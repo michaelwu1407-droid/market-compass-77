@@ -86,7 +86,6 @@ export default function DailyPage() {
               <DailyMoverRow
                 key={mover.id}
                 mover={mover}
-                onViewAsset={() => handleViewAsset(mover.asset_id)}
                 onAnalyse={() => handleAnalyse(mover.asset_id)}
                 onStarForIC={handleStarForIC}
               />

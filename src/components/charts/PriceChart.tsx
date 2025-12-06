@@ -36,9 +36,7 @@ export function PriceChart({
   const filteredData = data.filter(d => new Date(d.date) >= cutoffDate);
   const valueKey = 'price' in (data[0] || {}) ? 'price' : 'value';
 
-  const values = filteredData.map(d => (d as unknown as Record<string, number>)[valueKey] || 0);
-
-  const values = filteredData.map(d => (d as Record<string, number>)[valueKey]);
+  const values = filteredData.map(d => d.price ?? d.value ?? 0);
   const minValue = Math.min(...values) * 0.95;
   const maxValue = Math.max(...values) * 1.05;
   const isPositive = values.length >= 2 && values[values.length - 1] >= values[0];

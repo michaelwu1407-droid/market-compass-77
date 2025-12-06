@@ -87,8 +87,6 @@ export default function FeedPage() {
               <FeedCard
                 key={item.id}
                 item={item}
-                onViewTrader={handleViewTrader}
-                onViewAsset={handleViewAsset}
                 onAnalyse={handleAnalyse}
                 onStarForIC={handleStarForIC}
               />
