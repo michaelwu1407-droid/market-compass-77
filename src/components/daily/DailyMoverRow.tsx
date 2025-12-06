@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { Sparkles, Star, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { DailyMover } from '@/types';
@@ -5,21 +6,37 @@ import { cn } from '@/lib/utils';
 
 interface DailyMoverRowProps {
   mover: DailyMover;
-  onViewAsset?: () => void;
   onAnalyse?: () => void;
   onStarForIC?: () => void;
 }
 
-export function DailyMoverRow({ mover, onViewAsset, onAnalyse, onStarForIC }: DailyMoverRowProps) {
+export function DailyMoverRow({ mover, onAnalyse, onStarForIC }: DailyMoverRowProps) {
+  const navigate = useNavigate();
   const isPositive = mover.pct_change >= 0;
+
+  const handleViewAsset = () => {
+    if (mover.asset) {
+      navigate(`/assets/${mover.asset.id}`);
+    }
+  };
 
   return (
     <div className="p-4 border-b border-border last:border-b-0 hover:bg-secondary/30 transition-colors">
       <div className="flex items-start justify-between gap-4 mb-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
-            <span className="font-semibold">{mover.asset?.name}</span>
-            <span className="chip-ticker">${mover.asset?.ticker}</span>
+            <span 
+              className="font-semibold cursor-pointer hover:text-primary transition-colors"
+              onClick={handleViewAsset}
+            >
+              {mover.asset?.name}
+            </span>
+            <span 
+              className="chip-ticker cursor-pointer"
+              onClick={handleViewAsset}
+            >
+              ${mover.asset?.ticker}
+            </span>
           </div>
           <p className="text-sm text-muted-foreground line-clamp-2">{mover.reason_summary}</p>
         </div>
@@ -37,7 +54,7 @@ export function DailyMoverRow({ mover, onViewAsset, onAnalyse, onStarForIC }: Da
       </div>
 
       <div className="flex items-center gap-2">
-        <Button variant="ghost" size="sm" onClick={onViewAsset}>
+        <Button variant="ghost" size="sm" onClick={handleViewAsset}>
           <Eye className="h-3.5 w-3.5 mr-1" />
           View
         </Button>

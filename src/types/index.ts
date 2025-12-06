@@ -22,6 +22,24 @@ export interface Trader {
   style_tags: string[];
   created_at: string;
   updated_at: string;
+  // Extended eToro fields
+  profitable_weeks_pct: number;
+  profitable_months_pct: number;
+  aum: number | null;
+  active_since: string;
+  country: string;
+  verified: boolean;
+  avg_trade_duration_days: number;
+  trades_per_week: number;
+  win_rate: number;
+  long_short_ratio: number;
+  sharpe_ratio: number | null;
+  sortino_ratio: number | null;
+  daily_var: number | null;
+  beta: number | null;
+  monthly_returns: { month: string; return_pct: number }[];
+  performance_history: { date: string; value: number }[];
+  copier_history: { date: string; count: number }[];
 }
 
 export interface Asset {
@@ -36,6 +54,22 @@ export interface Asset {
   currency: string;
   created_at: string;
   updated_at: string;
+  // Extended eToro fields
+  pe_ratio: number | null;
+  eps: number | null;
+  dividend_yield: number | null;
+  week_52_high: number | null;
+  week_52_low: number | null;
+  avg_volume: number | null;
+  beta: number | null;
+  day_high: number | null;
+  day_low: number | null;
+  open_price: number | null;
+  prev_close: number | null;
+  change_today: number;
+  change_today_pct: number;
+  price_history: { date: string; price: number }[];
+  logo_url?: string;
 }
 
 export interface Post {
@@ -52,6 +86,10 @@ export interface Post {
   // Joined data
   trader?: Trader;
   asset?: Asset;
+  // Extended fields
+  comments?: { id: string; author: string; text: string; created_at: string }[];
+  images?: string[];
+  is_pinned?: boolean;
 }
 
 export interface TraderFollow {

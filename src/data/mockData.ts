@@ -1,5 +1,63 @@
 import type { User, Trader, Asset, Post, Trade, DailyMover, Report, TraderHolding, FeedItem } from '@/types';
 
+// Helper to generate performance history
+const generatePerformanceHistory = (startValue: number, months: number, volatility: number, trend: number) => {
+  const history: { date: string; value: number }[] = [];
+  let value = startValue;
+  const today = new Date();
+  
+  for (let i = months * 30; i >= 0; i -= 7) {
+    const date = new Date(today);
+    date.setDate(date.getDate() - i);
+    value = value * (1 + (Math.random() - 0.5) * volatility + trend / 52);
+    history.push({ date: date.toISOString().split('T')[0], value: Math.max(value, 0) });
+  }
+  return history;
+};
+
+// Helper to generate monthly returns
+const generateMonthlyReturns = (avgReturn: number, volatility: number) => {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return months.map(month => ({
+    month,
+    return_pct: parseFloat((avgReturn / 12 + (Math.random() - 0.5) * volatility).toFixed(1))
+  }));
+};
+
+// Helper to generate copier history
+const generateCopierHistory = (current: number, months: number) => {
+  const history: { date: string; count: number }[] = [];
+  const today = new Date();
+  let count = current * 0.6;
+  
+  for (let i = months; i >= 0; i--) {
+    const date = new Date(today);
+    date.setMonth(date.getMonth() - i);
+    count = Math.min(count * (1 + Math.random() * 0.1), current);
+    history.push({ date: date.toISOString().split('T')[0], count: Math.round(count) });
+  }
+  return history;
+};
+
+// Helper to generate price history
+const generatePriceHistory = (currentPrice: number, months: number, volatility: number) => {
+  const history: { date: string; price: number }[] = [];
+  const today = new Date();
+  let price = currentPrice * (0.7 + Math.random() * 0.3);
+  
+  for (let i = months * 30; i >= 0; i--) {
+    const date = new Date(today);
+    date.setDate(date.getDate() - i);
+    price = price * (1 + (Math.random() - 0.48) * volatility);
+    history.push({ date: date.toISOString().split('T')[0], price: parseFloat(price.toFixed(2)) });
+  }
+  // Ensure last price matches current
+  if (history.length > 0) {
+    history[history.length - 1].price = currentPrice;
+  }
+  return history;
+};
+
 // Current user
 export const currentUser: User = {
   id: 'user-1',
@@ -9,71 +67,7 @@ export const currentUser: User = {
   updated_at: '2024-12-01T00:00:00Z',
 };
 
-// Traders
-export const traders: Trader[] = [
-  {
-    id: 'trader-1',
-    etoro_trader_id: 'JayMedrow',
-    display_name: 'Jay Medrow',
-    avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=jay',
-    bio: 'Long-term value investor focusing on quality growth stocks. 15+ years experience in equity markets.',
-    risk_score: 4,
-    return_12m: 32.5,
-    return_24m: 78.4,
-    max_drawdown: -18.2,
-    num_copiers: 12450,
-    style_tags: ['growth', 'tech', 'long-term'],
-    created_at: '2020-03-15T00:00:00Z',
-    updated_at: '2024-12-05T00:00:00Z',
-  },
-  {
-    id: 'trader-2',
-    etoro_trader_id: 'SarahK_Invest',
-    display_name: 'Sarah Kim',
-    avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=sarah',
-    bio: 'Diversified portfolio manager with focus on dividends and defensive stocks.',
-    risk_score: 3,
-    return_12m: 18.7,
-    return_24m: 42.3,
-    max_drawdown: -12.5,
-    num_copiers: 8320,
-    style_tags: ['dividends', 'defensive', 'value'],
-    created_at: '2019-08-22T00:00:00Z',
-    updated_at: '2024-12-05T00:00:00Z',
-  },
-  {
-    id: 'trader-3',
-    etoro_trader_id: 'TechMomentum',
-    display_name: 'Marcus Lee',
-    avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=marcus',
-    bio: 'Momentum trader specializing in tech and AI stocks. Higher risk, higher reward approach.',
-    risk_score: 7,
-    return_12m: 67.2,
-    return_24m: 145.8,
-    max_drawdown: -35.4,
-    num_copiers: 5680,
-    style_tags: ['momentum', 'tech', 'AI', 'high-risk'],
-    created_at: '2021-01-10T00:00:00Z',
-    updated_at: '2024-12-05T00:00:00Z',
-  },
-  {
-    id: 'trader-4',
-    etoro_trader_id: 'GlobalDiversify',
-    display_name: 'Emma Watson',
-    avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=emma',
-    bio: 'Global macro investor with exposure across markets. Focus on risk-adjusted returns.',
-    risk_score: 5,
-    return_12m: 24.1,
-    return_24m: 52.7,
-    max_drawdown: -20.1,
-    num_copiers: 9840,
-    style_tags: ['global', 'macro', 'diversified'],
-    created_at: '2018-05-03T00:00:00Z',
-    updated_at: '2024-12-05T00:00:00Z',
-  },
-];
-
-// Assets
+// Assets with extended fields
 export const assets: Asset[] = [
   {
     id: 'asset-1',
@@ -87,6 +81,21 @@ export const assets: Asset[] = [
     currency: 'USD',
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-12-05T00:00:00Z',
+    pe_ratio: 65.2,
+    eps: 2.19,
+    dividend_yield: 0.03,
+    week_52_high: 152.89,
+    week_52_low: 45.01,
+    avg_volume: 312000000,
+    beta: 1.72,
+    day_high: 144.20,
+    day_low: 139.80,
+    open_price: 140.50,
+    prev_close: 136.75,
+    change_today: 5.75,
+    change_today_pct: 4.2,
+    price_history: generatePriceHistory(142.50, 12, 0.03),
+    logo_url: 'https://logo.clearbit.com/nvidia.com',
   },
   {
     id: 'asset-2',
@@ -100,6 +109,21 @@ export const assets: Asset[] = [
     currency: 'USD',
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-12-05T00:00:00Z',
+    pe_ratio: 29.8,
+    eps: 6.42,
+    dividend_yield: 0.52,
+    week_52_high: 199.62,
+    week_52_low: 164.08,
+    avg_volume: 52000000,
+    beta: 1.28,
+    day_high: 192.50,
+    day_low: 189.80,
+    open_price: 190.50,
+    prev_close: 189.95,
+    change_today: 1.29,
+    change_today_pct: 0.68,
+    price_history: generatePriceHistory(191.24, 12, 0.015),
+    logo_url: 'https://logo.clearbit.com/apple.com',
   },
   {
     id: 'asset-3',
@@ -113,6 +137,21 @@ export const assets: Asset[] = [
     currency: 'USD',
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-12-05T00:00:00Z',
+    pe_ratio: 35.2,
+    eps: 10.76,
+    dividend_yield: 0.78,
+    week_52_high: 420.82,
+    week_52_low: 309.45,
+    avg_volume: 18000000,
+    beta: 0.92,
+    day_high: 382.50,
+    day_low: 375.20,
+    open_price: 376.00,
+    prev_close: 372.15,
+    change_today: 6.76,
+    change_today_pct: 1.82,
+    price_history: generatePriceHistory(378.91, 12, 0.018),
+    logo_url: 'https://logo.clearbit.com/microsoft.com',
   },
   {
     id: 'asset-4',
@@ -126,6 +165,21 @@ export const assets: Asset[] = [
     currency: 'USD',
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-12-05T00:00:00Z',
+    pe_ratio: 23.5,
+    eps: 7.44,
+    dividend_yield: 0.45,
+    week_52_high: 191.75,
+    week_52_low: 129.40,
+    avg_volume: 21000000,
+    beta: 1.05,
+    day_high: 176.80,
+    day_low: 173.20,
+    open_price: 178.50,
+    prev_close: 178.56,
+    change_today: -3.74,
+    change_today_pct: -2.1,
+    price_history: generatePriceHistory(174.82, 12, 0.02),
+    logo_url: 'https://logo.clearbit.com/google.com',
   },
   {
     id: 'asset-5',
@@ -139,6 +193,21 @@ export const assets: Asset[] = [
     currency: 'USD',
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-12-05T00:00:00Z',
+    pe_ratio: 82.4,
+    eps: 4.28,
+    dividend_yield: 0,
+    week_52_high: 358.64,
+    week_52_low: 138.80,
+    avg_volume: 98000000,
+    beta: 2.31,
+    day_high: 358.64,
+    day_low: 328.50,
+    open_price: 330.00,
+    prev_close: 330.05,
+    change_today: 22.51,
+    change_today_pct: 6.82,
+    price_history: generatePriceHistory(352.56, 12, 0.04),
+    logo_url: 'https://logo.clearbit.com/tesla.com',
   },
   {
     id: 'asset-6',
@@ -152,6 +221,21 @@ export const assets: Asset[] = [
     currency: 'USD',
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-12-05T00:00:00Z',
+    pe_ratio: 27.8,
+    eps: 20.40,
+    dividend_yield: 0.35,
+    week_52_high: 602.95,
+    week_52_low: 326.91,
+    avg_volume: 14000000,
+    beta: 1.24,
+    day_high: 572.50,
+    day_low: 554.20,
+    open_price: 555.00,
+    prev_close: 553.94,
+    change_today: 13.29,
+    change_today_pct: 2.4,
+    price_history: generatePriceHistory(567.23, 12, 0.025),
+    logo_url: 'https://logo.clearbit.com/meta.com',
   },
   {
     id: 'asset-7',
@@ -165,6 +249,21 @@ export const assets: Asset[] = [
     currency: 'USD',
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-12-05T00:00:00Z',
+    pe_ratio: 42.5,
+    eps: 4.78,
+    dividend_yield: 0,
+    week_52_high: 215.90,
+    week_52_low: 144.05,
+    avg_volume: 38000000,
+    beta: 1.15,
+    day_high: 205.80,
+    day_low: 201.50,
+    open_price: 205.50,
+    prev_close: 205.58,
+    change_today: -2.46,
+    change_today_pct: -1.2,
+    price_history: generatePriceHistory(203.12, 12, 0.02),
+    logo_url: 'https://logo.clearbit.com/amazon.com',
   },
   {
     id: 'asset-8',
@@ -178,10 +277,157 @@ export const assets: Asset[] = [
     currency: 'USD',
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-12-05T00:00:00Z',
+    pe_ratio: 12.8,
+    eps: 18.97,
+    dividend_yield: 2.15,
+    week_52_high: 254.31,
+    week_52_low: 165.20,
+    avg_volume: 8500000,
+    beta: 1.08,
+    day_high: 244.50,
+    day_low: 240.20,
+    open_price: 241.00,
+    prev_close: 241.85,
+    change_today: 1.00,
+    change_today_pct: 0.41,
+    price_history: generatePriceHistory(242.85, 12, 0.015),
+    logo_url: 'https://logo.clearbit.com/jpmorganchase.com',
   },
 ];
 
-// Posts
+// Traders with extended fields
+export const traders: Trader[] = [
+  {
+    id: 'trader-1',
+    etoro_trader_id: 'JayMedrow',
+    display_name: 'Jay Medrow',
+    avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=jay',
+    bio: 'Long-term value investor focusing on quality growth stocks. 15+ years experience in equity markets. My strategy is simple: find great companies with durable competitive advantages and hold them forever. I primarily focus on technology and healthcare sectors where I have deep domain expertise.',
+    risk_score: 4,
+    return_12m: 32.5,
+    return_24m: 78.4,
+    max_drawdown: -18.2,
+    num_copiers: 12450,
+    style_tags: ['growth', 'tech', 'long-term'],
+    created_at: '2020-03-15T00:00:00Z',
+    updated_at: '2024-12-05T00:00:00Z',
+    profitable_weeks_pct: 62,
+    profitable_months_pct: 75,
+    aum: 45000000,
+    active_since: '2018-03-15',
+    country: 'US',
+    verified: true,
+    avg_trade_duration_days: 180,
+    trades_per_week: 1.2,
+    win_rate: 68,
+    long_short_ratio: 0.95,
+    sharpe_ratio: 1.85,
+    sortino_ratio: 2.42,
+    daily_var: 2.1,
+    beta: 1.15,
+    monthly_returns: generateMonthlyReturns(32.5, 8),
+    performance_history: generatePerformanceHistory(100, 24, 0.02, 0.25),
+    copier_history: generateCopierHistory(12450, 24),
+  },
+  {
+    id: 'trader-2',
+    etoro_trader_id: 'SarahK_Invest',
+    display_name: 'Sarah Kim',
+    avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=sarah',
+    bio: 'Diversified portfolio manager with focus on dividends and defensive stocks. Former institutional portfolio manager. I believe in steady, consistent returns with minimal volatility. Perfect for investors looking for income and capital preservation.',
+    risk_score: 3,
+    return_12m: 18.7,
+    return_24m: 42.3,
+    max_drawdown: -12.5,
+    num_copiers: 8320,
+    style_tags: ['dividends', 'defensive', 'value'],
+    created_at: '2019-08-22T00:00:00Z',
+    updated_at: '2024-12-05T00:00:00Z',
+    profitable_weeks_pct: 58,
+    profitable_months_pct: 71,
+    aum: 28000000,
+    active_since: '2019-08-22',
+    country: 'KR',
+    verified: true,
+    avg_trade_duration_days: 365,
+    trades_per_week: 0.5,
+    win_rate: 72,
+    long_short_ratio: 1.0,
+    sharpe_ratio: 1.52,
+    sortino_ratio: 1.98,
+    daily_var: 1.2,
+    beta: 0.72,
+    monthly_returns: generateMonthlyReturns(18.7, 5),
+    performance_history: generatePerformanceHistory(100, 24, 0.01, 0.15),
+    copier_history: generateCopierHistory(8320, 24),
+  },
+  {
+    id: 'trader-3',
+    etoro_trader_id: 'TechMomentum',
+    display_name: 'Marcus Lee',
+    avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=marcus',
+    bio: 'Momentum trader specializing in tech and AI stocks. Higher risk, higher reward approach. I ride the trends and cut losers quickly. Not for the faint of heart - my portfolio can be volatile but the returns speak for themselves.',
+    risk_score: 7,
+    return_12m: 67.2,
+    return_24m: 145.8,
+    max_drawdown: -35.4,
+    num_copiers: 5680,
+    style_tags: ['momentum', 'tech', 'AI', 'high-risk'],
+    created_at: '2021-01-10T00:00:00Z',
+    updated_at: '2024-12-05T00:00:00Z',
+    profitable_weeks_pct: 54,
+    profitable_months_pct: 62,
+    aum: 18500000,
+    active_since: '2021-01-10',
+    country: 'US',
+    verified: true,
+    avg_trade_duration_days: 45,
+    trades_per_week: 4.5,
+    win_rate: 52,
+    long_short_ratio: 0.85,
+    sharpe_ratio: 1.65,
+    sortino_ratio: 2.15,
+    daily_var: 4.2,
+    beta: 1.85,
+    monthly_returns: generateMonthlyReturns(67.2, 15),
+    performance_history: generatePerformanceHistory(100, 24, 0.04, 0.45),
+    copier_history: generateCopierHistory(5680, 24),
+  },
+  {
+    id: 'trader-4',
+    etoro_trader_id: 'GlobalDiversify',
+    display_name: 'Emma Watson',
+    avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=emma',
+    bio: 'Global macro investor with exposure across markets. Focus on risk-adjusted returns. I combine fundamental analysis with macro trends to find opportunities worldwide. Diversification is the only free lunch in investing.',
+    risk_score: 5,
+    return_12m: 24.1,
+    return_24m: 52.7,
+    max_drawdown: -20.1,
+    num_copiers: 9840,
+    style_tags: ['global', 'macro', 'diversified'],
+    created_at: '2018-05-03T00:00:00Z',
+    updated_at: '2024-12-05T00:00:00Z',
+    profitable_weeks_pct: 56,
+    profitable_months_pct: 68,
+    aum: 52000000,
+    active_since: '2017-05-03',
+    country: 'GB',
+    verified: true,
+    avg_trade_duration_days: 120,
+    trades_per_week: 2.0,
+    win_rate: 61,
+    long_short_ratio: 0.78,
+    sharpe_ratio: 1.35,
+    sortino_ratio: 1.72,
+    daily_var: 2.8,
+    beta: 0.95,
+    monthly_returns: generateMonthlyReturns(24.1, 7),
+    performance_history: generatePerformanceHistory(100, 24, 0.025, 0.20),
+    copier_history: generateCopierHistory(9840, 24),
+  },
+];
+
+// Posts with extended fields
 export const posts: Post[] = [
   {
     id: 'post-1',
@@ -196,6 +442,11 @@ export const posts: Post[] = [
     raw_json: {},
     trader: traders[0],
     asset: assets[0],
+    comments: [
+      { id: 'c1', author: 'InvestorMike', text: 'Great insight! What price target are you looking at?', created_at: '2024-12-05T14:45:00Z' },
+      { id: 'c2', author: 'TechBull2024', text: 'Agreed, NVDA is a must-own for the AI era', created_at: '2024-12-05T15:00:00Z' },
+    ],
+    is_pinned: false,
   },
   {
     id: 'post-2',
@@ -210,6 +461,10 @@ export const posts: Post[] = [
     raw_json: {},
     trader: traders[1],
     asset: assets[1],
+    comments: [
+      { id: 'c3', author: 'DividendKing', text: 'Apple is the ultimate cash machine!', created_at: '2024-12-05T12:30:00Z' },
+    ],
+    is_pinned: false,
   },
   {
     id: 'post-3',
@@ -224,6 +479,12 @@ export const posts: Post[] = [
     raw_json: {},
     trader: traders[2],
     asset: assets[4],
+    comments: [
+      { id: 'c4', author: 'EVFuture', text: 'FSD v12.5 is game changing!', created_at: '2024-12-05T11:00:00Z' },
+      { id: 'c5', author: 'Skeptic101', text: "Isn't 15% too concentrated?", created_at: '2024-12-05T11:15:00Z' },
+      { id: 'c6', author: 'TechMomentum', text: 'Concentration builds wealth, diversification preserves it 😉', created_at: '2024-12-05T11:20:00Z' },
+    ],
+    is_pinned: true,
   },
   {
     id: 'post-4',
@@ -238,6 +499,8 @@ export const posts: Post[] = [
     raw_json: {},
     trader: traders[3],
     asset: assets[2],
+    comments: [],
+    is_pinned: false,
   },
   {
     id: 'post-5',
@@ -252,6 +515,8 @@ export const posts: Post[] = [
     raw_json: {},
     trader: traders[0],
     asset: assets[5],
+    comments: [],
+    is_pinned: false,
   },
 ];
 
@@ -500,25 +765,28 @@ export const feedItems: FeedItem[] = [
     data: post,
     created_at: post.created_at,
   })),
-  ...trades.slice(0, 2).map((trade): FeedItem => ({
+  ...trades.map((trade): FeedItem => ({
     id: `feed-trade-${trade.id}`,
     type: 'trade' as const,
     data: trade,
     created_at: trade.executed_at,
   })),
-  {
-    id: 'feed-trending-1',
+  ...dailyMovers.slice(0, 2).map((mover): FeedItem => ({
+    id: `feed-trending-${mover.id}`,
     type: 'trending' as const,
-    data: { ...dailyMovers[0], mentions_change: 156 },
-    created_at: dailyMovers[0].created_at,
-  } as FeedItem,
-  {
-    id: 'feed-trending-2',
-    type: 'trending' as const,
-    data: { ...dailyMovers[1], mentions_change: 234 },
-    created_at: dailyMovers[1].created_at,
-  } as FeedItem,
+    data: { ...mover, mentions_change: Math.floor(Math.random() * 50) + 20 },
+    created_at: mover.created_at,
+  })),
 ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-// Followed traders for current user
-export const followedTraderIds = ['trader-1', 'trader-2', 'trader-4'];
+// Followed traders
+export const followedTraderIds = ['trader-1', 'trader-2'];
+
+// Helper to get asset by id
+export const getAssetById = (id: string) => assets.find(a => a.id === id);
+
+// Helper to get trader by id
+export const getTraderById = (id: string) => traders.find(t => t.id === id);
+
+// Helper to get asset by ticker
+export const getAssetByTicker = (ticker: string) => assets.find(a => a.ticker === ticker);
