@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
 import { Heart, MessageCircle, TrendingUp, Eye, Sparkles, Star } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -8,14 +9,21 @@ import { cn } from '@/lib/utils';
 
 interface FeedCardProps {
   item: FeedItem;
-  onViewTrader?: (traderId: string) => void;
-  onViewAsset?: (assetId: string) => void;
   onAnalyse?: (item: FeedItem) => void;
   onStarForIC?: (item: FeedItem) => void;
 }
 
-export function FeedCard({ item, onViewTrader, onViewAsset, onAnalyse, onStarForIC }: FeedCardProps) {
+export function FeedCard({ item, onAnalyse, onStarForIC }: FeedCardProps) {
+  const navigate = useNavigate();
   const timeAgo = formatDistanceToNow(new Date(item.created_at), { addSuffix: true });
+
+  const handleViewTrader = (traderId: string) => {
+    navigate(`/traders/${traderId}`);
+  };
+
+  const handleViewAsset = (assetId: string) => {
+    navigate(`/assets/${assetId}`);
+  };
 
   if (item.type === 'post') {
     const post = item.data as Post;
@@ -23,13 +31,21 @@ export function FeedCard({ item, onViewTrader, onViewAsset, onAnalyse, onStarFor
       <div className="feed-card animate-fade-in">
         {/* Header */}
         <div className="flex items-start gap-3 mb-3">
-          <Avatar className="h-10 w-10 cursor-pointer" onClick={() => post.trader && onViewTrader?.(post.trader.id)}>
+          <Avatar 
+            className="h-10 w-10 cursor-pointer hover:ring-2 hover:ring-primary transition-all" 
+            onClick={() => post.trader && handleViewTrader(post.trader.id)}
+          >
             <AvatarImage src={post.trader?.avatar_url} />
             <AvatarFallback>{post.trader?.display_name?.[0] ?? 'T'}</AvatarFallback>
           </Avatar>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-semibold text-sm">{post.trader?.display_name}</span>
+              <span 
+                className="font-semibold text-sm cursor-pointer hover:text-primary transition-colors"
+                onClick={() => post.trader && handleViewTrader(post.trader.id)}
+              >
+                {post.trader?.display_name}
+              </span>
               {post.trader && (
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <span className="text-gain">+{post.trader.return_12m}% 12m</span>
@@ -49,7 +65,7 @@ export function FeedCard({ item, onViewTrader, onViewAsset, onAnalyse, onStarFor
               <span 
                 key={i} 
                 className="chip-ticker"
-                onClick={() => post.asset && onViewAsset?.(post.asset.id)}
+                onClick={() => post.asset && handleViewAsset(post.asset.id)}
               >
                 {part}
               </span>
@@ -72,13 +88,13 @@ export function FeedCard({ item, onViewTrader, onViewAsset, onAnalyse, onStarFor
         {/* Actions */}
         <div className="flex items-center gap-2 flex-wrap">
           {post.trader && (
-            <Button variant="secondary" size="sm" onClick={() => onViewTrader?.(post.trader!.id)}>
+            <Button variant="secondary" size="sm" onClick={() => handleViewTrader(post.trader!.id)}>
               <Eye className="h-3.5 w-3.5 mr-1" />
               View trader
             </Button>
           )}
           {post.asset && (
-            <Button variant="secondary" size="sm" onClick={() => onViewAsset?.(post.asset!.id)}>
+            <Button variant="secondary" size="sm" onClick={() => handleViewAsset(post.asset!.id)}>
               View {post.asset.ticker}
             </Button>
           )}
@@ -112,8 +128,17 @@ export function FeedCard({ item, onViewTrader, onViewAsset, onAnalyse, onStarFor
         </div>
 
         <p className="text-sm font-medium mb-1">
-          {trade.trader?.display_name} just {trade.trade_type === 'buy' ? 'bought' : 'sold'}{' '}
-          <span className="chip-ticker" onClick={() => trade.asset && onViewAsset?.(trade.asset.id)}>
+          <span 
+            className="cursor-pointer hover:text-primary transition-colors"
+            onClick={() => trade.trader && handleViewTrader(trade.trader.id)}
+          >
+            {trade.trader?.display_name}
+          </span>
+          {' '}just {trade.trade_type === 'buy' ? 'bought' : 'sold'}{' '}
+          <span 
+            className="chip-ticker" 
+            onClick={() => trade.asset && handleViewAsset(trade.asset.id)}
+          >
             ${trade.asset?.ticker}
           </span>
         </p>
@@ -128,12 +153,12 @@ export function FeedCard({ item, onViewTrader, onViewAsset, onAnalyse, onStarFor
 
         <div className="flex items-center gap-2">
           {trade.trader && (
-            <Button variant="secondary" size="sm" onClick={() => onViewTrader?.(trade.trader!.id)}>
+            <Button variant="secondary" size="sm" onClick={() => handleViewTrader(trade.trader!.id)}>
               View trader
             </Button>
           )}
           {trade.asset && (
-            <Button variant="secondary" size="sm" onClick={() => onViewAsset?.(trade.asset!.id)}>
+            <Button variant="secondary" size="sm" onClick={() => handleViewAsset(trade.asset!.id)}>
               View asset
             </Button>
           )}
@@ -160,7 +185,10 @@ export function FeedCard({ item, onViewTrader, onViewAsset, onAnalyse, onStarFor
         <div className="flex items-center justify-between mb-2">
           <div>
             <span className="font-semibold">{mover.asset?.name}</span>
-            <span className="chip-ticker ml-2" onClick={() => mover.asset && onViewAsset?.(mover.asset.id)}>
+            <span 
+              className="chip-ticker ml-2 cursor-pointer" 
+              onClick={() => mover.asset && handleViewAsset(mover.asset.id)}
+            >
               ${mover.asset?.ticker}
             </span>
           </div>
@@ -174,6 +202,11 @@ export function FeedCard({ item, onViewTrader, onViewAsset, onAnalyse, onStarFor
         </p>
 
         <div className="flex items-center gap-2">
+          {mover.asset && (
+            <Button variant="secondary" size="sm" onClick={() => handleViewAsset(mover.asset!.id)}>
+              View asset
+            </Button>
+          )}
           <Button variant="secondary" size="sm" onClick={() => onAnalyse?.(item)}>
             <Sparkles className="h-3.5 w-3.5 mr-1" />
             Open in Analysis
