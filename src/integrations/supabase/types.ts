@@ -14,7 +14,488 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      assets: {
+        Row: {
+          asset_type: string | null
+          avg_volume: number | null
+          beta: number | null
+          created_at: string | null
+          current_price: number | null
+          dividend_yield: number | null
+          eps: number | null
+          exchange: string | null
+          high_52w: number | null
+          id: string
+          industry: string | null
+          logo_url: string | null
+          low_52w: number | null
+          market_cap: number | null
+          name: string
+          pe_ratio: number | null
+          price_change: number | null
+          price_change_pct: number | null
+          sector: string | null
+          symbol: string
+          updated_at: string | null
+        }
+        Insert: {
+          asset_type?: string | null
+          avg_volume?: number | null
+          beta?: number | null
+          created_at?: string | null
+          current_price?: number | null
+          dividend_yield?: number | null
+          eps?: number | null
+          exchange?: string | null
+          high_52w?: number | null
+          id?: string
+          industry?: string | null
+          logo_url?: string | null
+          low_52w?: number | null
+          market_cap?: number | null
+          name: string
+          pe_ratio?: number | null
+          price_change?: number | null
+          price_change_pct?: number | null
+          sector?: string | null
+          symbol: string
+          updated_at?: string | null
+        }
+        Update: {
+          asset_type?: string | null
+          avg_volume?: number | null
+          beta?: number | null
+          created_at?: string | null
+          current_price?: number | null
+          dividend_yield?: number | null
+          eps?: number | null
+          exchange?: string | null
+          high_52w?: number | null
+          id?: string
+          industry?: string | null
+          logo_url?: string | null
+          low_52w?: number | null
+          market_cap?: number | null
+          name?: string
+          pe_ratio?: number | null
+          price_change?: number | null
+          price_change_pct?: number | null
+          sector?: string | null
+          symbol?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      daily_movers: {
+        Row: {
+          ai_summary: string | null
+          asset_id: string | null
+          change_pct: number | null
+          created_at: string | null
+          date: string
+          direction: string | null
+          id: string
+          top_traders_trading: string[] | null
+          volume: number | null
+        }
+        Insert: {
+          ai_summary?: string | null
+          asset_id?: string | null
+          change_pct?: number | null
+          created_at?: string | null
+          date?: string
+          direction?: string | null
+          id?: string
+          top_traders_trading?: string[] | null
+          volume?: number | null
+        }
+        Update: {
+          ai_summary?: string | null
+          asset_id?: string | null
+          change_pct?: number | null
+          created_at?: string | null
+          date?: string
+          direction?: string | null
+          id?: string
+          top_traders_trading?: string[] | null
+          volume?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daily_movers_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      posts: {
+        Row: {
+          asset_ids: string[] | null
+          comments: number | null
+          content: string
+          created_at: string | null
+          etoro_post_id: string | null
+          id: string
+          likes: number | null
+          mentioned_symbols: string[] | null
+          posted_at: string | null
+          sentiment: string | null
+          shares: number | null
+          source: string | null
+          trader_id: string | null
+        }
+        Insert: {
+          asset_ids?: string[] | null
+          comments?: number | null
+          content: string
+          created_at?: string | null
+          etoro_post_id?: string | null
+          id?: string
+          likes?: number | null
+          mentioned_symbols?: string[] | null
+          posted_at?: string | null
+          sentiment?: string | null
+          shares?: number | null
+          source?: string | null
+          trader_id?: string | null
+        }
+        Update: {
+          asset_ids?: string[] | null
+          comments?: number | null
+          content?: string
+          created_at?: string | null
+          etoro_post_id?: string | null
+          id?: string
+          likes?: number | null
+          mentioned_symbols?: string[] | null
+          posted_at?: string | null
+          sentiment?: string | null
+          shares?: number | null
+          source?: string | null
+          trader_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "posts_trader_id_fkey"
+            columns: ["trader_id"]
+            isOneToOne: false
+            referencedRelation: "traders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      price_history: {
+        Row: {
+          asset_id: string | null
+          close_price: number | null
+          created_at: string | null
+          date: string
+          high_price: number | null
+          id: string
+          low_price: number | null
+          open_price: number | null
+          volume: number | null
+        }
+        Insert: {
+          asset_id?: string | null
+          close_price?: number | null
+          created_at?: string | null
+          date: string
+          high_price?: number | null
+          id?: string
+          low_price?: number | null
+          open_price?: number | null
+          volume?: number | null
+        }
+        Update: {
+          asset_id?: string | null
+          close_price?: number | null
+          created_at?: string | null
+          date?: string
+          high_price?: number | null
+          id?: string
+          low_price?: number | null
+          open_price?: number | null
+          volume?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "price_history_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      reports: {
+        Row: {
+          ai_generated: boolean | null
+          asset_id: string | null
+          content: string | null
+          created_at: string | null
+          created_by: string | null
+          id: string
+          report_type: string | null
+          starred_for_ic: boolean | null
+          status: string | null
+          title: string
+          trader_id: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          ai_generated?: boolean | null
+          asset_id?: string | null
+          content?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          report_type?: string | null
+          starred_for_ic?: boolean | null
+          status?: string | null
+          title: string
+          trader_id?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          ai_generated?: boolean | null
+          asset_id?: string | null
+          content?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          report_type?: string | null
+          starred_for_ic?: boolean | null
+          status?: string | null
+          title?: string
+          trader_id?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reports_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reports_trader_id_fkey"
+            columns: ["trader_id"]
+            isOneToOne: false
+            referencedRelation: "traders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trader_holdings: {
+        Row: {
+          allocation_pct: number | null
+          asset_id: string | null
+          avg_open_price: number | null
+          current_value: number | null
+          id: string
+          profit_loss_pct: number | null
+          trader_id: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          allocation_pct?: number | null
+          asset_id?: string | null
+          avg_open_price?: number | null
+          current_value?: number | null
+          id?: string
+          profit_loss_pct?: number | null
+          trader_id?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          allocation_pct?: number | null
+          asset_id?: string | null
+          avg_open_price?: number | null
+          current_value?: number | null
+          id?: string
+          profit_loss_pct?: number | null
+          trader_id?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trader_holdings_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "trader_holdings_trader_id_fkey"
+            columns: ["trader_id"]
+            isOneToOne: false
+            referencedRelation: "traders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trader_performance: {
+        Row: {
+          created_at: string | null
+          id: string
+          month: number
+          return_pct: number | null
+          trader_id: string | null
+          year: number
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          month: number
+          return_pct?: number | null
+          trader_id?: string | null
+          year: number
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          month?: number
+          return_pct?: number | null
+          trader_id?: string | null
+          year?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trader_performance_trader_id_fkey"
+            columns: ["trader_id"]
+            isOneToOne: false
+            referencedRelation: "traders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      traders: {
+        Row: {
+          active_since: string | null
+          aum: number | null
+          avatar_url: string | null
+          avg_holding_time_days: number | null
+          avg_trades_per_week: number | null
+          bio: string | null
+          copiers: number | null
+          country: string | null
+          created_at: string | null
+          display_name: string
+          etoro_username: string
+          gain_12m: number | null
+          gain_24m: number | null
+          id: string
+          max_drawdown: number | null
+          profitable_months_pct: number | null
+          profitable_weeks_pct: number | null
+          risk_score: number | null
+          tags: string[] | null
+          updated_at: string | null
+          verified: boolean | null
+        }
+        Insert: {
+          active_since?: string | null
+          aum?: number | null
+          avatar_url?: string | null
+          avg_holding_time_days?: number | null
+          avg_trades_per_week?: number | null
+          bio?: string | null
+          copiers?: number | null
+          country?: string | null
+          created_at?: string | null
+          display_name: string
+          etoro_username: string
+          gain_12m?: number | null
+          gain_24m?: number | null
+          id?: string
+          max_drawdown?: number | null
+          profitable_months_pct?: number | null
+          profitable_weeks_pct?: number | null
+          risk_score?: number | null
+          tags?: string[] | null
+          updated_at?: string | null
+          verified?: boolean | null
+        }
+        Update: {
+          active_since?: string | null
+          aum?: number | null
+          avatar_url?: string | null
+          avg_holding_time_days?: number | null
+          avg_trades_per_week?: number | null
+          bio?: string | null
+          copiers?: number | null
+          country?: string | null
+          created_at?: string | null
+          display_name?: string
+          etoro_username?: string
+          gain_12m?: number | null
+          gain_24m?: number | null
+          id?: string
+          max_drawdown?: number | null
+          profitable_months_pct?: number | null
+          profitable_weeks_pct?: number | null
+          risk_score?: number | null
+          tags?: string[] | null
+          updated_at?: string | null
+          verified?: boolean | null
+        }
+        Relationships: []
+      }
+      trades: {
+        Row: {
+          action: string
+          amount: number | null
+          asset_id: string | null
+          created_at: string | null
+          executed_at: string | null
+          id: string
+          percentage_of_portfolio: number | null
+          price: number | null
+          trader_id: string | null
+        }
+        Insert: {
+          action: string
+          amount?: number | null
+          asset_id?: string | null
+          created_at?: string | null
+          executed_at?: string | null
+          id?: string
+          percentage_of_portfolio?: number | null
+          price?: number | null
+          trader_id?: string | null
+        }
+        Update: {
+          action?: string
+          amount?: number | null
+          asset_id?: string | null
+          created_at?: string | null
+          executed_at?: string | null
+          id?: string
+          percentage_of_portfolio?: number | null
+          price?: number | null
+          trader_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trades_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "trades_trader_id_fkey"
+            columns: ["trader_id"]
+            isOneToOne: false
+            referencedRelation: "traders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
