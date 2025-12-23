@@ -1,13 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from '@/hooks/use-toast';
-import { Loader2, RefreshCw, Users, Briefcase, FileText, TrendingUp, CheckCircle, XCircle, Zap, Shield, Clock, Play } from 'lucide-react';
+import { Loader2, RefreshCw, Users, FileText, TrendingUp, CheckCircle, XCircle, Zap, Shield, Clock, Play, Database, BarChart3, Activity } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 import { useQuery } from '@tanstack/react-query';
 
 interface SyncStatus {
@@ -29,6 +30,18 @@ interface SyncState {
   total_pages: number | null;
   status: string;
   updated_at: string;
+}
+
+interface DataCounts {
+  total_traders: number;
+  synced_traders: number;
+  traders_with_risk_score: number;
+  traders_with_metrics: number;
+  total_holdings: number;
+  total_trades: number;
+  total_performance: number;
+  total_assets: number;
+  total_posts: number;
 }
 
 export default function AdminSyncPage() {
@@ -55,7 +68,38 @@ export default function AdminSyncPage() {
       if (error) throw error;
       return data as SyncState[];
     },
-    refetchInterval: 10000, // Refetch every 10 seconds
+    refetchInterval: 10000,
+  });
+
+  // Fetch data counts
+  const { data: dataCounts, refetch: refetchCounts } = useQuery({
+    queryKey: ['data-counts'],
+    queryFn: async () => {
+      const [traders, syncedTraders, riskScoreTraders, metricsTraders, holdings, trades, performance, assets, posts] = await Promise.all([
+        supabase.from('traders').select('id', { count: 'exact', head: true }),
+        supabase.from('traders').select('id', { count: 'exact', head: true }).not('details_synced_at', 'is', null),
+        supabase.from('traders').select('id', { count: 'exact', head: true }).not('risk_score', 'is', null),
+        supabase.from('traders').select('id', { count: 'exact', head: true }).not('sharpe_ratio', 'is', null),
+        supabase.from('trader_holdings').select('id', { count: 'exact', head: true }),
+        supabase.from('trades').select('id', { count: 'exact', head: true }),
+        supabase.from('trader_performance').select('id', { count: 'exact', head: true }),
+        supabase.from('assets').select('id', { count: 'exact', head: true }),
+        supabase.from('posts').select('id', { count: 'exact', head: true }),
+      ]);
+      
+      return {
+        total_traders: traders.count || 0,
+        synced_traders: syncedTraders.count || 0,
+        traders_with_risk_score: riskScoreTraders.count || 0,
+        traders_with_metrics: metricsTraders.count || 0,
+        total_holdings: holdings.count || 0,
+        total_trades: trades.count || 0,
+        total_performance: performance.count || 0,
+        total_assets: assets.count || 0,
+        total_posts: posts.count || 0,
+      } as DataCounts;
+    },
+    refetchInterval: 10000,
   });
 
   const updateStatus = (key: string, status: Partial<SyncStatus>) => {
@@ -97,7 +141,6 @@ export default function AdminSyncPage() {
   const syncDailyMovers = () => syncFunction('dailyMovers', 'scrape-daily-movers');
 
   const syncAll = async () => {
-    // Trigger worker multiple times to process all priorities
     for (let i = 0; i < 3; i++) {
       await triggerSyncWorker();
     }
@@ -105,6 +148,7 @@ export default function AdminSyncPage() {
       await syncPosts();
     }
     await syncDailyMovers();
+    refetchCounts();
   };
 
   // Format relative time
@@ -155,12 +199,81 @@ export default function AdminSyncPage() {
         </p>
       </div>
 
-      {/* Sync Status Dashboard */}
+      {/* Data Statistics Dashboard */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Database className="h-5 w-5" />
+            Data Statistics
+          </CardTitle>
+          <CardDescription>Current state of synced data in the database</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Traders Progress */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Users className="h-4 w-4 text-primary" />
+              <span className="font-medium">Traders</span>
+              <span className="text-sm text-muted-foreground ml-auto">
+                {dataCounts?.synced_traders || 0} / {dataCounts?.total_traders || 0} synced
+              </span>
+            </div>
+            <Progress 
+              value={dataCounts?.total_traders ? (dataCounts.synced_traders / dataCounts.total_traders) * 100 : 0} 
+              className="h-2"
+            />
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div className="flex items-center justify-between p-2 rounded bg-muted/50">
+                <span className="text-muted-foreground">With Risk Score</span>
+                <Badge variant={dataCounts?.traders_with_risk_score ? "default" : "secondary"}>
+                  {dataCounts?.traders_with_risk_score || 0}
+                </Badge>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded bg-muted/50">
+                <span className="text-muted-foreground">With Advanced Metrics</span>
+                <Badge variant={dataCounts?.traders_with_metrics ? "default" : "secondary"}>
+                  {dataCounts?.traders_with_metrics || 0}
+                </Badge>
+              </div>
+            </div>
+          </div>
+
+          {/* Portfolio Data */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="p-3 rounded-lg border bg-card text-center">
+              <div className="text-2xl font-bold text-primary">{dataCounts?.total_holdings || 0}</div>
+              <div className="text-xs text-muted-foreground">Holdings</div>
+            </div>
+            <div className="p-3 rounded-lg border bg-card text-center">
+              <div className="text-2xl font-bold text-primary">{dataCounts?.total_trades || 0}</div>
+              <div className="text-xs text-muted-foreground">Trades</div>
+            </div>
+            <div className="p-3 rounded-lg border bg-card text-center">
+              <div className="text-2xl font-bold text-primary">{dataCounts?.total_assets || 0}</div>
+              <div className="text-xs text-muted-foreground">Assets</div>
+            </div>
+            <div className="p-3 rounded-lg border bg-card text-center">
+              <div className="text-2xl font-bold text-primary">{dataCounts?.total_posts || 0}</div>
+              <div className="text-xs text-muted-foreground">Posts</div>
+            </div>
+          </div>
+
+          {/* Performance Data Warning */}
+          {dataCounts?.total_performance === 0 && (
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-600">
+              <Activity className="h-4 w-4" />
+              <span className="text-sm">Monthly performance data not yet synced (Bullaware API returns 404)</span>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Sync State Details */}
       <Card className="mb-6">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Clock className="h-5 w-5" />
-            Sync Status
+            Sync Pipeline Status
           </CardTitle>
           <CardDescription>Real-time sync progress from the continuous worker</CardDescription>
         </CardHeader>
@@ -177,7 +290,13 @@ export default function AdminSyncPage() {
                 <div className="text-sm text-muted-foreground space-y-1">
                   <div>Last run: {formatRelativeTime(state.last_run)}</div>
                   {state.total_pages && (
-                    <div>Page: {state.last_page} / {state.total_pages}</div>
+                    <>
+                      <div>Page: {state.last_page} / {state.total_pages}</div>
+                      <Progress 
+                        value={(state.last_page / state.total_pages) * 100} 
+                        className="h-1.5 mt-2"
+                      />
+                    </>
                   )}
                 </div>
               </div>
