@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { Calendar, TrendingUp, Users } from 'lucide-react';
+import { Calendar, TrendingUp, Users, Star } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -7,8 +7,9 @@ import { DailyMoverRow } from '@/components/daily/DailyMoverRow';
 import { TraderMoveCard } from '@/components/daily/TraderMoveCard';
 import { useTodayMovers } from '@/hooks/useDailyMovers';
 import { useRecentTrades } from '@/hooks/useTrades';
+import { useFollowedTradersAssets } from '@/hooks/useFollowedAssets';
 import { format } from 'date-fns';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 
 export default function DailyPage() {
   const [moverFilter, setMoverFilter] = useState('all');
@@ -17,6 +18,7 @@ export default function DailyPage() {
 
   const { data: dailyMovers, isLoading: moversLoading } = useTodayMovers();
   const { data: recentTrades, isLoading: tradesLoading } = useRecentTrades(10);
+  const { followedAssetIds, isLoading: followedLoading } = useFollowedTradersAssets();
 
   const handleAnalyse = (assetId?: string) => {
     navigate('/analysis');
@@ -27,7 +29,7 @@ export default function DailyPage() {
   };
 
   // Transform daily movers for the DailyMoverRow component
-  const transformedMovers = (dailyMovers || []).map((mover) => ({
+  const transformedMovers = useMemo(() => (dailyMovers || []).map((mover) => ({
     id: mover.id,
     asset_id: mover.asset_id || '',
     date: mover.date,
@@ -63,10 +65,26 @@ export default function DailyPage() {
       price_history: [],
       logo_url: mover.assets.logo_url || undefined,
     } : undefined,
-  }));
+  })), [dailyMovers]);
+
+  // Filter movers based on selected tab
+  const filteredMovers = useMemo(() => {
+    switch (moverFilter) {
+      case 'watchlist':
+        // Watchlist feature coming soon - show empty state
+        return [];
+      case 'followed':
+        // Filter to assets held by followed traders
+        return transformedMovers.filter(mover => 
+          followedAssetIds.includes(mover.asset_id)
+        );
+      default:
+        return transformedMovers;
+    }
+  }, [moverFilter, transformedMovers, followedAssetIds]);
 
   // Transform trades for TraderMoveCard
-  const transformedTrades = (recentTrades || []).map((trade) => ({
+  const transformedTrades = useMemo(() => (recentTrades || []).map((trade) => ({
     id: trade.id,
     trader_id: trade.trader_id || '',
     asset_id: trade.asset_id || '',
@@ -137,7 +155,28 @@ export default function DailyPage() {
       price_history: [],
       logo_url: trade.assets.logo_url || undefined,
     } : undefined,
-  }));
+  })), [recentTrades]);
+
+  // Generate summary text based on current filter
+  const getSummaryText = () => {
+    const totalHoldings = transformedMovers.length;
+    const followedCount = transformedMovers.filter(m => followedAssetIds.includes(m.asset_id)).length;
+    
+    return {
+      holdings: totalHoldings > 0 
+        ? `${totalHoldings} top performer holdings from tracked traders` 
+        : 'Loading holdings data...',
+      trades: transformedTrades.length > 0 
+        ? `${transformedTrades.length} recent trades from tracked traders` 
+        : 'No recent trades yet',
+      followed: followedAssetIds.length > 0
+        ? `${followedCount} holdings from traders you follow`
+        : 'Follow traders to see their holdings here',
+    };
+  };
+
+  const summary = getSummaryText();
+  const isFiltering = moverFilter !== 'all' && (moversLoading || followedLoading);
 
   return (
     <div className="max-w-5xl mx-auto">
@@ -149,7 +188,7 @@ export default function DailyPage() {
               <Calendar className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold">Today's Market in One Glance</h1>
+              <h1 className="text-2xl font-bold">Today's Market Snapshot</h1>
               <p className="text-muted-foreground">{format(today, 'EEEE, MMMM d, yyyy')}</p>
             </div>
           </div>
@@ -157,25 +196,28 @@ export default function DailyPage() {
           <div className="space-y-2 pl-12">
             <p className="text-sm flex items-start gap-2">
               <span className="text-primary mt-1">•</span>
-              <span>{transformedMovers.length > 0 ? `${transformedMovers.length} assets moving significantly today` : 'Loading market data...'}</span>
+              <span>{summary.holdings}</span>
             </p>
             <p className="text-sm flex items-start gap-2">
               <span className="text-primary mt-1">•</span>
-              <span>{transformedTrades.length > 0 ? `${transformedTrades.length} recent trades from tracked traders` : 'No recent trades yet'}</span>
+              <span>{summary.trades}</span>
             </p>
           </div>
         </CardContent>
       </Card>
 
-      {/* Daily Movers Section */}
+      {/* Top Performer Holdings Section */}
       <Card className="mb-6">
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle className="flex items-center gap-2">
               <TrendingUp className="h-5 w-5 text-primary" />
-              Daily Movers
+              Top Performer Holdings
             </CardTitle>
           </div>
+          <p className="text-xs text-muted-foreground">
+            Based on historical P&L of tracked traders' holdings
+          </p>
         </CardHeader>
         <CardContent className="p-0">
           <div className="border-b border-border px-4 py-2">
@@ -188,7 +230,7 @@ export default function DailyPage() {
             </Tabs>
           </div>
           
-          {moversLoading ? (
+          {moversLoading || isFiltering ? (
             <div className="divide-y divide-border">
               {[1, 2, 3, 4].map((i) => (
                 <div key={i} className="p-4">
@@ -196,9 +238,15 @@ export default function DailyPage() {
                 </div>
               ))}
             </div>
-          ) : transformedMovers.length > 0 ? (
+          ) : moverFilter === 'watchlist' ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <Star className="h-8 w-8 mx-auto mb-2 opacity-50" />
+              <p>Watchlist feature coming soon</p>
+              <p className="text-xs mt-1">Add assets to your watchlist to track them here</p>
+            </div>
+          ) : filteredMovers.length > 0 ? (
             <div className="divide-y divide-border">
-              {transformedMovers.map((mover) => (
+              {filteredMovers.map((mover) => (
                 <DailyMoverRow
                   key={mover.id}
                   mover={mover}
@@ -207,10 +255,16 @@ export default function DailyPage() {
                 />
               ))}
             </div>
+          ) : moverFilter === 'followed' ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
+              <p>No holdings from followed traders</p>
+              <p className="text-xs mt-1">Follow traders to see their holdings here</p>
+            </div>
           ) : (
             <div className="text-center py-8 text-muted-foreground">
               <TrendingUp className="h-8 w-8 mx-auto mb-2 opacity-50" />
-              <p>No movers data yet. Run the scrape-daily-movers edge function.</p>
+              <p>No holdings data yet. Run the scrape-daily-movers edge function.</p>
             </div>
           )}
         </CardContent>
