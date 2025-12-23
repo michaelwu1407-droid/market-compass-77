@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { RiskGauge } from '@/components/charts/RiskGauge';
-import { MonthlyReturnsGrid } from '@/components/charts/MonthlyReturnsGrid';
+import { MonthlyReturnsTable } from '@/components/charts/MonthlyReturnsTable';
 import { AllocationPieChart } from '@/components/charts/AllocationPieChart';
 import { PerformanceBarChart } from '@/components/charts/PerformanceBarChart';
 import { PerformanceVsBenchmarkChart } from '@/components/charts/PerformanceVsBenchmarkChart';
@@ -134,12 +134,6 @@ export default function TraderDetailPage() {
     if (aum >= 1e6) return `$${(aum / 1e6).toFixed(1)}M`;
     return `$${(aum / 1e3).toFixed(0)}K`;
   };
-
-  // Transform performance data for monthly returns grid
-  const monthlyReturns = (performance || []).map(p => ({
-    month: new Date(p.year, p.month - 1).toLocaleString('default', { month: 'short' }),
-    return_pct: p.return_pct || 0,
-  }));
 
   // Transform holdings for allocation pie chart
   // Use current_value as allocation if allocation_pct is null (API stores it there)
@@ -339,11 +333,14 @@ export default function TraderDetailPage() {
             </Card>
           )}
 
-          {/* Monthly Returns Grid */}
-          {monthlyReturns.length > 0 && (
+          {/* Monthly Returns Table */}
+          {performance && performance.length > 0 && (
             <Card>
-              <CardContent className="pt-6">
-                <MonthlyReturnsGrid returns={monthlyReturns} />
+              <CardHeader>
+                <CardTitle className="text-base">Monthly Returns Breakdown</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <MonthlyReturnsTable performance={performance} />
               </CardContent>
             </Card>
           )}
@@ -441,6 +438,10 @@ export default function TraderDetailPage() {
               beta={trader.beta}
               alpha={trader.alpha}
               volatility={trader.volatility}
+              omegaRatio={(trader as any).omega_ratio}
+              treynorRatio={(trader as any).treynor_ratio}
+              calmarRatio={(trader as any).calmar_ratio}
+              informationRatio={(trader as any).information_ratio}
             />
             <DrawdownsTable 
               drawdowns={[]} 
@@ -473,14 +474,14 @@ export default function TraderDetailPage() {
             </Card>
           )}
 
-          {/* Monthly Returns Grid */}
-          {monthlyReturns.length > 0 && (
+          {/* Monthly Returns Table */}
+          {performance && performance.length > 0 && (
             <Card>
               <CardHeader>
                 <CardTitle>Monthly Returns Breakdown</CardTitle>
               </CardHeader>
               <CardContent>
-                <MonthlyReturnsGrid returns={monthlyReturns} />
+                <MonthlyReturnsTable performance={performance} />
               </CardContent>
             </Card>
           )}

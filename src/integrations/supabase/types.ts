@@ -617,6 +617,7 @@ export type Database = {
           avg_trades_per_week: number | null
           beta: number | null
           bio: string | null
+          calmar_ratio: number | null
           copiers: number | null
           country: string | null
           created_at: string | null
@@ -627,13 +628,16 @@ export type Database = {
           gain_12m: number | null
           gain_24m: number | null
           id: string
+          information_ratio: number | null
           max_drawdown: number | null
+          omega_ratio: number | null
           profitable_months_pct: number | null
           profitable_weeks_pct: number | null
           risk_score: number | null
           sharpe_ratio: number | null
           sortino_ratio: number | null
           tags: string[] | null
+          treynor_ratio: number | null
           updated_at: string | null
           verified: boolean | null
           volatility: number | null
@@ -648,6 +652,7 @@ export type Database = {
           avg_trades_per_week?: number | null
           beta?: number | null
           bio?: string | null
+          calmar_ratio?: number | null
           copiers?: number | null
           country?: string | null
           created_at?: string | null
@@ -658,13 +663,16 @@ export type Database = {
           gain_12m?: number | null
           gain_24m?: number | null
           id?: string
+          information_ratio?: number | null
           max_drawdown?: number | null
+          omega_ratio?: number | null
           profitable_months_pct?: number | null
           profitable_weeks_pct?: number | null
           risk_score?: number | null
           sharpe_ratio?: number | null
           sortino_ratio?: number | null
           tags?: string[] | null
+          treynor_ratio?: number | null
           updated_at?: string | null
           verified?: boolean | null
           volatility?: number | null
@@ -679,6 +687,7 @@ export type Database = {
           avg_trades_per_week?: number | null
           beta?: number | null
           bio?: string | null
+          calmar_ratio?: number | null
           copiers?: number | null
           country?: string | null
           created_at?: string | null
@@ -689,13 +698,16 @@ export type Database = {
           gain_12m?: number | null
           gain_24m?: number | null
           id?: string
+          information_ratio?: number | null
           max_drawdown?: number | null
+          omega_ratio?: number | null
           profitable_months_pct?: number | null
           profitable_weeks_pct?: number | null
           risk_score?: number | null
           sharpe_ratio?: number | null
           sortino_ratio?: number | null
           tags?: string[] | null
+          treynor_ratio?: number | null
           updated_at?: string | null
           verified?: boolean | null
           volatility?: number | null

@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { TrendingUp, Shield, BarChart3, Target } from 'lucide-react';
+import { TrendingUp, Shield, BarChart3, Target, Activity, Zap, Scale, Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface AdvancedMetricsCardProps {
@@ -9,6 +9,9 @@ interface AdvancedMetricsCardProps {
   alpha?: number | null;
   volatility?: number | null;
   informationRatio?: number | null;
+  omegaRatio?: number | null;
+  treynorRatio?: number | null;
+  calmarRatio?: number | null;
 }
 
 export function AdvancedMetricsCard({
@@ -18,8 +21,11 @@ export function AdvancedMetricsCard({
   alpha,
   volatility,
   informationRatio,
+  omegaRatio,
+  treynorRatio,
+  calmarRatio,
 }: AdvancedMetricsCardProps) {
-  const metrics = [
+  const primaryMetrics = [
     {
       label: 'Sharpe Ratio',
       value: sharpeRatio,
@@ -54,9 +60,41 @@ export function AdvancedMetricsCard({
     },
   ];
 
-  const hasAnyData = metrics.some(m => m.value !== null && m.value !== undefined);
+  const secondaryMetrics = [
+    {
+      label: 'Omega Ratio',
+      value: omegaRatio,
+      format: (v: number) => v.toFixed(2),
+      description: 'Probability-weighted gain/loss',
+      good: (v: number) => v > 1,
+    },
+    {
+      label: 'Treynor Ratio',
+      value: treynorRatio,
+      format: (v: number) => v.toFixed(2),
+      description: 'Return per unit of systematic risk',
+      good: (v: number) => v > 0,
+    },
+    {
+      label: 'Calmar Ratio',
+      value: calmarRatio,
+      format: (v: number) => v.toFixed(2),
+      description: 'Return vs max drawdown',
+      good: (v: number) => v > 1,
+    },
+    {
+      label: 'Information Ratio',
+      value: informationRatio,
+      format: (v: number) => v.toFixed(2),
+      description: 'Active return per tracking error',
+      good: (v: number) => v > 0.5,
+    },
+  ];
 
-  if (!hasAnyData) {
+  const hasAnyPrimaryData = primaryMetrics.some(m => m.value !== null && m.value !== undefined);
+  const hasAnySecondaryData = secondaryMetrics.some(m => m.value !== null && m.value !== undefined);
+
+  if (!hasAnyPrimaryData && !hasAnySecondaryData && volatility === null) {
     return (
       <Card>
         <CardHeader>
@@ -83,8 +121,9 @@ export function AdvancedMetricsCard({
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-2 gap-4">
-          {metrics.map((metric) => {
+        {/* Primary Metrics Grid */}
+        <div className="grid grid-cols-2 gap-3">
+          {primaryMetrics.map((metric) => {
             const Icon = metric.icon;
             const hasValue = metric.value !== null && metric.value !== undefined;
             const isGood = hasValue && metric.good(metric.value!);
@@ -107,6 +146,31 @@ export function AdvancedMetricsCard({
           })}
         </div>
         
+        {/* Secondary Metrics */}
+        {hasAnySecondaryData && (
+          <div className="mt-4 pt-4 border-t border-border">
+            <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+              {secondaryMetrics.map((metric) => {
+                const hasValue = metric.value !== null && metric.value !== undefined;
+                const isGood = hasValue && metric.good(metric.value!);
+                
+                return (
+                  <div key={metric.label} className="flex justify-between items-center py-1">
+                    <span className="text-xs text-muted-foreground">{metric.label}</span>
+                    <span className={cn(
+                      "text-sm font-medium",
+                      hasValue ? (isGood ? "text-gain" : "text-foreground") : "text-muted-foreground"
+                    )}>
+                      {hasValue ? metric.format(metric.value!) : '-'}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        
+        {/* Volatility */}
         {volatility !== null && volatility !== undefined && (
           <div className="mt-4 pt-4 border-t border-border">
             <div className="flex justify-between items-center">
