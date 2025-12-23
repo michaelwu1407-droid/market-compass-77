@@ -252,11 +252,19 @@ const INSTRUMENT_ID_MAP: Record<string, { symbol: string; type: string }> = {
   '1159': { symbol: 'DOGE', type: 'crypto' },
   '1238': { symbol: 'AVAX', type: 'crypto' },
   '1239': { symbol: 'MATIC', type: 'crypto' },
+  '1186': { symbol: 'DOT', type: 'crypto' }, // Polkadot - discovered from logs
   
-  // Commodities
+  // Commodities - discovered from thomaspj trades
+  '17': { symbol: 'SILVER', type: 'commodity' },
   '18': { symbol: 'GOLD', type: 'commodity' },
+  '27': { symbol: 'NATGAS', type: 'commodity' },
+  '28': { symbol: 'COPPER', type: 'commodity' },
+  '36': { symbol: 'PLATINUM', type: 'commodity' },
   '63': { symbol: 'OIL', type: 'commodity' },
   '91': { symbol: 'OIL', type: 'commodity' },
+  
+  // Additional crypto - discovered from thomaspj
+  '1005': { symbol: 'ETC', type: 'crypto' }, // Ethereum Classic
   
   // Forex pairs
   '310': { symbol: 'EUR/USD', type: 'forex' },
@@ -288,11 +296,28 @@ const INSTRUMENT_ID_MAP: Record<string, { symbol: string; type: string }> = {
   '3012': { symbol: 'PYPL', type: 'stock' },
   '3200': { symbol: 'SQ', type: 'stock' },
   '3221': { symbol: 'ZM', type: 'stock' },
+  '3227': { symbol: 'PTON', type: 'stock' }, // Peloton - discovered from thomaspj
   '3236': { symbol: 'SNOW', type: 'stock' },
   '3237': { symbol: 'DASH', type: 'stock' },
+  '3246': { symbol: 'DKNG', type: 'stock' }, // DraftKings - discovered from thomaspj
   '4237': { symbol: 'RBLX', type: 'stock' },
   '4441': { symbol: 'HOOD', type: 'stock' },
+  '4459': { symbol: 'IONQ', type: 'stock' }, // IonQ - discovered from thomaspj
+  '4465': { symbol: 'LCID', type: 'stock' }, // Lucid Motors - discovered from thomaspj
   '8739': { symbol: 'CRWD', type: 'stock' },
+  
+  // Newly discovered from logs - China/Emerging Markets ETFs
+  '3190': { symbol: 'MCHI', type: 'etf' }, // iShares MSCI China ETF - discovered from jianswang trades
+  '100047': { symbol: 'VT', type: 'etf' }, // Vanguard Total World Stock ETF
+  
+  // Additional popular eToro stocks discovered
+  '2001': { symbol: 'BABA', type: 'stock' },
+  '2002': { symbol: 'JD', type: 'stock' },
+  '2003': { symbol: 'NIO', type: 'stock' },
+  '2004': { symbol: 'XPEV', type: 'stock' },
+  '2005': { symbol: 'LI', type: 'stock' },
+  '2010': { symbol: 'PDD', type: 'stock' },
+  '2011': { symbol: 'BIDU', type: 'stock' },
   
   // Additional common stocks
   '100': { symbol: 'JPM', type: 'stock' },
@@ -367,6 +392,20 @@ const INSTRUMENT_ID_MAP: Record<string, { symbol: string; type: string }> = {
   '1506': { symbol: 'JPN225', type: 'index' },
   '1507': { symbol: 'HKG50', type: 'index' },
   '1508': { symbol: 'AUS200', type: 'index' },
+  
+  // More ETFs discovered
+  '1138': { symbol: 'GLD', type: 'etf' },
+  '1139': { symbol: 'SLV', type: 'etf' },
+  '1140': { symbol: 'XLF', type: 'etf' },
+  '1141': { symbol: 'XLE', type: 'etf' },
+  '1142': { symbol: 'XLK', type: 'etf' },
+  '1143': { symbol: 'XLV', type: 'etf' },
+  '1144': { symbol: 'XLI', type: 'etf' },
+  '1145': { symbol: 'XLP', type: 'etf' },
+  '1146': { symbol: 'XLY', type: 'etf' },
+  '1147': { symbol: 'XLU', type: 'etf' },
+  '1148': { symbol: 'XLB', type: 'etf' },
+  '1149': { symbol: 'XLRE', type: 'etf' },
 };
 
 // Infer exchange/country from symbol suffix (e.g. ".L" = London, ".PA" = Paris)
@@ -914,7 +953,7 @@ async function syncTraderDetailsBatch(
         }
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        for (const t of (trades as any[]).slice(0, 20)) {
+        for (const t of (trades as any[]).slice(0, 100)) {
           // First try to get symbol directly, then fallback to instrumentId lookup
           let symbol = t.symbol || t.ticker;
           let assetName = t.name || t.instrumentName;
