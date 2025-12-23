@@ -313,6 +313,11 @@ async function syncTraderDetailsBatch(
         const holdings = holdingsData.data || holdingsData.positions || holdingsData.holdings || [];
 
         console.log(`[sync-worker] Got ${holdings.length} holdings for ${trader.etoro_username}`);
+        
+        // DEBUG: Log first holding to see available fields
+        if (holdings.length > 0) {
+          console.log(`[sync-worker] Sample holding fields for ${trader.etoro_username}:`, JSON.stringify(holdings[0], null, 2));
+        }
 
         // Process holdings
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -348,9 +353,9 @@ async function syncTraderDetailsBatch(
                 trader_id: trader.id,
                 asset_id: asset.id,
                 allocation_pct: allocation,
-                avg_open_price: h.avgOpenPrice ?? h.avg_open_price ?? h.openPrice,
+                avg_open_price: h.avgOpenPrice ?? h.avg_open_price ?? h.openPrice ?? h.openRate ?? h.avgPrice,
                 current_value: allocation, // Also store in current_value as backup
-                profit_loss_pct: h.profitLossPct ?? h.profit_loss_pct ?? h.pnl ?? h.gain,
+                profit_loss_pct: h.profitLossPct ?? h.profit_loss_pct ?? h.pnl ?? h.gain ?? h.profitLoss ?? h.pl ?? h.unrealizedPnl ?? h.unrealizedPnlPct ?? h.returnPct ?? h.returns,
                 updated_at: new Date().toISOString(),
               }, { onConflict: 'trader_id,asset_id' });
           }
@@ -377,6 +382,14 @@ async function syncTraderDetailsBatch(
         const trades = tradesData.data || tradesData.trades || tradesData.items || [];
 
         console.log(`[sync-worker] Got ${trades.length} trades for ${trader.etoro_username}`);
+        
+        // DEBUG: Log first trade to see available fields
+        if (trades.length > 0) {
+          console.log(`[sync-worker] Sample trade fields for ${trader.etoro_username}:`, JSON.stringify(trades[0], null, 2));
+        } else {
+          // Log the full response to understand the API structure
+          console.log(`[sync-worker] Trades response structure for ${trader.etoro_username}:`, JSON.stringify(tradesData, null, 2).slice(0, 500));
+        }
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         for (const t of (trades as any[]).slice(0, 20)) {
