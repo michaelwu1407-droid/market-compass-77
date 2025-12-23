@@ -269,11 +269,12 @@ async function getStaleTraders(
   thresholdTime.setHours(thresholdTime.getHours() - hoursThreshold);
 
   // Use details_synced_at to check staleness (not updated_at which is set during list sync)
+  // Order by copiers DESC to prioritize popular traders first
   const { data, error } = await supabase
     .from('traders')
-    .select('id, etoro_username, details_synced_at')
+    .select('id, etoro_username, details_synced_at, copiers')
     .or(`details_synced_at.is.null,details_synced_at.lt.${thresholdTime.toISOString()}`)
-    .order('details_synced_at', { ascending: true, nullsFirst: true })
+    .order('copiers', { ascending: false, nullsFirst: false })
     .limit(limit);
 
   if (error) {
