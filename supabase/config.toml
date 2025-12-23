@@ -1,1 +1,13 @@
 project_id = "vzqwhqgpurkylqfwiowa"
+
+[functions.sync-traders]
+verify_jwt = false
+
+[functions.sync-assets]
+verify_jwt = false
+
+[functions.sync-trader-details]
+verify_jwt = false
+
+[functions.analyse]
+verify_jwt = false
