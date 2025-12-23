@@ -9,9 +9,9 @@ const corsHeaders = {
 const BULLAWARE_BASE = 'https://api.bullaware.com/v1';
 const ENDPOINTS = {
   investors: `${BULLAWARE_BASE}/investors`,
+  investorDetails: (username: string) => `${BULLAWARE_BASE}/investors/${username}`, // Contains monthlyReturns, yearlyReturns, profitableWeeksPct, etc.
   portfolio: (username: string) => `${BULLAWARE_BASE}/investors/${username}/portfolio`,
   trades: (username: string) => `${BULLAWARE_BASE}/investors/${username}/trades`,
-  performance: (username: string) => `${BULLAWARE_BASE}/investors/${username}/performance`,
   metrics: (username: string) => `${BULLAWARE_BASE}/investors/${username}/metrics`,
   riskScore: (username: string) => `${BULLAWARE_BASE}/investors/${username}/risk-score/monthly`,
   instruments: `${BULLAWARE_BASE}/instruments`,
@@ -440,9 +440,9 @@ async function syncTraderDetailsBatch(
 
       await delay(RATE_LIMIT_DELAY_MS);
 
-      // Fetch performance
-      const perfRes = await fetch(
-        ENDPOINTS.performance(trader.etoro_username),
+      // Fetch investor details (contains monthlyReturns, yearlyReturns, profitableWeeksPct, etc.)
+      const investorRes = await fetch(
+        ENDPOINTS.investorDetails(trader.etoro_username),
         { 
           headers: { 
             'Authorization': `Bearer ${apiKey}`,
@@ -451,25 +451,76 @@ async function syncTraderDetailsBatch(
         }
       );
 
-      if (perfRes.ok) {
-        const perfData = await perfRes.json();
-        const monthly = perfData.data || perfData.monthly || perfData.monthlyReturns || [];
-
-        console.log(`[sync-worker] Got ${monthly.length} performance records for ${trader.etoro_username}`);
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        for (const m of monthly as any[]) {
+      if (investorRes.ok) {
+        const investorData = await investorRes.json();
+        const investor = investorData.investor || investorData.data || investorData;
+        
+        console.log(`[sync-worker] Got investor details for ${trader.etoro_username}:`, JSON.stringify({
+          hasMonthlyReturns: !!investor.monthlyReturns,
+          monthlyReturnsKeys: investor.monthlyReturns ? Object.keys(investor.monthlyReturns).slice(0, 5) : [],
+          profitableWeeksPct: investor.profitableWeeksPct,
+          profitableMonthsPct: investor.profitableMonthsPct,
+          dailyDD: investor.dailyDD,
+          weeklyDD: investor.weeklyDD,
+        }, null, 2));
+        
+        // Extract and save monthly returns (format: {"2021-01": 5.5, "2021-02": 9.2})
+        const monthlyReturns = investor.monthlyReturns || {};
+        const monthlyEntries = Object.entries(monthlyReturns);
+        
+        if (monthlyEntries.length > 0) {
+          console.log(`[sync-worker] Saving ${monthlyEntries.length} monthly performance records for ${trader.etoro_username}`);
+          
+          for (const [key, value] of monthlyEntries) {
+            // Key format is "YYYY-MM" e.g. "2024-01"
+            const parts = key.split('-');
+            if (parts.length >= 2) {
+              const year = parseInt(parts[0], 10);
+              const month = parseInt(parts[1], 10);
+              
+              if (!isNaN(year) && !isNaN(month) && typeof value === 'number') {
+                await supabase
+                  .from('trader_performance')
+                  .upsert({
+                    trader_id: trader.id,
+                    year,
+                    month,
+                    return_pct: value,
+                  }, { onConflict: 'trader_id,year,month' });
+              }
+            }
+          }
+        }
+        
+        // Update trader with additional stats from investor details
+        const traderUpdates: Record<string, unknown> = {};
+        
+        if (investor.profitableWeeksPct !== undefined && investor.profitableWeeksPct !== null) {
+          traderUpdates.profitable_weeks_pct = investor.profitableWeeksPct;
+        }
+        if (investor.profitableMonthsPct !== undefined && investor.profitableMonthsPct !== null) {
+          traderUpdates.profitable_months_pct = investor.profitableMonthsPct;
+        }
+        if (investor.dailyDD !== undefined && investor.dailyDD !== null) {
+          traderUpdates.daily_drawdown = investor.dailyDD;
+        }
+        // Also capture additional useful metrics if available
+        if (investor.maxDrawdown !== undefined && investor.maxDrawdown !== null) {
+          traderUpdates.max_drawdown = investor.maxDrawdown;
+        }
+        if (investor.avgPosSize !== undefined && investor.avgPosSize !== null) {
+          traderUpdates.avg_holding_time_days = investor.avgPosSize; // Approximate mapping
+        }
+        
+        if (Object.keys(traderUpdates).length > 0) {
+          console.log(`[sync-worker] Updating trader stats for ${trader.etoro_username}:`, traderUpdates);
           await supabase
-            .from('trader_performance')
-            .upsert({
-              trader_id: trader.id,
-              year: m.year,
-              month: m.month,
-              return_pct: m.return ?? m.returnPct ?? m.gain ?? m.value,
-            }, { onConflict: 'trader_id,year,month' });
+            .from('traders')
+            .update(traderUpdates)
+            .eq('id', trader.id);
         }
       } else {
-        console.log(`[sync-worker] Performance fetch failed for ${trader.etoro_username}: ${perfRes.status}`);
+        console.log(`[sync-worker] Investor details fetch failed for ${trader.etoro_username}: ${investorRes.status}`);
       }
 
       await delay(RATE_LIMIT_DELAY_MS);
