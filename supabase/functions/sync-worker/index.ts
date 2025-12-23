@@ -78,8 +78,127 @@ function parseAum(aumStr: string | number | null | undefined): number | null {
   return parseAumValue(str);
 }
 
+// Sector mapping for common stocks
+const SECTOR_MAP: Record<string, string> = {
+  // Technology
+  'AAPL': 'Technology', 'MSFT': 'Technology', 'GOOG': 'Technology', 'GOOGL': 'Technology',
+  'AMZN': 'Technology', 'META': 'Technology', 'NVDA': 'Technology', 'TSM': 'Technology',
+  'AVGO': 'Technology', 'ORCL': 'Technology', 'CSCO': 'Technology', 'ACN': 'Technology',
+  'ADBE': 'Technology', 'CRM': 'Technology', 'AMD': 'Technology', 'INTC': 'Technology',
+  'QCOM': 'Technology', 'IBM': 'Technology', 'TXN': 'Technology', 'INTU': 'Technology',
+  'AMAT': 'Technology', 'MU': 'Technology', 'NOW': 'Technology', 'PANW': 'Technology',
+  'LRCX': 'Technology', 'KLAC': 'Technology', 'SNPS': 'Technology', 'CDNS': 'Technology',
+  'ADSK': 'Technology', 'CRWD': 'Technology', 'ANET': 'Technology', 'MRVL': 'Technology',
+  'PLTR': 'Technology', 'APP': 'Technology', 'NET': 'Technology', 'TEAM': 'Technology',
+  'DDOG': 'Technology', 'SNOW': 'Technology', 'ZS': 'Technology', 'HUBS': 'Technology',
+  'ISRG': 'Technology', 'APH': 'Technology', 'EME': 'Technology', 'GEV': 'Technology',
+  
+  // Financials
+  'JPM': 'Financials', 'BAC': 'Financials', 'WFC': 'Financials', 'GS': 'Financials',
+  'MS': 'Financials', 'C': 'Financials', 'BLK': 'Financials', 'SCHW': 'Financials',
+  'AXP': 'Financials', 'BX': 'Financials', 'CB': 'Financials', 'MMC': 'Financials',
+  'PGR': 'Financials', 'ICE': 'Financials', 'CME': 'Financials', 'AON': 'Financials',
+  'USB': 'Financials', 'TFC': 'Financials', 'COF': 'Financials', 'MET': 'Financials',
+  'V': 'Financials', 'MA': 'Financials', 'PYPL': 'Financials', 'SQ': 'Financials',
+  
+  // Healthcare
+  'UNH': 'Healthcare', 'JNJ': 'Healthcare', 'LLY': 'Healthcare', 'ABBV': 'Healthcare',
+  'MRK': 'Healthcare', 'PFE': 'Healthcare', 'TMO': 'Healthcare', 'ABT': 'Healthcare',
+  'DHR': 'Healthcare', 'BMY': 'Healthcare', 'AMGN': 'Healthcare', 'GILD': 'Healthcare',
+  'CVS': 'Healthcare', 'ELV': 'Healthcare', 'MDT': 'Healthcare', 'SYK': 'Healthcare',
+  'CI': 'Healthcare', 'ZTS': 'Healthcare', 'BSX': 'Healthcare', 'VRTX': 'Healthcare',
+  'REGN': 'Healthcare', 'HUM': 'Healthcare', 'MCK': 'Healthcare', 'BIIB': 'Healthcare',
+  
+  // Consumer
+  'TSLA': 'Consumer Discretionary', 'HD': 'Consumer Discretionary', 'MCD': 'Consumer Discretionary',
+  'NKE': 'Consumer Discretionary', 'SBUX': 'Consumer Discretionary', 'LOW': 'Consumer Discretionary',
+  'TJX': 'Consumer Discretionary', 'BKNG': 'Consumer Discretionary', 'CMG': 'Consumer Discretionary',
+  'ORLY': 'Consumer Discretionary', 'AZO': 'Consumer Discretionary', 'ROST': 'Consumer Discretionary',
+  'DG': 'Consumer Discretionary', 'DLTR': 'Consumer Discretionary', 'EBAY': 'Consumer Discretionary',
+  'MELI': 'Consumer Discretionary', 'UBER': 'Consumer Discretionary', 'ABNB': 'Consumer Discretionary',
+  'TPR': 'Consumer Discretionary',
+  
+  'PG': 'Consumer Staples', 'KO': 'Consumer Staples', 'PEP': 'Consumer Staples',
+  'COST': 'Consumer Staples', 'WMT': 'Consumer Staples', 'PM': 'Consumer Staples',
+  'MO': 'Consumer Staples', 'MDLZ': 'Consumer Staples', 'CL': 'Consumer Staples',
+  'KMB': 'Consumer Staples', 'KHC': 'Consumer Staples', 'GIS': 'Consumer Staples',
+  
+  // Industrials
+  'GE': 'Industrials', 'CAT': 'Industrials', 'HON': 'Industrials', 'UNP': 'Industrials',
+  'UPS': 'Industrials', 'RTX': 'Industrials', 'BA': 'Industrials', 'LMT': 'Industrials',
+  'DE': 'Industrials', 'MMM': 'Industrials', 'GD': 'Industrials', 'NOC': 'Industrials',
+  'FDX': 'Industrials', 'EMR': 'Industrials', 'CSX': 'Industrials', 'NSC': 'Industrials',
+  
+  // Energy
+  'XOM': 'Energy', 'CVX': 'Energy', 'COP': 'Energy', 'SLB': 'Energy',
+  'EOG': 'Energy', 'MPC': 'Energy', 'VLO': 'Energy', 'PSX': 'Energy',
+  'OXY': 'Energy', 'PXD': 'Energy', 'HES': 'Energy', 'DVN': 'Energy',
+  
+  // Materials
+  'LIN': 'Materials', 'APD': 'Materials', 'SHW': 'Materials', 'ECL': 'Materials',
+  'FCX': 'Materials', 'NEM': 'Materials', 'NUE': 'Materials', 'DOW': 'Materials',
+  'DD': 'Materials', 'PPG': 'Materials', 'VMC': 'Materials', 'MLM': 'Materials',
+  'MT.NV': 'Materials',
+  
+  // Real Estate
+  'AMT': 'Real Estate', 'PLD': 'Real Estate', 'CCI': 'Real Estate', 'EQIX': 'Real Estate',
+  'SPG': 'Real Estate', 'O': 'Real Estate', 'PSA': 'Real Estate', 'DLR': 'Real Estate',
+  
+  // Utilities
+  'NEE': 'Utilities', 'DUK': 'Utilities', 'SO': 'Utilities', 'D': 'Utilities',
+  'AEP': 'Utilities', 'SRE': 'Utilities', 'EXC': 'Utilities', 'XEL': 'Utilities',
+  
+  // Communication
+  'DIS': 'Communication', 'NFLX': 'Communication', 'CMCSA': 'Communication',
+  'T': 'Communication', 'VZ': 'Communication', 'TMUS': 'Communication',
+  'CHTR': 'Communication', 'EA': 'Communication', 'ATVI': 'Communication',
+  'WBD': 'Communication', 'PARA': 'Communication', 'TTWO': 'Communication',
+  
+  // European stocks
+  'SIE.DE': 'Industrials', 'CBK.DE': 'Financials', 'HEI.DE': 'Industrials',
+  'ENR.DE': 'Utilities', 'DBV.PA': 'Healthcare', 'ABVX.PA': 'Healthcare',
+  'SAN.MC': 'Financials', 'CABK.MC': 'Financials', 'FER.MC': 'Industrials',
+  'UCG.MI': 'Financials',
+};
+
+// US Exchange mapping for well-known stocks
+const US_EXCHANGE_MAP: Record<string, string> = {
+  // NASDAQ
+  'AAPL': 'NASDAQ', 'MSFT': 'NASDAQ', 'GOOG': 'NASDAQ', 'GOOGL': 'NASDAQ',
+  'AMZN': 'NASDAQ', 'META': 'NASDAQ', 'NVDA': 'NASDAQ', 'AVGO': 'NASDAQ',
+  'CSCO': 'NASDAQ', 'ADBE': 'NASDAQ', 'AMD': 'NASDAQ', 'INTC': 'NASDAQ',
+  'QCOM': 'NASDAQ', 'TXN': 'NASDAQ', 'INTU': 'NASDAQ', 'AMAT': 'NASDAQ',
+  'MU': 'NASDAQ', 'LRCX': 'NASDAQ', 'KLAC': 'NASDAQ', 'SNPS': 'NASDAQ',
+  'CDNS': 'NASDAQ', 'ADSK': 'NASDAQ', 'MRVL': 'NASDAQ', 'NFLX': 'NASDAQ',
+  'CMCSA': 'NASDAQ', 'COST': 'NASDAQ', 'PEP': 'NASDAQ', 'SBUX': 'NASDAQ',
+  'PYPL': 'NASDAQ', 'ISRG': 'NASDAQ', 'REGN': 'NASDAQ', 'VRTX': 'NASDAQ',
+  'GILD': 'NASDAQ', 'AMGN': 'NASDAQ', 'BIIB': 'NASDAQ', 'BKNG': 'NASDAQ',
+  'CHTR': 'NASDAQ', 'TMUS': 'NASDAQ', 'ADP': 'NASDAQ', 'PANW': 'NASDAQ',
+  'CRWD': 'NASDAQ', 'ANET': 'NASDAQ', 'PLTR': 'NASDAQ', 'APP': 'NASDAQ',
+  'EBAY': 'NASDAQ', 'MELI': 'NASDAQ', 'TEAM': 'NASDAQ', 'DDOG': 'NASDAQ',
+  'SNOW': 'NASDAQ', 'ZS': 'NASDAQ', 'NET': 'NASDAQ', 'HUBS': 'NASDAQ',
+  'TSLA': 'NASDAQ', 'EA': 'NASDAQ', 'TTWO': 'NASDAQ',
+  
+  // NYSE
+  'JPM': 'NYSE', 'V': 'NYSE', 'UNH': 'NYSE', 'JNJ': 'NYSE', 'WMT': 'NYSE',
+  'MA': 'NYSE', 'PG': 'NYSE', 'XOM': 'NYSE', 'HD': 'NYSE', 'CVX': 'NYSE',
+  'LLY': 'NYSE', 'ABBV': 'NYSE', 'MRK': 'NYSE', 'PFE': 'NYSE', 'BAC': 'NYSE',
+  'KO': 'NYSE', 'TMO': 'NYSE', 'ABT': 'NYSE', 'DHR': 'NYSE', 'DIS': 'NYSE',
+  'CRM': 'NYSE', 'MCD': 'NYSE', 'ACN': 'NYSE', 'VZ': 'NYSE', 'BMY': 'NYSE',
+  'NKE': 'NYSE', 'PM': 'NYSE', 'WFC': 'NYSE', 'T': 'NYSE', 'ORCL': 'NYSE',
+  'UNP': 'NYSE', 'UPS': 'NYSE', 'GE': 'NYSE', 'GS': 'NYSE', 'MS': 'NYSE',
+  'C': 'NYSE', 'BLK': 'NYSE', 'CAT': 'NYSE', 'HON': 'NYSE', 'IBM': 'NYSE',
+  'RTX': 'NYSE', 'BA': 'NYSE', 'LMT': 'NYSE', 'DE': 'NYSE', 'LOW': 'NYSE',
+  'SLB': 'NYSE', 'CVS': 'NYSE', 'MDT': 'NYSE', 'SYK': 'NYSE', 'CI': 'NYSE',
+  'ELV': 'NYSE', 'SO': 'NYSE', 'DUK': 'NYSE', 'NEE': 'NYSE', 'D': 'NYSE',
+  'COP': 'NYSE', 'MMM': 'NYSE', 'GD': 'NYSE', 'NOC': 'NYSE', 'FDX': 'NYSE',
+  'EMR': 'NYSE', 'APD': 'NYSE', 'SHW': 'NYSE', 'ECL': 'NYSE', 'LIN': 'NYSE',
+  'UBER': 'NYSE', 'ABNB': 'NYSE', 'SQ': 'NYSE', 'TPR': 'NYSE', 'GEV': 'NYSE',
+  'APH': 'NYSE', 'EME': 'NYSE', 'NOW': 'NYSE',
+};
+
 // Infer exchange/country from symbol suffix (e.g. ".L" = London, ".PA" = Paris)
-function inferExchangeFromSymbol(symbol: string): { exchange: string | null; country: string | null } {
+function inferExchangeFromSymbol(symbol: string): { exchange: string | null; country: string | null; sector: string | null } {
   const suffix = symbol.includes('.') ? symbol.split('.').pop()?.toUpperCase() : null;
   const exchangeMap: Record<string, { exchange: string; country: string }> = {
     'L': { exchange: 'LSE', country: 'GB' },
@@ -94,15 +213,23 @@ function inferExchangeFromSymbol(symbol: string): { exchange: string | null; cou
     'TW': { exchange: 'TWSE', country: 'TW' },
     'AX': { exchange: 'ASX', country: 'AU' },
     'TO': { exchange: 'TSX', country: 'CA' },
+    'NV': { exchange: 'Euronext Amsterdam', country: 'NL' },
   };
+  
+  // Get sector from map
+  const sector = SECTOR_MAP[symbol] || null;
+  
   if (suffix && exchangeMap[suffix]) {
-    return exchangeMap[suffix];
+    return { ...exchangeMap[suffix], sector };
   }
-  // No suffix typically means US stock
+  
+  // No suffix typically means US stock - check our US exchange map
   if (!symbol.includes('.')) {
-    return { exchange: null, country: 'US' };
+    const usExchange = US_EXCHANGE_MAP[symbol] || 'US Stock Exchange';
+    return { exchange: usExchange, country: 'US', sector };
   }
-  return { exchange: null, country: null };
+  
+  return { exchange: null, country: null, sector };
 }
 
 Deno.serve(async (req) => {
@@ -412,11 +539,11 @@ async function syncTraderDetailsBatch(
           // Get or create asset, enriching with data from holdings
           let { data: asset } = await supabase
             .from('assets')
-            .select('id, asset_type, exchange, country')
+            .select('id, asset_type, exchange, country, sector')
             .eq('symbol', symbol)
             .single();
 
-          // Infer exchange/country from symbol suffix
+          // Infer exchange/country/sector from symbol
           const inferred = inferExchangeFromSymbol(symbol);
           
           // Map Bullaware type to our asset_type
@@ -432,13 +559,14 @@ async function syncTraderDetailsBatch(
                 asset_type: assetType,
                 exchange: inferred.exchange,
                 country: inferred.country,
+                sector: inferred.sector,
               })
-              .select('id, asset_type, exchange, country')
+              .select('id, asset_type, exchange, country, sector')
               .single();
             asset = newAsset;
-            console.log(`[sync-worker] Created asset ${symbol} with type=${assetType}, exchange=${inferred.exchange}, country=${inferred.country}`);
+            console.log(`[sync-worker] Created asset ${symbol} with type=${assetType}, exchange=${inferred.exchange}, country=${inferred.country}, sector=${inferred.sector}`);
           } else {
-            // Update asset if missing type/exchange/country
+            // Update asset if missing type/exchange/country/sector
             const updates: Record<string, unknown> = {};
             if (!asset.asset_type || asset.asset_type === 'stock') {
               updates.asset_type = assetType;
@@ -448,6 +576,9 @@ async function syncTraderDetailsBatch(
             }
             if (!asset.country && inferred.country) {
               updates.country = inferred.country;
+            }
+            if (!asset.sector && inferred.sector) {
+              updates.sector = inferred.sector;
             }
             if (Object.keys(updates).length > 0) {
               await supabase.from('assets').update(updates).eq('id', asset.id);
@@ -584,6 +715,7 @@ async function syncTraderDetailsBatch(
                 asset_type: assetType,
                 exchange: inferred.exchange,
                 country: inferred.country,
+                sector: inferred.sector,
               })
               .select('id')
               .single();

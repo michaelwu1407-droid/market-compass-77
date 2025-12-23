@@ -48,17 +48,17 @@ export function MonthlyReturnsTable({ performance }: MonthlyReturnsTableProps) {
   }, [performance]);
 
   const getColorClass = (value: number | null) => {
-    if (value === null) return 'text-muted-foreground';
-    if (value >= 5) return 'bg-gain/20 text-gain font-semibold';
+    if (value === null) return 'text-muted-foreground/50';
+    if (value >= 5) return 'bg-gain/15 text-gain font-medium';
     if (value >= 2) return 'bg-gain/10 text-gain';
     if (value >= 0) return 'text-gain';
     if (value >= -2) return 'text-loss';
     if (value >= -5) return 'bg-loss/10 text-loss';
-    return 'bg-loss/20 text-loss font-semibold';
+    return 'bg-loss/15 text-loss font-medium';
   };
 
   const formatValue = (value: number | null) => {
-    if (value === null) return '-';
+    if (value === null) return '–';
     return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
   };
 
@@ -69,35 +69,38 @@ export function MonthlyReturnsTable({ performance }: MonthlyReturnsTableProps) {
   }
 
   return (
-    <div className="overflow-x-auto">
-      <Table>
+    <div className="overflow-x-auto -mx-2 px-2">
+      <Table className="min-w-[700px]">
         <TableHeader>
-          <TableRow>
-            <TableHead className="w-16 font-semibold">Year</TableHead>
+          <TableRow className="hover:bg-transparent border-b">
+            <TableHead className="w-14 font-semibold text-xs h-8 sticky left-0 bg-background z-10">Year</TableHead>
             {MONTHS.map(month => (
-              <TableHead key={month} className="text-center min-w-[60px] text-xs">
+              <TableHead key={month} className="text-center w-12 text-xs h-8 px-1">
                 {month}
               </TableHead>
             ))}
-            <TableHead className="text-center min-w-[70px] font-semibold">Annual</TableHead>
+            <TableHead className="text-center w-16 font-semibold text-xs h-8 bg-muted/30">Total</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {yearlyData.map(({ year, months, annual }) => (
-            <TableRow key={year}>
-              <TableCell className="font-semibold">{year}</TableCell>
+            <TableRow key={year} className="hover:bg-muted/30">
+              <TableCell className="font-semibold text-sm py-1.5 sticky left-0 bg-background z-10">{year}</TableCell>
               {months.map((value, idx) => (
                 <TableCell
                   key={idx}
-                  className={cn("text-center text-xs py-2", getColorClass(value))}
+                  className={cn(
+                    "text-center text-xs py-1.5 px-1 tabular-nums",
+                    getColorClass(value)
+                  )}
                 >
                   {formatValue(value)}
                 </TableCell>
               ))}
               <TableCell
                 className={cn(
-                  "text-center font-semibold",
-                  annual !== null ? (annual >= 0 ? 'text-gain' : 'text-loss') : 'text-muted-foreground'
+                  "text-center text-sm py-1.5 font-semibold tabular-nums bg-muted/30",
+                  annual !== null ? (annual >= 0 ? 'text-gain' : 'text-loss') : 'text-muted-foreground/50'
                 )}
               >
                 {formatValue(annual)}
