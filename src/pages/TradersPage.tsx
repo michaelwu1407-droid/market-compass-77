@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { TraderCard } from '@/components/traders/TraderCard';
-import { traders, followedTraderIds } from '@/data/mockData';
+import { useTraders } from '@/hooks/useTraders';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
+import { Skeleton } from '@/components/ui/skeleton';
 
 type TraderFilter = 'trending' | 'most_copied' | 'following';
 
@@ -13,8 +14,10 @@ export default function TradersPage() {
   const [filter, setFilter] = useState<TraderFilter>('trending');
   const [minTrackRecord, setMinTrackRecord] = useState('12m');
   const [maxRisk, setMaxRisk] = useState([7]);
-  const [followingIds, setFollowingIds] = useState<string[]>(followedTraderIds);
+  const [followingIds, setFollowingIds] = useState<string[]>([]);
   const navigate = useNavigate();
+
+  const { data: traders, isLoading, error } = useTraders();
 
   const handleFollow = (traderId: string) => {
     setFollowingIds(prev => 
@@ -25,7 +28,7 @@ export default function TradersPage() {
   };
 
   const handleAnalyse = (traderId: string) => {
-    navigate('/analysis');
+    navigate(`/analysis?trader=${traderId}`);
   };
 
   const handleStarForIC = (traderId: string) => {
@@ -37,15 +40,39 @@ export default function TradersPage() {
   };
 
   // Filter traders
-  let filteredTraders = [...traders];
+  let filteredTraders = [...(traders || [])];
   
   if (filter === 'following') {
     filteredTraders = filteredTraders.filter(t => followingIds.includes(t.id));
   } else if (filter === 'most_copied') {
-    filteredTraders = filteredTraders.sort((a, b) => b.num_copiers - a.num_copiers);
+    filteredTraders = filteredTraders.sort((a, b) => (b.copiers || 0) - (a.copiers || 0));
   }
 
-  filteredTraders = filteredTraders.filter(t => t.risk_score <= maxRisk[0]);
+  filteredTraders = filteredTraders.filter(t => (t.risk_score || 0) <= maxRisk[0]);
+
+  if (isLoading) {
+    return (
+      <div className="max-w-6xl mx-auto">
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold mb-2">Copy Traders</h1>
+          <p className="text-muted-foreground">Discover and analyse top investor profiles</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {[...Array(6)].map((_, i) => (
+            <Skeleton key={i} className="h-64 rounded-lg" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-6xl mx-auto text-center py-12">
+        <p className="text-destructive">Error loading traders: {error.message}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -125,9 +152,15 @@ export default function TradersPage() {
         ))}
       </div>
 
-      {filteredTraders.length === 0 && (
+      {filteredTraders.length === 0 && !isLoading && (
         <div className="text-center py-12 text-muted-foreground">
           <p>No traders match your filters</p>
+          <p className="text-sm mt-2">
+            {traders?.length === 0 
+              ? "Run the sync-traders edge function to populate data from Bullaware"
+              : "Try adjusting your filters"
+            }
+          </p>
         </div>
       )}
     </div>

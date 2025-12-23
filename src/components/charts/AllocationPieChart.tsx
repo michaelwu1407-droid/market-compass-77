@@ -1,8 +1,18 @@
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
-import type { TraderHolding } from '@/types';
+
+interface HoldingData {
+  asset: {
+    id: string;
+    name: string;
+    ticker: string;
+    sector: string;
+  };
+  weight_pct: number;
+  pnl_pct: number;
+}
 
 interface AllocationPieChartProps {
-  holdings: TraderHolding[];
+  holdings: HoldingData[];
   height?: number;
   showLegend?: boolean;
 }
