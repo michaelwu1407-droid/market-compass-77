@@ -78,6 +78,33 @@ function parseAum(aumStr: string | number | null | undefined): number | null {
   return parseAumValue(str);
 }
 
+// Infer exchange/country from symbol suffix (e.g. ".L" = London, ".PA" = Paris)
+function inferExchangeFromSymbol(symbol: string): { exchange: string | null; country: string | null } {
+  const suffix = symbol.includes('.') ? symbol.split('.').pop()?.toUpperCase() : null;
+  const exchangeMap: Record<string, { exchange: string; country: string }> = {
+    'L': { exchange: 'LSE', country: 'GB' },
+    'PA': { exchange: 'Euronext Paris', country: 'FR' },
+    'DE': { exchange: 'XETRA', country: 'DE' },
+    'AS': { exchange: 'Euronext Amsterdam', country: 'NL' },
+    'MI': { exchange: 'Borsa Italiana', country: 'IT' },
+    'MC': { exchange: 'BME', country: 'ES' },
+    'SW': { exchange: 'SIX', country: 'CH' },
+    'HK': { exchange: 'HKEX', country: 'HK' },
+    'T': { exchange: 'TSE', country: 'JP' },
+    'TW': { exchange: 'TWSE', country: 'TW' },
+    'AX': { exchange: 'ASX', country: 'AU' },
+    'TO': { exchange: 'TSX', country: 'CA' },
+  };
+  if (suffix && exchangeMap[suffix]) {
+    return exchangeMap[suffix];
+  }
+  // No suffix typically means US stock
+  if (!symbol.includes('.')) {
+    return { exchange: null, country: 'US' };
+  }
+  return { exchange: null, country: null };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -91,6 +118,49 @@ Deno.serve(async (req) => {
   const supabase: any = createClient(supabaseUrl, supabaseServiceKey);
 
   try {
+    // Check if this is an on-demand sync request for a specific trader
+    let body: { trader_id?: string; force_assets?: boolean } = {};
+    try {
+      body = await req.json();
+    } catch {
+      // No body, regular sync
+    }
+
+    // On-demand sync for specific trader
+    if (body.trader_id) {
+      console.log(`[sync-worker] On-demand sync requested for trader ID: ${body.trader_id}`);
+      
+      const { data: trader, error } = await supabase
+        .from('traders')
+        .select('id, etoro_username')
+        .eq('id', body.trader_id)
+        .single();
+      
+      if (error || !trader) {
+        return new Response(JSON.stringify({ error: 'Trader not found' }), { 
+          status: 404, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        });
+      }
+      
+      console.log(`[sync-worker] On-demand syncing: ${trader.etoro_username}`);
+      const result = await syncTraderDetailsBatch(supabase, bullwareApiKey, [trader]);
+      return new Response(JSON.stringify({ 
+        action: 'on_demand_sync', 
+        ...result 
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // Force assets sync (can be triggered manually)
+    if (body.force_assets) {
+      console.log('[sync-worker] Force assets sync requested...');
+      const result = await syncAssetsBatch(supabase, bullwareApiKey);
+      return new Response(JSON.stringify({ 
+        action: 'force_assets_sync', 
+        ...result 
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
     console.log('[sync-worker] Starting sync cycle...');
 
     // Get current sync states
@@ -103,6 +173,17 @@ Deno.serve(async (req) => {
     const states: Record<string, SyncState> = {};
     for (const state of syncStates || []) {
       states[state.id] = state;
+    }
+
+    // Priority 0: Force assets sync if never run (needed for sector/exchange/country data)
+    const assetsState = states['assets'];
+    if (!assetsState?.last_run) {
+      console.log('[sync-worker] Assets never synced, forcing initial asset sync...');
+      const result = await syncAssetsBatch(supabase, bullwareApiKey);
+      return new Response(JSON.stringify({ 
+        action: 'initial_assets_sync', 
+        ...result 
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     // Priority 1: Check if we need to discover/refresh traders list
@@ -135,9 +216,8 @@ Deno.serve(async (req) => {
     }
 
     // Priority 2: Check if assets need refresh
-    const assetsState = states['assets'];
     if (isStale(assetsState?.last_run, STALE_HOURS_ASSETS)) {
-      console.log('[sync-worker] Priority 3: Syncing assets...');
+      console.log('[sync-worker] Assets stale, syncing...');
       const result = await syncAssetsBatch(supabase, bullwareApiKey);
       return new Response(JSON.stringify({ 
         action: 'sync_assets', 
@@ -329,20 +409,50 @@ async function syncTraderDetailsBatch(
           const symbol = h.symbol || h.instrumentId || h.ticker || h.asset;
           if (!symbol) continue;
 
-          // Get or create asset
+          // Get or create asset, enriching with data from holdings
           let { data: asset } = await supabase
             .from('assets')
-            .select('id')
+            .select('id, asset_type, exchange, country')
             .eq('symbol', symbol)
             .single();
 
+          // Infer exchange/country from symbol suffix
+          const inferred = inferExchangeFromSymbol(symbol);
+          
+          // Map Bullaware type to our asset_type
+          const assetType = h.type?.toLowerCase() || 'stock';
+          
           if (!asset) {
+            // Create asset with enriched data from holdings
             const { data: newAsset } = await supabase
               .from('assets')
-              .insert({ symbol, name: h.name || h.instrumentName || symbol })
-              .select('id')
+              .insert({ 
+                symbol, 
+                name: h.name || h.instrumentName || symbol,
+                asset_type: assetType,
+                exchange: inferred.exchange,
+                country: inferred.country,
+              })
+              .select('id, asset_type, exchange, country')
               .single();
             asset = newAsset;
+            console.log(`[sync-worker] Created asset ${symbol} with type=${assetType}, exchange=${inferred.exchange}, country=${inferred.country}`);
+          } else {
+            // Update asset if missing type/exchange/country
+            const updates: Record<string, unknown> = {};
+            if (!asset.asset_type || asset.asset_type === 'stock') {
+              updates.asset_type = assetType;
+            }
+            if (!asset.exchange && inferred.exchange) {
+              updates.exchange = inferred.exchange;
+            }
+            if (!asset.country && inferred.country) {
+              updates.country = inferred.country;
+            }
+            if (Object.keys(updates).length > 0) {
+              await supabase.from('assets').update(updates).eq('id', asset.id);
+              console.log(`[sync-worker] Updated asset ${symbol} with:`, updates);
+            }
           }
 
           if (asset) {

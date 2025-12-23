@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, TrendingUp, AlertTriangle, Users, Sparkles, Star, CheckCircle2, Calendar, Target, Clock, BarChart3, PieChart, LineChart } from 'lucide-react';
+import { ArrowLeft, TrendingUp, AlertTriangle, Users, Sparkles, Star, CheckCircle2, Calendar, Target, Clock, BarChart3, PieChart, LineChart, RefreshCw } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -31,6 +32,8 @@ import { useFollowedTraders } from '@/hooks/useFollowedTraders';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow, format } from 'date-fns';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 
 const countryFlags: Record<string, string> = {
   US: '🇺🇸',
@@ -46,13 +49,14 @@ export default function TraderDetailPage() {
   const analyseMutation = useAnalyse();
   const { user } = useAuth();
   const { isFollowing, toggleFollow } = useFollowedTraders();
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const { data: trader, isLoading: traderLoading, error: traderError } = useTrader(traderId);
-  const { data: holdings } = useTraderHoldings(traderId);
-  const { data: trades } = useTraderTrades(traderId);
-  const { data: performance } = useTraderPerformance(traderId);
-  const { data: equityHistory } = useTraderEquityHistory(traderId);
-  const { data: portfolioHistory } = useTraderPortfolioHistory(traderId);
+  const { data: trader, isLoading: traderLoading, error: traderError, refetch: refetchTrader } = useTrader(traderId);
+  const { data: holdings, refetch: refetchHoldings } = useTraderHoldings(traderId);
+  const { data: trades, refetch: refetchTrades } = useTraderTrades(traderId);
+  const { data: performance, refetch: refetchPerformance } = useTraderPerformance(traderId);
+  const { data: equityHistory, refetch: refetchEquity } = useTraderEquityHistory(traderId);
+  const { data: portfolioHistory, refetch: refetchPortfolio } = useTraderPortfolioHistory(traderId);
   const { data: posts } = useTraderPosts(traderId);
 
   const following = traderId ? isFollowing(traderId) : false;
@@ -60,6 +64,42 @@ export default function TraderDetailPage() {
   const handleAnalyse = () => {
     if (traderId) {
       analyseMutation.mutate({ trader_id: traderId, analysis_type: 'comprehensive' });
+    }
+  };
+
+  const handleRefreshData = async () => {
+    if (!traderId) return;
+    
+    setIsRefreshing(true);
+    try {
+      toast.info('Refreshing trader data from Bullaware...');
+      
+      const { data, error } = await supabase.functions.invoke('sync-worker', {
+        body: { trader_id: traderId }
+      });
+      
+      if (error) {
+        console.error('Sync error:', error);
+        toast.error('Failed to refresh data');
+      } else {
+        console.log('Sync result:', data);
+        toast.success('Data refreshed successfully!');
+        
+        // Refetch all data
+        await Promise.all([
+          refetchTrader(),
+          refetchHoldings(),
+          refetchTrades(),
+          refetchPerformance(),
+          refetchEquity(),
+          refetchPortfolio(),
+        ]);
+      }
+    } catch (err) {
+      console.error('Refresh error:', err);
+      toast.error('Failed to refresh data');
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -179,6 +219,15 @@ export default function TraderDetailPage() {
                   <Button onClick={handleAnalyse} disabled={analyseMutation.isPending}>
                     <Sparkles className="h-4 w-4 mr-2" />
                     {analyseMutation.isPending ? 'Analysing...' : 'Analyse'}
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    size="icon" 
+                    onClick={handleRefreshData}
+                    disabled={isRefreshing}
+                    title="Refresh data from Bullaware"
+                  >
+                    <RefreshCw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
                   </Button>
                   <Button variant="ghost" size="icon">
                     <Star className="h-4 w-4" />
