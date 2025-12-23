@@ -583,7 +583,13 @@ export default function TraderDetailPage() {
                   ))}
                 </div>
               ) : (
-                <p className="text-muted-foreground text-sm">No trade activity available</p>
+                <div className="text-center py-8">
+                  <Clock className="h-10 w-10 text-muted-foreground/50 mx-auto mb-3" />
+                  <p className="text-muted-foreground text-sm mb-2">No trade history available</p>
+                  <p className="text-xs text-muted-foreground/70">
+                    Trade data syncs periodically. Click the refresh button above to update.
+                  </p>
+                </div>
               )}
             </CardContent>
           </Card>
