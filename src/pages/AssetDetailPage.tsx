@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, TrendingUp, TrendingDown, Sparkles, Star, ExternalLink, RefreshCw } from 'lucide-react';
+import { ArrowLeft, TrendingUp, TrendingDown, Sparkles, Star, ExternalLink, RefreshCw, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,6 +9,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { useAsset } from '@/hooks/useAssets';
 import { useAssetPosts, useAssetHolders } from '@/hooks/useAssetPosts';
+import { useAssetPriceHistory } from '@/hooks/useAssetPriceHistory';
+import { useRefreshAsset } from '@/hooks/useRefreshAsset';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -19,12 +21,24 @@ export default function AssetDetailPage() {
   const { data: asset, isLoading: assetLoading, error } = useAsset(assetId);
   const { data: assetPosts, isLoading: postsLoading } = useAssetPosts(assetId);
   const { data: holders, isLoading: holdersLoading } = useAssetHolders(assetId);
+  const { data: priceHistory, isLoading: priceHistoryLoading } = useAssetPriceHistory(assetId);
+  const refreshAsset = useRefreshAsset();
 
   const openYahooFinance = () => {
     if (asset?.symbol) {
       window.open(`https://finance.yahoo.com/quote/${asset.symbol}`, '_blank');
     }
   };
+
+  const handleRefresh = () => {
+    if (asset?.id && asset?.symbol) {
+      refreshAsset.mutate({ assetId: asset.id, symbol: asset.symbol });
+    }
+  };
+
+  // Check if data is missing
+  const hasNoData = asset && (!asset.current_price || asset.current_price === 0);
+  const hasNoPriceHistory = !priceHistoryLoading && (!priceHistory || priceHistory.length === 0);
 
   if (assetLoading) {
     return (
@@ -34,6 +48,7 @@ export default function AssetDetailPage() {
           Back
         </Button>
         <Skeleton className="h-48 w-full mb-6" />
+        <Skeleton className="h-64 w-full mb-6" />
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
           {[...Array(8)].map((_, i) => (
             <Skeleton key={i} className="h-20" />
@@ -84,6 +99,25 @@ export default function AssetDetailPage() {
         Back
       </Button>
 
+      {/* No Data Alert */}
+      {hasNoData && (
+        <Card className="mb-6 border-warning bg-warning/5">
+          <CardContent className="p-4 flex items-center gap-4">
+            <AlertCircle className="h-8 w-8 text-warning shrink-0" />
+            <div className="flex-1">
+              <h3 className="font-semibold mb-1">No price data available</h3>
+              <p className="text-sm text-muted-foreground">
+                Click the refresh button to fetch the latest data from Yahoo Finance.
+              </p>
+            </div>
+            <Button onClick={handleRefresh} disabled={refreshAsset.isPending}>
+              <RefreshCw className={cn("h-4 w-4 mr-2", refreshAsset.isPending && "animate-spin")} />
+              {refreshAsset.isPending ? 'Fetching...' : 'Fetch Data'}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Header */}
       <Card className="mb-6">
         <CardContent className="p-4 md:p-6">
@@ -121,21 +155,37 @@ export default function AssetDetailPage() {
 
             {/* Price & Change */}
             <div className="flex-1 md:text-right">
-              <div className="text-2xl md:text-3xl font-bold">
-                ${Number(asset.current_price || 0).toFixed(2)}
-              </div>
-              <div className={cn("flex items-center gap-1 md:justify-end", isPositive ? "text-gain" : "text-loss")}>
-                {isPositive ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
-                <span className="font-semibold">
-                  {isPositive ? '+' : ''}{Number(asset.price_change || 0).toFixed(2)} ({isPositive ? '+' : ''}{Number(asset.price_change_pct || 0).toFixed(2)}%)
-                </span>
-                <span className="text-muted-foreground text-sm ml-1">Today</span>
-              </div>
+              {asset.current_price ? (
+                <>
+                  <div className="text-2xl md:text-3xl font-bold">
+                    ${Number(asset.current_price).toFixed(2)}
+                  </div>
+                  <div className={cn("flex items-center gap-1 md:justify-end", isPositive ? "text-gain" : "text-loss")}>
+                    {isPositive ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+                    <span className="font-semibold">
+                      {isPositive ? '+' : ''}{Number(asset.price_change || 0).toFixed(2)} ({isPositive ? '+' : ''}{Number(asset.price_change_pct || 0).toFixed(2)}%)
+                    </span>
+                    <span className="text-muted-foreground text-sm ml-1">Today</span>
+                  </div>
+                </>
+              ) : (
+                <div className="text-muted-foreground">No price data</div>
+              )}
             </div>
           </div>
 
           {/* Action Buttons */}
           <div className="flex items-center gap-2 mt-4 pt-4 border-t border-border flex-wrap">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handleRefresh}
+              disabled={refreshAsset.isPending}
+              className="flex-1 sm:flex-none"
+            >
+              <RefreshCw className={cn("h-4 w-4 mr-2", refreshAsset.isPending && "animate-spin")} />
+              {refreshAsset.isPending ? 'Refreshing...' : 'Refresh'}
+            </Button>
             <Button onClick={() => navigate('/analysis')} size="sm" className="flex-1 sm:flex-none">
               <Sparkles className="h-4 w-4 mr-2" />
               Analyse
@@ -149,6 +199,45 @@ export default function AssetDetailPage() {
               Yahoo Finance
             </Button>
           </div>
+
+          {/* Last Updated */}
+          {asset.updated_at && (
+            <div className="mt-3 text-xs text-muted-foreground">
+              Last updated: {formatDistanceToNow(new Date(asset.updated_at), { addSuffix: true })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Price Chart */}
+      <Card className="mb-6">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-lg">Price History</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {priceHistoryLoading ? (
+            <Skeleton className="h-[300px] w-full" />
+          ) : priceHistory && priceHistory.length > 0 ? (
+            <PriceChart 
+              data={priceHistory} 
+              height={300}
+              showRangeSelector={true}
+            />
+          ) : (
+            <div className="h-[200px] flex flex-col items-center justify-center text-muted-foreground">
+              <AlertCircle className="h-8 w-8 mb-2 opacity-50" />
+              <p className="mb-3">No price history available</p>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={handleRefresh}
+                disabled={refreshAsset.isPending}
+              >
+                <RefreshCw className={cn("h-4 w-4 mr-2", refreshAsset.isPending && "animate-spin")} />
+                {refreshAsset.isPending ? 'Fetching...' : 'Fetch Price History'}
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -180,31 +269,33 @@ export default function AssetDetailPage() {
         </Card>
         <Card className="p-3 md:p-4">
           <div className="text-xs text-muted-foreground mb-1">52W High</div>
-          <div className="font-semibold text-sm md:text-base">${asset.high_52w ? Number(asset.high_52w).toFixed(2) : '-'}</div>
+          <div className="font-semibold text-sm md:text-base">{asset.high_52w ? `$${Number(asset.high_52w).toFixed(2)}` : '-'}</div>
         </Card>
         <Card className="p-3 md:p-4">
           <div className="text-xs text-muted-foreground mb-1">52W Low</div>
-          <div className="font-semibold text-sm md:text-base">${asset.low_52w ? Number(asset.low_52w).toFixed(2) : '-'}</div>
+          <div className="font-semibold text-sm md:text-base">{asset.low_52w ? `$${Number(asset.low_52w).toFixed(2)}` : '-'}</div>
         </Card>
       </div>
 
       {/* 52 Week Range */}
-      <Card className="p-4 mb-6">
-        <div className="flex justify-between text-xs text-muted-foreground mb-2">
-          <span>52 Week Range</span>
-          <span>${asset.low_52w ? Number(asset.low_52w).toFixed(2) : '-'} - ${asset.high_52w ? Number(asset.high_52w).toFixed(2) : '-'}</span>
-        </div>
-        <div className="relative h-2 bg-secondary rounded-full">
-          <div 
-            className="absolute top-0 h-full bg-primary rounded-full"
-            style={{ width: `${yearRangePercentage}%` }}
-          />
-          <div 
-            className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-primary rounded-full border-2 border-background"
-            style={{ left: `calc(${yearRangePercentage}% - 6px)` }}
-          />
-        </div>
-      </Card>
+      {asset.low_52w && asset.high_52w && (
+        <Card className="p-4 mb-6">
+          <div className="flex justify-between text-xs text-muted-foreground mb-2">
+            <span>52 Week Range</span>
+            <span>${Number(asset.low_52w).toFixed(2)} - ${Number(asset.high_52w).toFixed(2)}</span>
+          </div>
+          <div className="relative h-2 bg-secondary rounded-full">
+            <div 
+              className="absolute top-0 h-full bg-primary rounded-full"
+              style={{ width: `${yearRangePercentage}%` }}
+            />
+            <div 
+              className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-primary rounded-full border-2 border-background"
+              style={{ left: `calc(${yearRangePercentage}% - 6px)` }}
+            />
+          </div>
+        </Card>
+      )}
 
       {/* Content Tabs */}
       <Tabs defaultValue="stats">
@@ -242,11 +333,11 @@ export default function AssetDetailPage() {
                 <div className="space-y-3">
                   <div className="flex justify-between py-2 border-b border-border">
                     <span className="text-muted-foreground">52 Week High</span>
-                    <span className="font-medium">${asset.high_52w ? Number(asset.high_52w).toFixed(2) : '-'}</span>
+                    <span className="font-medium">{asset.high_52w ? `$${Number(asset.high_52w).toFixed(2)}` : '-'}</span>
                   </div>
                   <div className="flex justify-between py-2 border-b border-border">
                     <span className="text-muted-foreground">52 Week Low</span>
-                    <span className="font-medium">${asset.low_52w ? Number(asset.low_52w).toFixed(2) : '-'}</span>
+                    <span className="font-medium">{asset.low_52w ? `$${Number(asset.low_52w).toFixed(2)}` : '-'}</span>
                   </div>
                   <div className="flex justify-between py-2 border-b border-border">
                     <span className="text-muted-foreground">Avg Volume</span>
