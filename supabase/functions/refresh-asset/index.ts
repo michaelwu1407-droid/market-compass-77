@@ -131,58 +131,79 @@ serve(async (req) => {
     const priceChange = currentPrice - previousClose;
     const priceChangePct = previousClose > 0 ? (priceChange / previousClose) * 100 : 0;
 
-    // Fetch fundamental data with multiple modules for better coverage
+    // Fetch fundamental data using Firecrawl to scrape Yahoo Finance
     let fundamentals: any = {};
-    try {
-      const quoteUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=summaryDetail,defaultKeyStatistics,price,financialData`;
-      console.log(`[refresh-asset] Fetching fundamentals from: ${quoteUrl}`);
-      
-      const quoteResponse = await fetch(quoteUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    const firecrawlApiKey = Deno.env.get('FIRECRAWL_API_KEY');
+    
+    if (firecrawlApiKey) {
+      try {
+        const yahooUrl = `https://finance.yahoo.com/quote/${encodeURIComponent(symbol)}`;
+        console.log(`[refresh-asset] Scraping fundamentals from: ${yahooUrl}`);
+        
+        const firecrawlResponse = await fetch('https://api.firecrawl.dev/v1/scrape', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${firecrawlApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            url: yahooUrl,
+            formats: ['markdown'],
+            waitFor: 3000, // Wait for JS to render
+          }),
+        });
+        
+        if (firecrawlResponse.ok) {
+          const firecrawlData = await firecrawlResponse.json();
+          const markdown = firecrawlData.data?.markdown || '';
+          
+          console.log(`[refresh-asset] Got ${markdown.length} chars of markdown`);
+          
+          // Parse key metrics from markdown
+          // Format is usually like: "Market Cap | 25.33B" or "Market Cap25.33B"
+          const parseMetric = (pattern: RegExp): number | null => {
+            const match = markdown.match(pattern);
+            if (!match) return null;
+            
+            const valueStr = match[1].replace(/[,\s]/g, '').trim();
+            if (valueStr === '--' || valueStr === 'N/A' || valueStr === '') return null;
+            
+            const multipliers: Record<string, number> = { 'T': 1e12, 'B': 1e9, 'M': 1e6, 'K': 1e3 };
+            const numMatch = valueStr.match(/^([\d.]+)([TBMK])?$/i);
+            if (numMatch) {
+              const num = parseFloat(numMatch[1]);
+              const mult = numMatch[2] ? multipliers[numMatch[2].toUpperCase()] || 1 : 1;
+              return num * mult;
+            }
+            const parsed = parseFloat(valueStr);
+            return isNaN(parsed) ? null : parsed;
+          };
+          
+          // Different possible patterns for the metrics
+          const marketCap = parseMetric(/Market\s*Cap[^\d]*?([\d,.]+[TBMK]?)/i);
+          const peRatio = parseMetric(/(?:PE\s*Ratio|P\/E)[^\d]*?([\d,.]+)/i);
+          const eps = parseMetric(/EPS[^\d]*?([\d,.]+)/i);
+          const dividendYield = parseMetric(/Dividend\s*Yield[^\d]*?([\d,.]+)%?/i);
+          const beta = parseMetric(/Beta[^\d]*?([\d,.]+)/i);
+          
+          fundamentals = {
+            market_cap: marketCap,
+            pe_ratio: peRatio,
+            eps: eps,
+            dividend_yield: dividendYield,
+            beta: beta,
+          };
+          
+          console.log(`[refresh-asset] Parsed fundamentals:`, JSON.stringify(fundamentals));
+        } else {
+          const errorText = await firecrawlResponse.text();
+          console.warn(`[refresh-asset] Firecrawl returned ${firecrawlResponse.status}: ${errorText}`);
         }
-      });
-      
-      if (quoteResponse.ok) {
-        const quoteData: YahooQuoteResult = await quoteResponse.json();
-        const resultData = quoteData.quoteSummary?.result?.[0];
-        const summary = resultData?.summaryDetail;
-        const keyStats = resultData?.defaultKeyStatistics;
-        const priceData = resultData?.price;
-        
-        // Get market cap from price module first (more reliable), then summaryDetail
-        const marketCap = priceData?.marketCap?.raw || summary?.marketCap?.raw || null;
-        
-        // Get P/E ratio - try trailing first, then forward
-        const peRatio = summary?.trailingPE?.raw || summary?.forwardPE?.raw || null;
-        
-        // Get EPS - try trailing first, then forward
-        const eps = keyStats?.trailingEps?.raw || keyStats?.forwardEps?.raw || null;
-        
-        // Get dividend yield (convert from decimal to percentage)
-        const dividendYield = summary?.dividendYield?.raw ? summary.dividendYield.raw * 100 : null;
-        
-        // Get beta from either source
-        const beta = summary?.beta?.raw || keyStats?.beta?.raw || null;
-        
-        // Get average volume
-        const avgVolume = summary?.averageVolume?.raw || null;
-        
-        fundamentals = {
-          market_cap: marketCap,
-          pe_ratio: peRatio,
-          dividend_yield: dividendYield,
-          avg_volume: avgVolume,
-          beta: beta,
-          eps: eps,
-        };
-        
-        console.log(`[refresh-asset] Got fundamentals:`, JSON.stringify(fundamentals));
-      } else {
-        console.warn(`[refresh-asset] Quote summary API returned ${quoteResponse.status}`);
+      } catch (err) {
+        console.warn(`[refresh-asset] Firecrawl scrape failed:`, err);
       }
-    } catch (err) {
-      console.warn(`[refresh-asset] Failed to fetch fundamentals:`, err);
+    } else {
+      console.warn(`[refresh-asset] FIRECRAWL_API_KEY not configured, skipping fundamentals`);
     }
 
     // Update asset with latest data including currency
