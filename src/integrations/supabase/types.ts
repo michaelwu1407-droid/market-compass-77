@@ -392,6 +392,39 @@ export type Database = {
           },
         ]
       }
+      sync_state: {
+        Row: {
+          created_at: string | null
+          id: string
+          last_page: number | null
+          last_run: string | null
+          metadata: Json | null
+          status: string | null
+          total_pages: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id: string
+          last_page?: number | null
+          last_run?: string | null
+          metadata?: Json | null
+          status?: string | null
+          total_pages?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          last_page?: number | null
+          last_run?: string | null
+          metadata?: Json | null
+          status?: string | null
+          total_pages?: number | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       trader_holdings: {
         Row: {
           allocation_pct: number | null
