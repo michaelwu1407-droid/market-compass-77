@@ -1,14 +1,18 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, TrendingUp, AlertTriangle, Users, Sparkles, Star, CheckCircle2, Calendar, Target, Clock, BarChart3 } from 'lucide-react';
+import { ArrowLeft, TrendingUp, AlertTriangle, Users, Sparkles, Star, CheckCircle2, Calendar, Target, Clock, BarChart3, PieChart } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { RiskGauge } from '@/components/charts/RiskGauge';
 import { MonthlyReturnsGrid } from '@/components/charts/MonthlyReturnsGrid';
 import { AllocationPieChart } from '@/components/charts/AllocationPieChart';
+import { PerformanceBarChart } from '@/components/charts/PerformanceBarChart';
+import { PerformanceMetrics } from '@/components/trader/PerformanceMetrics';
+import { HoldingsTable } from '@/components/trader/HoldingsTable';
+import { DiversificationSection } from '@/components/trader/DiversificationSection';
+import { MarkdownContent } from '@/components/feed/MarkdownContent';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useTrader } from '@/hooks/useTraders';
 import { useTraderHoldings } from '@/hooks/useTraderHoldings';
@@ -221,7 +225,29 @@ export default function TraderDetailPage() {
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
-          {/* Monthly Returns */}
+          {/* Performance Metrics */}
+          <PerformanceMetrics 
+            performance={performance || []}
+            gain12m={trader.gain_12m}
+            gain24m={trader.gain_24m}
+          />
+
+          {/* Monthly Performance Chart */}
+          {performance && performance.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <BarChart3 className="h-4 w-4" />
+                  Monthly Performance
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <PerformanceBarChart data={performance} height={220} />
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Monthly Returns Grid */}
           {monthlyReturns.length > 0 && (
             <Card>
               <CardContent className="pt-6">
@@ -261,11 +287,17 @@ export default function TraderDetailPage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="portfolio">
+        <TabsContent value="portfolio" className="space-y-6">
+          {/* Diversification Section */}
+          <DiversificationSection holdings={holdings || []} />
+
           <div className="grid lg:grid-cols-3 gap-6">
             <Card className="lg:col-span-1">
               <CardHeader>
-                <CardTitle className="text-base">Allocation</CardTitle>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <PieChart className="h-4 w-4" />
+                  Allocation
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 {holdingsForChart.length > 0 ? (
@@ -280,47 +312,28 @@ export default function TraderDetailPage() {
                 <CardTitle>Current Holdings</CardTitle>
               </CardHeader>
               <CardContent className="p-0">
-                {holdings && holdings.length > 0 ? (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Asset</TableHead>
-                        <TableHead>Sector</TableHead>
-                        <TableHead className="text-right">Weight</TableHead>
-                        <TableHead className="text-right">P&L</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {holdings.map((holding) => (
-                        <TableRow 
-                          key={holding.id}
-                          className="cursor-pointer hover:bg-secondary/50"
-                          onClick={() => holding.asset_id && navigate(`/assets/${holding.asset_id}`)}
-                        >
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <div className="font-medium">{holding.assets?.name || 'Unknown'}</div>
-                              <Badge variant="secondary" className="text-xs">{holding.assets?.symbol || 'N/A'}</Badge>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-muted-foreground">{holding.assets?.sector || '-'}</TableCell>
-                          <TableCell className="text-right font-medium">{(holding.allocation_pct ?? holding.current_value)?.toFixed(1) || 0}%</TableCell>
-                          <TableCell className={cn("text-right font-medium", (holding.profit_loss_pct || 0) >= 0 ? "text-gain" : "text-loss")}>
-                            {(holding.profit_loss_pct || 0) >= 0 ? '+' : ''}{holding.profit_loss_pct?.toFixed(1) || 0}%
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                ) : (
-                  <p className="p-4 text-muted-foreground text-sm">No holdings data available</p>
-                )}
+                <HoldingsTable holdings={holdings || []} />
               </CardContent>
             </Card>
           </div>
         </TabsContent>
 
-        <TabsContent value="stats">
+        <TabsContent value="stats" className="space-y-6">
+          {/* Performance Chart */}
+          {performance && performance.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <BarChart3 className="h-4 w-4" />
+                  Historical Performance
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <PerformanceBarChart data={performance} height={250} />
+              </CardContent>
+            </Card>
+          )}
+
           <div className="grid md:grid-cols-2 gap-6">
             <Card>
               <CardHeader>
@@ -424,7 +437,7 @@ export default function TraderDetailPage() {
                 <div className="space-y-4">
                   {posts.map((post) => (
                     <div key={post.id} className="p-4 rounded-lg border border-border">
-                      <p className="text-sm mb-2">{post.content}</p>
+                      <MarkdownContent content={post.content} className="mb-3" />
                       <div className="flex items-center gap-4 text-xs text-muted-foreground">
                         <span>❤️ {post.likes || 0}</span>
                         <span>💬 {post.comments || 0}</span>

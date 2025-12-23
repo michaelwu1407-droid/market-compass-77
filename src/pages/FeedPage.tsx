@@ -9,6 +9,7 @@ import { usePosts } from '@/hooks/usePosts';
 import { useTraders } from '@/hooks/useTraders';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useFollowedTraders } from '@/hooks/useFollowedTraders';
+import { isValidPostContent } from '@/components/feed/MarkdownContent';
 import type { FeedItem, Post as FeedPost, Trader as FeedTrader } from '@/types';
 
 type FilterType = 'all' | 'following' | 'assets' | 'traders' | 'saved';
@@ -22,63 +23,65 @@ export default function FeedPage() {
   const { data: traders, isLoading: tradersLoading } = useTraders();
   const { followedTraderIds, isLoading: followsLoading, toggleFollow, isFollowing } = useFollowedTraders();
 
-  // Transform database posts to FeedItem format
-  const feedItems: FeedItem[] = (posts || []).map((post) => {
-    // Map database trader to FeedPost trader format
-    const mappedTrader: FeedTrader | undefined = post.traders ? {
-      id: post.traders.id,
-      etoro_trader_id: post.traders.etoro_username,
-      display_name: post.traders.display_name,
-      avatar_url: post.traders.avatar_url || '',
-      bio: post.traders.bio || '',
-      risk_score: post.traders.risk_score || 0,
-      return_12m: post.traders.gain_12m || 0,
-      return_24m: post.traders.gain_24m || 0,
-      max_drawdown: post.traders.max_drawdown || 0,
-      num_copiers: post.traders.copiers || 0,
-      style_tags: post.traders.tags || [],
-      created_at: post.traders.created_at || '',
-      updated_at: post.traders.updated_at || '',
-      profitable_weeks_pct: post.traders.profitable_weeks_pct || 0,
-      profitable_months_pct: post.traders.profitable_months_pct || 0,
-      aum: post.traders.aum,
-      active_since: post.traders.active_since || '',
-      country: post.traders.country || '',
-      verified: post.traders.verified || false,
-      avg_trade_duration_days: post.traders.avg_holding_time_days || 0,
-      trades_per_week: post.traders.avg_trades_per_week || 0,
-      win_rate: 0,
-      long_short_ratio: 0,
-      sharpe_ratio: null,
-      sortino_ratio: null,
-      daily_var: null,
-      beta: null,
-      monthly_returns: [],
-      performance_history: [],
-      copier_history: [],
-    } : undefined;
+  // Transform database posts to FeedItem format, filtering out garbage content
+  const feedItems: FeedItem[] = (posts || [])
+    .filter(post => isValidPostContent(post.content)) // Filter out garbage posts
+    .map((post) => {
+      // Map database trader to FeedPost trader format
+      const mappedTrader: FeedTrader | undefined = post.traders ? {
+        id: post.traders.id,
+        etoro_trader_id: post.traders.etoro_username,
+        display_name: post.traders.display_name,
+        avatar_url: post.traders.avatar_url || '',
+        bio: post.traders.bio || '',
+        risk_score: post.traders.risk_score || 0,
+        return_12m: post.traders.gain_12m || 0,
+        return_24m: post.traders.gain_24m || 0,
+        max_drawdown: post.traders.max_drawdown || 0,
+        num_copiers: post.traders.copiers || 0,
+        style_tags: post.traders.tags || [],
+        created_at: post.traders.created_at || '',
+        updated_at: post.traders.updated_at || '',
+        profitable_weeks_pct: post.traders.profitable_weeks_pct || 0,
+        profitable_months_pct: post.traders.profitable_months_pct || 0,
+        aum: post.traders.aum,
+        active_since: post.traders.active_since || '',
+        country: post.traders.country || '',
+        verified: post.traders.verified || false,
+        avg_trade_duration_days: post.traders.avg_holding_time_days || 0,
+        trades_per_week: post.traders.avg_trades_per_week || 0,
+        win_rate: 0,
+        long_short_ratio: 0,
+        sharpe_ratio: null,
+        sortino_ratio: null,
+        daily_var: null,
+        beta: null,
+        monthly_returns: [],
+        performance_history: [],
+        copier_history: [],
+      } : undefined;
 
-    const feedPost: FeedPost = {
-      id: post.id,
-      source: 'etoro',
-      source_post_id: post.etoro_post_id || '',
-      trader_id: post.trader_id,
-      asset_id: null,
-      text: post.content,
-      created_at: post.posted_at || post.created_at || '',
-      like_count: post.likes || 0,
-      comment_count: post.comments || 0,
-      raw_json: {},
-      trader: mappedTrader,
-    };
+      const feedPost: FeedPost = {
+        id: post.id,
+        source: 'etoro',
+        source_post_id: post.etoro_post_id || '',
+        trader_id: post.trader_id,
+        asset_id: null,
+        text: post.content,
+        created_at: post.posted_at || post.created_at || '',
+        like_count: post.likes || 0,
+        comment_count: post.comments || 0,
+        raw_json: {},
+        trader: mappedTrader,
+      };
 
-    return {
-      id: post.id,
-      type: 'post' as const,
-      data: feedPost,
-      created_at: post.posted_at || post.created_at || '',
-    };
-  });
+      return {
+        id: post.id,
+        type: 'post' as const,
+        data: feedPost,
+        created_at: post.posted_at || post.created_at || '',
+      };
+    });
 
   // Get real followed traders from the database
   const followedTraders = (traders || []).filter(t => followedTraderIds.includes(t.id));
