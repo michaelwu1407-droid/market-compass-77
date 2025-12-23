@@ -5,112 +5,153 @@ interface MarkdownContentProps {
   className?: string;
 }
 
-// Clean up scraped content - AGGRESSIVELY remove navigation/boilerplate from eToro pages
+// Extract ONLY the actual post content from scraped eToro pages
 function cleanContent(raw: string): string {
   let text = raw;
   
+  // First, try to extract just the post content after common markers
+  // Look for patterns like "[12d]" or "[13d]" followed by actual content
+  const postDatePattern = /\[(\d+[dhm])\]\([^)]+\)\s*(Edited\s*)?/gi;
+  const postMatches = text.split(postDatePattern);
+  
+  // If we found date markers, the actual post content is usually after them
+  if (postMatches.length > 1) {
+    // Find the last substantive content block (usually the actual post)
+    for (let i = postMatches.length - 1; i >= 0; i--) {
+      const segment = postMatches[i]?.trim();
+      // Skip short segments (dates, "Edited", etc.)
+      if (segment && segment.length > 100 && !segment.match(/^\d+[dhm]$/i) && segment !== 'Edited') {
+        // This might be the actual post content - clean it further
+        text = segment;
+        break;
+      }
+    }
+  }
+  
+  // Remove everything BEFORE the actual post content
+  // Common patterns that precede posts
+  const startMarkers = [
+    /^[\s\S]*?(?:Discussions\s*Top\s*All\s*Mentions\s*)/i,
+    /^[\s\S]*?(?:Profitable Weeks\s*[\d.]+%\s*)/i,
+    /^[\s\S]*?(?:Avg\. Risk Score[^)]+\)\s*\d+\s*)/i,
+  ];
+  
+  for (const pattern of startMarkers) {
+    text = text.replace(pattern, '');
+  }
+  
+  // Remove "Similar Traders" sections completely - they're not posts
+  if (text.includes('## Similar Traders') || text.startsWith('- [![')) {
+    return ''; // This is navigation, not a post
+  }
+  
   // Remove entire sections that are profile/navigation boilerplate
   const sectionPatterns = [
-    // Remove "Similar Traders" section entirely (contains avatars, percentages, names)
-    /Similar Traders[\s\S]*?(?=\n\n[A-Z]|\n\n#|$)/gi,
-    /Traders You Might Like[\s\S]*?(?=\n\n|$)/gi,
+    // Remove "Similar Traders" section entirely
+    /##?\s*Similar Traders[\s\S]*$/gi,
+    /Traders You Might Like[\s\S]*$/gi,
     
-    // Remove performance history blocks
-    /Performance \(Since[\s\S]*?(?=\n\n[A-Z]|\n\n#|$)/gi,
-    /Performance History[\s\S]*?(?=\n\n|$)/gi,
-    /^\s*\d{4}\s*$[\s\S]*?(?=\n\n[A-Z]|\n\n#|$)/gm,
+    // Remove performance blocks
+    /##?\s*Performance[\s\S]*?(?=\n\n[A-Z][a-z]|$)/gi,
+    /Return YTD[\s\S]*?Profitable Weeks\s*[\d.]+%/gi,
     
-    // Remove tables with years/percentages (performance data)
-    /\|\s*\d{4}\s*\|[\s\S]*?\|[\s\S]*?\|/gm,
-    /\+?\d+\.?\d*%\s*[-–]\s*\+?\d+\.?\d*%/g,
+    // Remove navigation headers with images/links
+    /^Copy\s*\n\[!\[/gm,
+    /^\[!\[.*?\]\(.*?\)\]\(.*?\)\s*$/gm,
     
-    // Remove entire profile header sections
-    /^#+\s*\[.*?\]\(.*?\)[\s\S]*?(?=\n\n)/gm,
+    // Remove profile header blocks
+    /^\[!\[.*?\]\(https:\/\/etoro-cdn[^)]+\)\]\([^)]+\)[\s\S]*?@\w+\s*Copy/gm,
     
-    // Remove asset/instrument sections that are navigation
-    /Top Instruments[\s\S]*?(?=\n\n|$)/gi,
-    /Portfolio Distribution[\s\S]*?(?=\n\n|$)/gi,
-    /Trading Stats[\s\S]*?(?=\n\n|$)/gi,
-    
-    // Remove footer/navigation sections
-    /eToro.*?regulated.*?[\s\S]*?$/gi,
+    // Remove footer/navigation
+    /eToro.*?regulated[\s\S]*$/gi,
     /Risk Warning[\s\S]*$/gi,
-    /CFDs are complex instruments[\s\S]*$/gi,
+    /CFDs are complex[\s\S]*$/gi,
+    
+    // Remove year-by-year performance lines
+    /^[-+]?\d+\.?\d*%\d{4}\s*$/gm,
+    /^\d{4}\s*$/gm,
+    /^[-+]?\d+\.?\d*%\s*$/gm,
   ];
   
   for (const pattern of sectionPatterns) {
     text = text.replace(pattern, '');
   }
   
-  // Remove specific boilerplate phrases and navigation elements
+  // Remove specific boilerplate elements
   const removePatterns = [
+    // Avatar and profile images
+    /!\[.*?\]\(https?:\/\/etoro-cdn[^)]+\)/g,
+    /\[!\[.*?\]\([^)]+\)\]\([^)]+\)/g,
+    
+    // Profile links with avatars
+    /\[!\[[^\]]*\]\([^)]+\)\s*[^\]]+\s*@\w+\]\([^)]+\)/g,
+    
+    // Stats and metrics
     /Risk Score:?\s*\d+/gi,
     /Copiers:?\s*[\d,]+/gi,
-    /^\s*\|.*\|.*$/gm, // markdown tables
-    /^[-|:]+$/gm, // table separators
-    /Follow\s+Copy/gi,
-    /^(Stats|About|Portfolio|Feed|Overview|Copy|Follow|Trade|Invest)$/gim,
-    /Log in.*?Register/gi,
-    /^\s*#+\s*$/gm, // empty headers
-    /!\[.*?\]\(https?:\/\/.*?\)/g, // Image links
-    /\[!\[.*?\]\(.*?\)\]\(.*?\)/g, // Nested image links
-    /^\s*\[\s*\]\s*$/gm, // Empty link brackets
-    /Popular Investor/gi,
-    /Copy this trader/gi,
-    /See performance/gi,
-    /View (portfolio|stats|feed|profile)/gi,
-    /\d+\s*(copiers|followers)/gi,
     /AUM:?\s*\$?[\d.]+[KMB]?/gi,
-    /^\s*[@#]\w+\s*$/gm, // Lone hashtags or mentions
+    /Return\s*(YTD|2Y|12M|24M)[\s:]+[-+]?\d+\.?\d*%/gi,
+    /Avg\.\s*Risk Score[^)]*\)\s*\d+/gi,
+    /Profitable Weeks\s*[\d.]+%/gi,
     
-    // Remove percentage-only lines (performance indicators)
-    /^[+-]?\d+\.?\d*%\s*$/gm,
+    // Navigation elements
+    /^(Stats|About|Portfolio|Feed|Overview|Copy|Follow|Trade|Invest|Top|All|Mentions)\s*$/gim,
+    /^Copy$/gm,
+    /Log in.*?Register/gi,
+    /Popular Investor/gi,
     
-    // Remove avatar image URLs
-    /https?:\/\/[^\s]*avatar[^\s]*/gi,
-    /https?:\/\/[^\s]*profile[^\s]*/gi,
-    /https?:\/\/etoro[^\s]*/gi,
+    // Markdown tables
+    /^\s*\|.*\|.*$/gm,
+    /^[-|:]+$/gm,
     
-    // Remove "X followers" style text
-    /\d+[KMB]?\s*(followers?|following|copiers?)/gi,
+    // Empty or malformed elements
+    /^\s*#+\s*$/gm,
+    /^\s*\[\s*\]\s*$/gm,
     
-    // Remove navigation breadcrumbs
-    /^(Home|Discover|Markets|People)\s*[>›]/gim,
+    // Country names alone on a line (from profile headers)
+    /^(Denmark|United Arab Emirates|Germany|United Kingdom|United States|France|Spain|Italy|Netherlands|Sweden|Norway|Finland|Australia|Canada|Japan|South Korea|Singapore|Hong Kong|Switzerland|Austria|Belgium|Ireland|Portugal|Poland|Czech Republic|Hungary|Romania|Bulgaria|Greece|Turkey|Israel|India|Brazil|Mexico|Argentina|Chile|Colombia|Peru|South Africa|Egypt|Nigeria|Kenya|Morocco|Philippines|Indonesia|Malaysia|Thailand|Vietnam|Taiwan|China)\s*$/gim,
     
-    // Remove "View on eToro" type CTAs
-    /View on \w+/gi,
-    /Open.*?Position/gi,
-    /Start.*?Copying/gi,
+    // Date links like [12d](url)
+    /\[\d+[dhm]\]\([^)]+\)/g,
+    /Edited/g,
     
-    // Remove profile stats lines
-    /^\s*(Invested in|Returns|Risk|Since)\s*[:|-]?\s*[\d.%KMB+-]+\s*$/gim,
-    
-    // Remove markdown links that are just usernames
-    /\[@\w+\]\([^)]+\)/g,
-    
-    // Remove lines that are just names/usernames
-    /^\s*[A-Z][a-z]+\s+[A-Z][a-z]+\s*$/gm,
+    // Percentage-only content
+    /^\d+\.?\d*%0%-\d+\.?\d*%$/gm,
   ];
   
   for (const pattern of removePatterns) {
     text = text.replace(pattern, '');
   }
   
-  // Clean up excessive whitespace and empty lines
+  // Clean up trader name + handle patterns at start
+  text = text.replace(/^[A-Z][a-z]+\s+(?:[A-Z][a-z]+\s+)?@\w+\s*/gm, '');
+  
+  // Clean up excessive whitespace
   text = text
     .replace(/\n{3,}/g, '\n\n')
     .replace(/^\s+$/gm, '')
+    .replace(/^\n+/, '')
     .trim();
   
-  // Skip mostly empty or garbage content (less than 50 chars of actual text)
-  const textOnly = text.replace(/[^a-zA-Z]/g, '');
-  if (textOnly.length < 50) {
+  // Reject content that's too short or still looks like garbage
+  const textOnly = text.replace(/[^a-zA-Z\s]/g, '').trim();
+  const wordCount = textOnly.split(/\s+/).filter(w => w.length > 2).length;
+  
+  // Need at least 10 real words for a valid post
+  if (wordCount < 10) {
     return '';
   }
   
   // Limit length for feed display
-  if (text.length > 800) {
-    text = text.substring(0, 800) + '...';
+  if (text.length > 1000) {
+    // Try to cut at a sentence boundary
+    const truncated = text.substring(0, 1000);
+    const lastPeriod = truncated.lastIndexOf('.');
+    if (lastPeriod > 700) {
+      text = truncated.substring(0, lastPeriod + 1);
+    } else {
+      text = truncated + '...';
+    }
   }
   
   return text;
