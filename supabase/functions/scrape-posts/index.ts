@@ -17,7 +17,6 @@ interface ScrapedPost {
 }
 
 function extractSymbols(text: string): string[] {
-  // Match $SYMBOL or standalone uppercase symbols
   const dollarSymbols = text.match(/\$([A-Z]{1,5})/g) || [];
   const symbols = dollarSymbols.map(s => s.replace('$', ''));
   return [...new Set(symbols)];
@@ -73,15 +72,12 @@ async function scrapeEtoroFeed(firecrawlApiKey: string, traderUsernames: string[
       const data = await response.json();
       const markdown = data.data?.markdown || data.markdown || '';
 
-      // Parse posts from markdown
-      // eToro feed typically shows posts with content, timestamps, and engagement
       const postBlocks = markdown.split(/---|\n\n\n/).filter((block: string) => block.trim().length > 50);
 
-      for (const block of postBlocks.slice(0, 10)) { // Limit to recent 10 posts
+      for (const block of postBlocks.slice(0, 10)) {
         const content = block.trim();
         if (content.length < 20) continue;
 
-        // Try to extract timestamp
         const timeMatch = content.match(/(\d+)\s*(hour|minute|day|week|month)s?\s*ago/i);
         let postedAt = new Date();
         if (timeMatch) {
@@ -94,13 +90,12 @@ async function scrapeEtoroFeed(firecrawlApiKey: string, traderUsernames: string[
           else if (unit.startsWith('month')) postedAt.setMonth(postedAt.getMonth() - value);
         }
 
-        // Extract engagement numbers
         const likesMatch = content.match(/(\d+)\s*(?:like|heart)/i);
         const commentsMatch = content.match(/(\d+)\s*comment/i);
 
         allPosts.push({
           trader_username: username,
-          content: content.substring(0, 1000), // Limit content length
+          content: content.substring(0, 1000),
           posted_at: postedAt.toISOString(),
           likes: likesMatch ? parseInt(likesMatch[1]) : 0,
           comments: commentsMatch ? parseInt(commentsMatch[1]) : 0,
@@ -130,30 +125,36 @@ serve(async (req) => {
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
     if (!FIRECRAWL_API_KEY) {
-      throw new Error('FIRECRAWL_API_KEY is not configured');
+      throw new Error('FIRECRAWL_API_KEY is not configured - this function requires Firecrawl');
     }
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
-    // Get trader usernames to scrape
+    // Parse request options
     let usernames: string[] = [];
+    let traderLimit = 10; // Default: only scrape top 10 traders to save credits
+    
     try {
       const body = await req.json();
       usernames = body.usernames || [];
+      traderLimit = body.traderLimit ?? 10;
     } catch {
-      // No body - get all traders from DB
+      // No body
     }
 
     if (usernames.length === 0) {
+      // Get traders from DB, ordered by copiers (most popular first)
       const { data: traders } = await supabase
         .from('traders')
-        .select('etoro_username')
-        .limit(20); // Limit to prevent rate limiting
+        .select('etoro_username, copiers')
+        .order('copiers', { ascending: false })
+        .limit(traderLimit);
       
       usernames = (traders || []).map(t => t.etoro_username);
     }
 
-    console.log(`Scraping posts for ${usernames.length} traders`);
+    console.log(`Scraping posts for ${usernames.length} traders (limit: ${traderLimit})`);
+    console.log(`Estimated Firecrawl credits: ~${usernames.length}`);
 
     const scrapedPosts = await scrapeEtoroFeed(FIRECRAWL_API_KEY, usernames);
     console.log(`Total scraped posts: ${scrapedPosts.length}`);
@@ -180,7 +181,6 @@ serve(async (req) => {
       }));
 
     if (postsToInsert.length > 0) {
-      // Insert new posts (avoiding duplicates via content matching would need a unique constraint)
       const { data: inserted, error } = await supabase
         .from('posts')
         .insert(postsToInsert)
@@ -199,6 +199,7 @@ serve(async (req) => {
           traders_processed: usernames.length,
           posts_scraped: scrapedPosts.length,
           posts_inserted: inserted?.length || 0,
+          firecrawl_credits_used: usernames.length,
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
@@ -210,6 +211,7 @@ serve(async (req) => {
         traders_processed: usernames.length,
         posts_scraped: scrapedPosts.length,
         posts_inserted: 0,
+        firecrawl_credits_used: usernames.length,
         message: 'No matching posts to insert',
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

@@ -31,47 +31,76 @@ serve(async (req) => {
       // No body provided
     }
 
-    // Fetch assets/instruments from Bullaware API
-    const bullwareUrl = symbols.length > 0
-      ? `https://api.bullaware.com/v1/instruments?symbols=${symbols.join(',')}`
-      : 'https://api.bullaware.com/v1/instruments';
-
-    console.log(`Fetching from Bullaware: ${bullwareUrl}`);
-
-    const bullwareResponse = await fetch(bullwareUrl, {
-      headers: {
-        'Authorization': `Bearer ${BULLAWARE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!bullwareResponse.ok) {
-      const errorText = await bullwareResponse.text();
-      console.error('Bullaware API error:', bullwareResponse.status, errorText);
-      throw new Error(`Bullaware API error: ${bullwareResponse.status}`);
-    }
-
-    const responseText = await bullwareResponse.text();
-    console.log('Raw Bullaware response (first 1000 chars):', responseText.substring(0, 1000));
-    
-    const bullwareData = JSON.parse(responseText);
-    console.log('Response type:', typeof bullwareData);
-    console.log('Response keys:', Array.isArray(bullwareData) ? 'ARRAY' : Object.keys(bullwareData));
-    
-    // Handle multiple possible response formats
-    const assets = bullwareData.data 
-      || bullwareData.instruments 
-      || bullwareData.assets
-      || bullwareData.items 
-      || bullwareData.results 
-      || (Array.isArray(bullwareData) ? bullwareData : []);
-    
-    console.log(`Received ${assets.length} assets from Bullaware`);
-
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
+    let allAssets: any[] = [];
+
+    if (symbols.length > 0) {
+      // Specific symbols requested
+      const bullwareUrl = `https://api.bullaware.com/v1/instruments?symbols=${symbols.join(',')}`;
+      console.log(`Fetching specific assets from Bullaware: ${bullwareUrl}`);
+
+      const response = await fetch(bullwareUrl, {
+        headers: {
+          'Authorization': `Bearer ${BULLAWARE_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Bullaware API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      allAssets = data.items || data.data || data.instruments || (Array.isArray(data) ? data : []);
+    } else {
+      // Fetch all with pagination
+      let page = 1;
+      const pageSize = 100;
+      let hasMore = true;
+
+      while (hasMore) {
+        const bullwareUrl = `https://api.bullaware.com/v1/instruments?page=${page}&limit=${pageSize}`;
+        console.log(`Fetching assets page ${page}...`);
+
+        const response = await fetch(bullwareUrl, {
+          headers: {
+            'Authorization': `Bearer ${BULLAWARE_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Bullaware API error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const items = data.items || data.data || data.instruments || (Array.isArray(data) ? data : []);
+        
+        allAssets.push(...items);
+        console.log(`Page ${page}: received ${items.length} assets (total: ${allAssets.length})`);
+
+        // Check if more pages
+        const total = data.total || data.totalCount;
+        if (total && allAssets.length >= total) {
+          hasMore = false;
+        } else if (items.length < pageSize) {
+          hasMore = false;
+        } else {
+          page++;
+          // Safety limit
+          if (page > 100) {
+            console.log('Reached page limit, stopping pagination');
+            hasMore = false;
+          }
+        }
+      }
+    }
+
+    console.log(`Total assets from Bullaware: ${allAssets.length}`);
+
     // Map Bullaware data to our assets table schema
-    const assetsToUpsert = assets.map((asset: any) => ({
+    const assetsToUpsert = allAssets.map((asset: any) => ({
       symbol: asset.symbol || asset.ticker,
       name: asset.name || asset.fullName,
       asset_type: asset.type || asset.assetType || 'stock',
