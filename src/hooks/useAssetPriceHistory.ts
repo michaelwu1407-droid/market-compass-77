@@ -34,5 +34,6 @@ export function useAssetPriceHistory(assetId: string | undefined) {
       })) as PriceHistoryPoint[];
     },
     enabled: !!assetId,
+    refetchInterval: 5 * 60 * 1000, // Refresh every 5 minutes
   });
 }

@@ -222,6 +222,7 @@ export default function AssetDetailPage() {
               data={priceHistory} 
               height={300}
               showRangeSelector={true}
+              currency={(asset as any).currency || 'USD'}
             />
           ) : (
             <div className="h-[200px] flex flex-col items-center justify-center text-muted-foreground">

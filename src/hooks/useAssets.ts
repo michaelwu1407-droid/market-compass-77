@@ -16,6 +16,7 @@ export function useAssets() {
       if (error) throw error;
       return data as Asset[];
     },
+    refetchInterval: 5 * 60 * 1000, // Refresh every 5 minutes
   });
 }
 
@@ -35,5 +36,6 @@ export function useAsset(assetId: string | undefined) {
       return data as Asset;
     },
     enabled: !!assetId,
+    refetchInterval: 5 * 60 * 1000, // Refresh every 5 minutes
   });
 }

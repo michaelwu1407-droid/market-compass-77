@@ -12,6 +12,7 @@ interface YahooChartResult {
       meta: {
         regularMarketPrice: number;
         previousClose: number;
+        chartPreviousClose?: number;
         fiftyTwoWeekHigh: number;
         fiftyTwoWeekLow: number;
         currency: string;
@@ -38,6 +39,7 @@ interface YahooQuoteResult {
       summaryDetail?: {
         marketCap?: { raw: number };
         trailingPE?: { raw: number };
+        forwardPE?: { raw: number };
         dividendYield?: { raw: number };
         averageVolume?: { raw: number };
         beta?: { raw: number };
@@ -46,12 +48,19 @@ interface YahooQuoteResult {
       };
       defaultKeyStatistics?: {
         trailingEps?: { raw: number };
+        forwardEps?: { raw: number };
         beta?: { raw: number };
+        enterpriseValue?: { raw: number };
       };
       price?: {
         regularMarketPrice?: { raw: number };
         regularMarketChange?: { raw: number };
         regularMarketChangePercent?: { raw: number };
+        currency?: string;
+        marketCap?: { raw: number };
+      };
+      financialData?: {
+        currentPrice?: { raw: number };
       };
     }];
     error: null | { code: string; description: string };
@@ -110,19 +119,22 @@ serve(async (req) => {
     const timestamps = result.timestamp || [];
     const quotes = result.indicators?.quote?.[0] || {};
 
+    // Extract currency from chart meta
+    const currency = meta.currency || 'USD';
+    
     console.log(`[refresh-asset] Got ${timestamps.length} price points for ${symbol}`);
-    console.log(`[refresh-asset] Current price: ${meta.regularMarketPrice}, Previous close: ${meta.previousClose}`);
+    console.log(`[refresh-asset] Currency: ${currency}, Current price: ${meta.regularMarketPrice}, Previous close: ${meta.previousClose}`);
 
     // Calculate price change
     const currentPrice = meta.regularMarketPrice;
-    const previousClose = meta.previousClose;
+    const previousClose = meta.chartPreviousClose || meta.previousClose;
     const priceChange = currentPrice - previousClose;
-    const priceChangePct = (priceChange / previousClose) * 100;
+    const priceChangePct = previousClose > 0 ? (priceChange / previousClose) * 100 : 0;
 
-    // Fetch fundamental data
+    // Fetch fundamental data with multiple modules for better coverage
     let fundamentals: any = {};
     try {
-      const quoteUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=summaryDetail,defaultKeyStatistics,price`;
+      const quoteUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=summaryDetail,defaultKeyStatistics,price,financialData`;
       console.log(`[refresh-asset] Fetching fundamentals from: ${quoteUrl}`);
       
       const quoteResponse = await fetch(quoteUrl, {
@@ -133,35 +145,59 @@ serve(async (req) => {
       
       if (quoteResponse.ok) {
         const quoteData: YahooQuoteResult = await quoteResponse.json();
-        const summary = quoteData.quoteSummary?.result?.[0]?.summaryDetail;
-        const keyStats = quoteData.quoteSummary?.result?.[0]?.defaultKeyStatistics;
+        const resultData = quoteData.quoteSummary?.result?.[0];
+        const summary = resultData?.summaryDetail;
+        const keyStats = resultData?.defaultKeyStatistics;
+        const priceData = resultData?.price;
+        
+        // Get market cap from price module first (more reliable), then summaryDetail
+        const marketCap = priceData?.marketCap?.raw || summary?.marketCap?.raw || null;
+        
+        // Get P/E ratio - try trailing first, then forward
+        const peRatio = summary?.trailingPE?.raw || summary?.forwardPE?.raw || null;
+        
+        // Get EPS - try trailing first, then forward
+        const eps = keyStats?.trailingEps?.raw || keyStats?.forwardEps?.raw || null;
+        
+        // Get dividend yield (convert from decimal to percentage)
+        const dividendYield = summary?.dividendYield?.raw ? summary.dividendYield.raw * 100 : null;
+        
+        // Get beta from either source
+        const beta = summary?.beta?.raw || keyStats?.beta?.raw || null;
+        
+        // Get average volume
+        const avgVolume = summary?.averageVolume?.raw || null;
         
         fundamentals = {
-          market_cap: summary?.marketCap?.raw || null,
-          pe_ratio: summary?.trailingPE?.raw || null,
-          dividend_yield: summary?.dividendYield?.raw ? summary.dividendYield.raw * 100 : null,
-          avg_volume: summary?.averageVolume?.raw || null,
-          beta: summary?.beta?.raw || keyStats?.beta?.raw || null,
-          eps: keyStats?.trailingEps?.raw || null,
+          market_cap: marketCap,
+          pe_ratio: peRatio,
+          dividend_yield: dividendYield,
+          avg_volume: avgVolume,
+          beta: beta,
+          eps: eps,
         };
-        console.log(`[refresh-asset] Got fundamentals:`, fundamentals);
+        
+        console.log(`[refresh-asset] Got fundamentals:`, JSON.stringify(fundamentals));
+      } else {
+        console.warn(`[refresh-asset] Quote summary API returned ${quoteResponse.status}`);
       }
     } catch (err) {
       console.warn(`[refresh-asset] Failed to fetch fundamentals:`, err);
     }
 
-    // Update asset with latest data
+    // Update asset with latest data including currency
     const assetUpdate = {
       current_price: currentPrice,
       price_change: priceChange,
       price_change_pct: priceChangePct,
       high_52w: meta.fiftyTwoWeekHigh || null,
       low_52w: meta.fiftyTwoWeekLow || null,
+      currency: currency,
       ...fundamentals,
       updated_at: new Date().toISOString(),
     };
 
-    console.log(`[refresh-asset] Updating asset:`, assetUpdate);
+    console.log(`[refresh-asset] Updating asset:`, JSON.stringify(assetUpdate));
 
     const { error: assetError } = await supabase
       .from('assets')
@@ -209,8 +245,10 @@ serve(async (req) => {
         success: true, 
         priceHistoryCount: priceHistory.length,
         currentPrice,
+        currency,
         priceChange,
-        priceChangePct
+        priceChangePct,
+        fundamentals
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
