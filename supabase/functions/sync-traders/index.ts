@@ -171,8 +171,21 @@ serve(async (req) => {
       throw new Error(`Bullaware API error: ${bullwareResponse.status}`);
     }
 
-    const bullwareData = await bullwareResponse.json();
-    const bullwareTraders = bullwareData.data || [];
+    const responseText = await bullwareResponse.text();
+    console.log('Raw Bullaware response (first 1000 chars):', responseText.substring(0, 1000));
+    
+    const bullwareData = JSON.parse(responseText);
+    console.log('Response type:', typeof bullwareData);
+    console.log('Response keys:', Array.isArray(bullwareData) ? 'ARRAY' : Object.keys(bullwareData));
+    
+    // Handle multiple possible response formats
+    const bullwareTraders = bullwareData.data 
+      || bullwareData.investors 
+      || bullwareData.traders
+      || bullwareData.items 
+      || bullwareData.results 
+      || (Array.isArray(bullwareData) ? bullwareData : []);
+    
     console.log(`Received ${bullwareTraders.length} traders from Bullaware`);
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
