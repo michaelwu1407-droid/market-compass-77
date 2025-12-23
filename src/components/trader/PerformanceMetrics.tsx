@@ -12,34 +12,33 @@ export function PerformanceMetrics({ performance, gain12m, gain24m }: Performanc
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth() + 1;
 
-  // Calculate YTD return
+  // Check if we have any monthly performance data
+  const hasPerformanceData = performance && performance.length > 0;
+
+  // Calculate YTD return - only if we have data
   const ytdData = performance.filter(p => p.year === currentYear && p.month <= currentMonth);
+  const hasYtdData = ytdData.length > 0;
   const ytdReturn = ytdData.reduce((acc, p) => {
     const monthReturn = p.return_pct || 0;
     return acc * (1 + monthReturn / 100);
   }, 1);
-  const ytdPct = (ytdReturn - 1) * 100;
+  const ytdPct = hasYtdData ? (ytdReturn - 1) * 100 : null;
 
-  // Calculate this month's return
+  // Calculate this month's return - only if we have data for this month
   const thisMonth = performance.find(p => p.year === currentYear && p.month === currentMonth);
-  const thisMonthReturn = thisMonth?.return_pct || 0;
+  const thisMonthReturn = thisMonth?.return_pct ?? null;
 
-  // Calculate 2Y and 5Y (if we have enough data)
+  // Calculate 5Y (if we have enough data)
   const sortedPerf = [...performance].sort((a, b) => {
     if (a.year !== b.year) return b.year - a.year;
     return b.month - a.month;
   });
   
-  const last24Months = sortedPerf.slice(0, 24);
   const last60Months = sortedPerf.slice(0, 60);
-
-  const calc2YReturn = last24Months.reduce((acc, p) => acc * (1 + (p.return_pct || 0) / 100), 1);
-  const twoYearPct = (calc2YReturn - 1) * 100;
-
   const calc5YReturn = last60Months.reduce((acc, p) => acc * (1 + (p.return_pct || 0) / 100), 1);
   const fiveYearPct = last60Months.length >= 24 ? (calc5YReturn - 1) * 100 : null;
 
-  // Calculate annualized return from 12m gain
+  // Use gain_12m for annualized return
   const annualizedReturn = gain12m;
 
   const MetricCard = ({ label, value, suffix = '%' }: { label: string; value: number | null; suffix?: string }) => {
@@ -78,7 +77,7 @@ export function PerformanceMetrics({ performance, gain12m, gain24m }: Performanc
       <MetricCard label="This Month" value={thisMonthReturn} />
       <MetricCard label="YTD" value={ytdPct} />
       <MetricCard label="1 Year" value={gain12m || null} />
-      <MetricCard label="2 Years" value={gain24m || twoYearPct} />
+      <MetricCard label="2 Years" value={gain24m ?? null} />
       <MetricCard label="5 Years" value={fiveYearPct} />
       <MetricCard label="Annualized" value={annualizedReturn || null} />
     </div>
