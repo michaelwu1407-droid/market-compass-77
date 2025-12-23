@@ -12,11 +12,12 @@ export function useTraderHoldings(traderId: string | undefined) {
     queryFn: async () => {
       if (!traderId) return [];
       
+      // Order by current_value as fallback since API often stores allocation there
       const { data, error } = await supabase
         .from('trader_holdings')
         .select('*, assets(*)')
         .eq('trader_id', traderId)
-        .order('allocation_pct', { ascending: false });
+        .order('current_value', { ascending: false });
       
       if (error) throw error;
       return data as TraderHolding[];
