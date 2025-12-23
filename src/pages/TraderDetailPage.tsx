@@ -319,6 +319,16 @@ export default function TraderDetailPage() {
         </TabsContent>
 
         <TabsContent value="stats" className="space-y-6">
+          {/* Performance Metrics */}
+          <PerformanceMetrics 
+            performance={performance || []}
+            gain12m={trader.gain_12m}
+            gain24m={trader.gain_24m}
+          />
+
+          {/* Diversification Section */}
+          <DiversificationSection holdings={holdings || []} />
+
           {/* Performance Chart */}
           {performance && performance.length > 0 && (
             <Card>
@@ -333,6 +343,28 @@ export default function TraderDetailPage() {
               </CardContent>
             </Card>
           )}
+
+          {/* Monthly Returns Grid */}
+          {monthlyReturns.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Monthly Returns Breakdown</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <MonthlyReturnsGrid returns={monthlyReturns} />
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Current Holdings */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Portfolio Holdings</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <HoldingsTable holdings={holdings || []} />
+            </CardContent>
+          </Card>
 
           <div className="grid md:grid-cols-2 gap-6">
             <Card>

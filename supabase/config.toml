@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.sync-worker]
 verify_jwt = false
+
+[functions.enrich-assets-yahoo]
+verify_jwt = false
