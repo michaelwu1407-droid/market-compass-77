@@ -85,21 +85,47 @@ async function scrapeEtoroFeed(firecrawlApiKey: string, traderUsernames: string[
       const data = await response.json();
       const markdown = data.data?.markdown || data.markdown || '';
 
-      // Filter out non-post content (navigation, stats, similar traders)
+      // Aggressively clean non-post content
       const cleanedMarkdown = markdown
-        .replace(/Similar Traders[\s\S]*?(?=\n\n\n|\z)/gi, '')
-        .replace(/Performance \(Since.*?\)[\s\S]*?(?=\n\n\n|\z)/gi, '')
-        .replace(/^\s*\|.*\|.*$/gm, '') // tables
-        .replace(/^[-|]+$/gm, '') // table separators
+        // Remove Similar Traders sections entirely
+        .replace(/Similar Traders[\s\S]*?(?=\n#{1,3}\s|\n\n\n|$)/gi, '')
+        // Remove Performance tables
+        .replace(/Performance \(Since.*?\)[\s\S]*?(?=\n#{1,3}\s|\n\n\n|$)/gi, '')
+        .replace(/Performance\s*\n\s*\|[\s\S]*?(?=\n\n\n|$)/gi, '')
+        // Remove all markdown tables (stats, performance)
+        .replace(/\|[^|]+\|[^|]+\|.*\n?/g, '')
+        .replace(/^\s*[-|:]+\s*$/gm, '')
+        // Remove navigation and UI elements
         .replace(/Follow\s+Copy/gi, '')
+        .replace(/Copy Trader/gi, '')
         .replace(/Risk Score:?\s*\d+/gi, '')
-        .replace(/Copiers:?\s*[\d,]+/gi, '');
+        .replace(/Copiers:?\s*[\d,]+/gi, '')
+        .replace(/AUM:?\s*\$?[\d,]+[KMB]?/gi, '')
+        // Remove stats lines
+        .replace(/^\s*(?:Risk|AUM|Return|Profit|Loss|Trades?|Portfolio):\s*.*$/gmi, '')
+        // Remove boilerplate text
+        .replace(/People who copy .* also copy/gi, '')
+        .replace(/Top instruments traded/gi, '')
+        .replace(/\[Copy\]/gi, '')
+        .replace(/\[Follow\]/gi, '')
+        // Remove image markdown
+        .replace(/!\[.*?\]\(.*?\)/g, '')
+        // Remove consecutive newlines
+        .replace(/\n{4,}/g, '\n\n\n');
       
+      // Split into post blocks and filter
       const postBlocks = cleanedMarkdown.split(/---|\n\n\n/).filter((block: string) => {
         const trimmed = block.trim();
-        // Filter out short blocks and navigation-like content
-        return trimmed.length > 50 && 
-               !trimmed.match(/^(Stats|About|Portfolio|Feed|Log in|Register)$/i);
+        // Must have real content (not just stats or nav)
+        if (trimmed.length < 50) return false;
+        // Skip navigation-like content
+        if (/^(Stats|About|Portfolio|Feed|Log in|Register|Copy|Follow)$/i.test(trimmed)) return false;
+        // Skip if mostly numbers/stats
+        const alphaRatio = (trimmed.match(/[a-zA-Z]/g) || []).length / trimmed.length;
+        if (alphaRatio < 0.3) return false;
+        // Skip if contains boilerplate patterns
+        if (/Similar Traders|People who copy|Top instruments/i.test(trimmed)) return false;
+        return true;
       });
 
       for (const block of postBlocks.slice(0, 10)) {

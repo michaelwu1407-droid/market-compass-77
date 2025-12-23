@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
-import { Heart, MessageCircle, TrendingUp, Eye, Sparkles, Star } from 'lucide-react';
+import { Heart, MessageCircle, TrendingUp, Eye, Sparkles, Star, Bookmark, BookmarkCheck } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -12,11 +12,22 @@ interface FeedCardProps {
   item: FeedItem;
   onAnalyse?: (item: FeedItem) => void;
   onStarForIC?: (item: FeedItem) => void;
+  onSave?: (postId: string) => void;
+  onUnsave?: (postId: string) => void;
+  isSaved?: boolean;
 }
 
-export function FeedCard({ item, onAnalyse, onStarForIC }: FeedCardProps) {
+export function FeedCard({ item, onAnalyse, onStarForIC, onSave, onUnsave, isSaved }: FeedCardProps) {
   const navigate = useNavigate();
   const timeAgo = formatDistanceToNow(new Date(item.created_at), { addSuffix: true });
+
+  const handleSaveToggle = (postId: string) => {
+    if (isSaved) {
+      onUnsave?.(postId);
+    } else {
+      onSave?.(postId);
+    }
+  };
 
   const handleViewTrader = (traderId: string) => {
     navigate(`/traders/${traderId}`);
@@ -94,6 +105,19 @@ export function FeedCard({ item, onAnalyse, onStarForIC }: FeedCardProps) {
           <Button variant="ghost" size="sm" onClick={() => onStarForIC?.(item)}>
             <Star className="h-3.5 w-3.5 mr-1" />
             Star for IC
+          </Button>
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={() => handleSaveToggle(post.id)}
+            className={isSaved ? "text-primary" : ""}
+          >
+            {isSaved ? (
+              <BookmarkCheck className="h-3.5 w-3.5 mr-1" />
+            ) : (
+              <Bookmark className="h-3.5 w-3.5 mr-1" />
+            )}
+            {isSaved ? 'Saved' : 'Save'}
           </Button>
         </div>
       </div>
