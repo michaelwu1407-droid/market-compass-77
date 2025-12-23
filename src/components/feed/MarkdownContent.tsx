@@ -5,17 +5,37 @@ interface MarkdownContentProps {
   className?: string;
 }
 
-// Clean up scraped content - remove navigation/boilerplate
+// Clean up scraped content - AGGRESSIVELY remove navigation/boilerplate from eToro pages
 function cleanContent(raw: string): string {
   let text = raw;
   
   // Remove entire sections that are profile/navigation boilerplate
   const sectionPatterns = [
+    // Remove "Similar Traders" section entirely (contains avatars, percentages, names)
     /Similar Traders[\s\S]*?(?=\n\n[A-Z]|\n\n#|$)/gi,
+    /Traders You Might Like[\s\S]*?(?=\n\n|$)/gi,
+    
+    // Remove performance history blocks
     /Performance \(Since[\s\S]*?(?=\n\n[A-Z]|\n\n#|$)/gi,
-    /^\s*\d{4}\s*$[\s\S]*?(?=\n\n[A-Z]|\n\n#|$)/gm, // Year-only lines followed by performance data
-    /\|\s*\d{4}\s*\|[\s\S]*?\|[\s\S]*?\|/gm, // Performance tables with years
-    /\+?\d+\.?\d*%\s*[-–]\s*\+?\d+\.?\d*%/g, // Range percentages like "+5.2% - +12.3%"
+    /Performance History[\s\S]*?(?=\n\n|$)/gi,
+    /^\s*\d{4}\s*$[\s\S]*?(?=\n\n[A-Z]|\n\n#|$)/gm,
+    
+    // Remove tables with years/percentages (performance data)
+    /\|\s*\d{4}\s*\|[\s\S]*?\|[\s\S]*?\|/gm,
+    /\+?\d+\.?\d*%\s*[-–]\s*\+?\d+\.?\d*%/g,
+    
+    // Remove entire profile header sections
+    /^#+\s*\[.*?\]\(.*?\)[\s\S]*?(?=\n\n)/gm,
+    
+    // Remove asset/instrument sections that are navigation
+    /Top Instruments[\s\S]*?(?=\n\n|$)/gi,
+    /Portfolio Distribution[\s\S]*?(?=\n\n|$)/gi,
+    /Trading Stats[\s\S]*?(?=\n\n|$)/gi,
+    
+    // Remove footer/navigation sections
+    /eToro.*?regulated.*?[\s\S]*?$/gi,
+    /Risk Warning[\s\S]*$/gi,
+    /CFDs are complex instruments[\s\S]*$/gi,
   ];
   
   for (const pattern of sectionPatterns) {
@@ -29,19 +49,47 @@ function cleanContent(raw: string): string {
     /^\s*\|.*\|.*$/gm, // markdown tables
     /^[-|:]+$/gm, // table separators
     /Follow\s+Copy/gi,
-    /^(Stats|About|Portfolio|Feed|Overview|Copy|Follow)$/gim,
+    /^(Stats|About|Portfolio|Feed|Overview|Copy|Follow|Trade|Invest)$/gim,
     /Log in.*?Register/gi,
     /^\s*#+\s*$/gm, // empty headers
-    /!\[.*?\]\(https?:\/\/.*?\)/g, // Image links (we'll handle images separately)
+    /!\[.*?\]\(https?:\/\/.*?\)/g, // Image links
     /\[!\[.*?\]\(.*?\)\]\(.*?\)/g, // Nested image links
     /^\s*\[\s*\]\s*$/gm, // Empty link brackets
     /Popular Investor/gi,
     /Copy this trader/gi,
     /See performance/gi,
-    /View (portfolio|stats|feed)/gi,
+    /View (portfolio|stats|feed|profile)/gi,
     /\d+\s*(copiers|followers)/gi,
     /AUM:?\s*\$?[\d.]+[KMB]?/gi,
-    /^\s*[@#]\w+\s*$/gm, // Lone hashtags or mentions on their own line
+    /^\s*[@#]\w+\s*$/gm, // Lone hashtags or mentions
+    
+    // Remove percentage-only lines (performance indicators)
+    /^[+-]?\d+\.?\d*%\s*$/gm,
+    
+    // Remove avatar image URLs
+    /https?:\/\/[^\s]*avatar[^\s]*/gi,
+    /https?:\/\/[^\s]*profile[^\s]*/gi,
+    /https?:\/\/etoro[^\s]*/gi,
+    
+    // Remove "X followers" style text
+    /\d+[KMB]?\s*(followers?|following|copiers?)/gi,
+    
+    // Remove navigation breadcrumbs
+    /^(Home|Discover|Markets|People)\s*[>›]/gim,
+    
+    // Remove "View on eToro" type CTAs
+    /View on \w+/gi,
+    /Open.*?Position/gi,
+    /Start.*?Copying/gi,
+    
+    // Remove profile stats lines
+    /^\s*(Invested in|Returns|Risk|Since)\s*[:|-]?\s*[\d.%KMB+-]+\s*$/gim,
+    
+    // Remove markdown links that are just usernames
+    /\[@\w+\]\([^)]+\)/g,
+    
+    // Remove lines that are just names/usernames
+    /^\s*[A-Z][a-z]+\s+[A-Z][a-z]+\s*$/gm,
   ];
   
   for (const pattern of removePatterns) {
@@ -54,17 +102,24 @@ function cleanContent(raw: string): string {
     .replace(/^\s+$/gm, '')
     .trim();
   
-  // Skip mostly empty content
-  if (text.length < 20) {
+  // Skip mostly empty or garbage content (less than 50 chars of actual text)
+  const textOnly = text.replace(/[^a-zA-Z]/g, '');
+  if (textOnly.length < 50) {
     return '';
   }
   
   // Limit length for feed display
-  if (text.length > 600) {
-    text = text.substring(0, 600) + '...';
+  if (text.length > 800) {
+    text = text.substring(0, 800) + '...';
   }
   
   return text;
+}
+
+// Check if content is mostly garbage/boilerplate
+export function isValidPostContent(content: string): boolean {
+  const cleaned = cleanContent(content);
+  return cleaned.length >= 50;
 }
 
 export function MarkdownContent({ content, className = '' }: MarkdownContentProps) {
