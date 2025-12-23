@@ -232,12 +232,12 @@ export function AnalysisInput({ onSubmit, isLoading, preselectedTrader, preselec
               <FileText className="h-4 w-4" />
               Analysis Template
             </Label>
-            <Select value={selectedTemplateId} onValueChange={setSelectedTemplateId}>
+            <Select value={selectedTemplateId || "none"} onValueChange={(v) => setSelectedTemplateId(v === "none" ? "" : v)}>
               <SelectTrigger>
                 <SelectValue placeholder="Select a template (optional)" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">No template</SelectItem>
+                <SelectItem value="none">No template</SelectItem>
                 {templates.map((template) => (
                   <SelectItem key={template.id} value={template.id}>
                     <div className="flex flex-col">
