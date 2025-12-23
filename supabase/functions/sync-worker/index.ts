@@ -490,18 +490,17 @@ async function syncTraderDetailsBatch(
         const riskData = await riskRes.json();
         console.log(`[sync-worker] Risk score response for ${trader.etoro_username}:`, JSON.stringify(riskData, null, 2).slice(0, 500));
         
-        // Extract risk score - could be in various formats
-        const data = riskData.data || riskData;
-        if (Array.isArray(data) && data.length > 0) {
-          // If it's an array, get the latest value
-          const latest = data[data.length - 1];
-          riskScoreValue = latest.value ?? latest.riskScore ?? latest.risk ?? latest;
-        } else if (typeof data === 'number') {
-          riskScoreValue = data;
-        } else if (data.value !== undefined) {
-          riskScoreValue = data.value;
-        } else if (data.riskScore !== undefined) {
-          riskScoreValue = data.riskScore;
+        // API returns { points: [{ date, riskScore, minRiskScore, maxRiskScore }, ...] }
+        // Get the latest riskScore from the points array
+        const points = riskData.points || riskData.data || [];
+        if (Array.isArray(points) && points.length > 0) {
+          // Get the last point (most recent)
+          const latest = points[points.length - 1];
+          riskScoreValue = latest.riskScore ?? latest.risk ?? latest.value ?? null;
+        } else if (typeof riskData === 'number') {
+          riskScoreValue = riskData;
+        } else if (riskData.riskScore !== undefined) {
+          riskScoreValue = riskData.riskScore;
         }
         
         if (riskScoreValue !== null) {
@@ -510,6 +509,8 @@ async function syncTraderDetailsBatch(
             .from('traders')
             .update({ risk_score: riskScoreValue })
             .eq('id', trader.id);
+        } else {
+          console.log(`[sync-worker] Could not extract risk score for ${trader.etoro_username}`);
         }
       } else {
         console.log(`[sync-worker] Risk score fetch failed for ${trader.etoro_username}: ${riskRes.status}`);
