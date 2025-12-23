@@ -7,10 +7,12 @@ import {
   ClipboardCheck,
   ChevronLeft,
   ChevronRight,
-  AlertTriangle
+  AlertTriangle,
+  Settings
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { useIsAdmin } from '@/hooks/useIsAdmin';
 
 const navItems = [
   { path: '/', icon: MessageSquare, label: 'Feed' },
@@ -27,6 +29,8 @@ interface SidebarProps {
 }
 
 export function Sidebar({ collapsed, onToggle }: SidebarProps) {
+  const { isAdmin } = useIsAdmin();
+
   return (
     <aside className={cn(
       "fixed left-0 top-16 h-[calc(100vh-64px)] bg-card border-r border-border transition-all duration-300 z-40",
@@ -63,6 +67,23 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               {!collapsed && <span>{item.label}</span>}
             </NavLink>
           ))}
+
+          {/* Admin link - only visible to admins */}
+          {isAdmin && (
+            <NavLink
+              to="/admin"
+              className={({ isActive }) => cn(
+                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                isActive 
+                  ? "bg-primary text-primary-foreground" 
+                  : "text-muted-foreground hover:text-foreground hover:bg-secondary",
+                collapsed && "justify-center px-2"
+              )}
+            >
+              <Settings className="h-5 w-5 flex-shrink-0" />
+              {!collapsed && <span>Admin Sync</span>}
+            </NavLink>
+          )}
         </nav>
 
         {/* Footer */}
