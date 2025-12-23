@@ -406,6 +406,68 @@ const INSTRUMENT_ID_MAP: Record<string, { symbol: string; type: string }> = {
   '1147': { symbol: 'XLU', type: 'etf' },
   '1148': { symbol: 'XLB', type: 'etf' },
   '1149': { symbol: 'XLRE', type: 'etf' },
+
+  // Additional discovered from logs - commonly unknown instrumentIds
+  '1030': { symbol: 'OIL_WTI', type: 'commodity' },
+  '1183': { symbol: 'LINK', type: 'crypto' }, // Chainlink
+  '1222': { symbol: 'UNI', type: 'crypto' }, // Uniswap
+  '1227': { symbol: 'XTZ', type: 'crypto' }, // Tezos
+  '1967': { symbol: 'MANA', type: 'crypto' }, // Decentraland
+  '2043': { symbol: 'SAND', type: 'crypto' }, // The Sandbox
+  '2081': { symbol: 'APE', type: 'crypto' }, // ApeCoin
+  '2219': { symbol: 'FTT', type: 'crypto' }, // FTX Token (historical)
+  '2282': { symbol: 'NEAR', type: 'crypto' }, // NEAR Protocol
+  '2458': { symbol: 'ALGO', type: 'crypto' }, // Algorand
+  '2511': { symbol: 'ATOM', type: 'crypto' }, // Cosmos
+  '2529': { symbol: 'AXS', type: 'crypto' }, // Axie Infinity
+  '2585': { symbol: 'FIL', type: 'crypto' }, // Filecoin
+  '2659': { symbol: 'ICP', type: 'crypto' }, // Internet Computer
+  '4149': { symbol: 'ARB', type: 'crypto' }, // Arbitrum
+  '4543': { symbol: 'OP', type: 'crypto' }, // Optimism
+  '6168': { symbol: 'LDO', type: 'crypto' }, // Lido DAO
+  '6380': { symbol: 'AAVE', type: 'crypto' }, // Aave
+  '6391': { symbol: 'CRV', type: 'crypto' }, // Curve DAO
+  '7018': { symbol: 'GMX', type: 'crypto' }, // GMX
+  '7528': { symbol: 'INJ', type: 'crypto' }, // Injective
+  '8611': { symbol: 'TIA', type: 'crypto' }, // Celestia
+  '9810': { symbol: 'APP', type: 'stock' }, // AppLovin
+  '9817': { symbol: 'MSTR', type: 'stock' }, // MicroStrategy
+
+  // More popular stocks by eToro instrumentId
+  '3100': { symbol: 'SHOP', type: 'stock' },
+  '3101': { symbol: 'TWLO', type: 'stock' },
+  '3102': { symbol: 'ROKU', type: 'stock' },
+  '3103': { symbol: 'TTD', type: 'stock' },
+  '3104': { symbol: 'OKTA', type: 'stock' },
+  '3105': { symbol: 'MDB', type: 'stock' },
+  '3106': { symbol: 'ZM', type: 'stock' },
+  '3107': { symbol: 'DOCU', type: 'stock' },
+  '3108': { symbol: 'SPOT', type: 'stock' },
+  '3109': { symbol: 'PINS', type: 'stock' },
+  '3110': { symbol: 'SNAP', type: 'stock' },
+  '3111': { symbol: 'LYFT', type: 'stock' },
+  '3112': { symbol: 'BYND', type: 'stock' },
+  
+  // Gaming and entertainment
+  '5001': { symbol: 'RBLX', type: 'stock' },
+  '5002': { symbol: 'U', type: 'stock' }, // Unity
+  '5003': { symbol: 'TTWO', type: 'stock' },
+  '5004': { symbol: 'ATVI', type: 'stock' }, // Activision
+  '5005': { symbol: 'EA', type: 'stock' },
+  
+  // EV and clean energy
+  '6001': { symbol: 'LCID', type: 'stock' },
+  '6002': { symbol: 'RIVN', type: 'stock' },
+  '6003': { symbol: 'FSR', type: 'stock' }, // Fisker
+  '6004': { symbol: 'NIO', type: 'stock' },
+  '6005': { symbol: 'XPEV', type: 'stock' },
+  '6006': { symbol: 'LI', type: 'stock' },
+  '6007': { symbol: 'PLUG', type: 'stock' },
+  '6008': { symbol: 'FCEL', type: 'stock' },
+  '6009': { symbol: 'BE', type: 'stock' }, // Bloom Energy
+  '6010': { symbol: 'ENPH', type: 'stock' },
+  '6011': { symbol: 'SEDG', type: 'stock' },
+  '6012': { symbol: 'RUN', type: 'stock' }, // Sunrun
 };
 
 // Infer exchange/country from symbol suffix (e.g. ".L" = London, ".PA" = Paris)

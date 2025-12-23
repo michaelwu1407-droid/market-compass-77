@@ -26,3 +26,6 @@ verify_jwt = false
 
 [functions.fetch-daily-prices]
 verify_jwt = false
+
+[functions.report-qa]
+verify_jwt = false

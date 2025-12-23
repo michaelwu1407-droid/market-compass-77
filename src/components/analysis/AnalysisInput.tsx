@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Sparkles, Check, ChevronsUpDown, User } from 'lucide-react';
+import { Search, Sparkles, Check, ChevronsUpDown, User, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -10,8 +10,10 @@ import { Label } from '@/components/ui/label';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { useTraders } from '@/hooks/useTraders';
+import { useAnalysisTemplates, type AnalysisTemplate } from '@/hooks/useAnalysisTemplates';
 import type { ReportType, Horizon } from '@/types';
 
 interface PreselectedTrader {
@@ -29,6 +31,7 @@ interface AnalysisInputProps {
     horizon: Horizon;
     extraInstructions: string;
     outputMode: 'quick' | 'full';
+    templateId?: string;
   }) => void;
   isLoading?: boolean;
   preselectedTrader?: PreselectedTrader;
@@ -46,8 +49,10 @@ export function AnalysisInput({ onSubmit, isLoading, preselectedTrader, preselec
   const [outputMode, setOutputMode] = useState<'quick' | 'full'>('quick');
   const [traderSearchOpen, setTraderSearchOpen] = useState(false);
   const [traderSearchQuery, setTraderSearchQuery] = useState('');
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
 
   const { data: traders, isLoading: tradersLoading } = useTraders();
+  const { data: templates } = useAnalysisTemplates();
 
   // Handle preselected trader
   useEffect(() => {
@@ -71,15 +76,16 @@ export function AnalysisInput({ onSubmit, isLoading, preselectedTrader, preselec
     // For stock analysis, use search query
     const assets = reportType !== 'trader_portfolio' ? [searchQuery.toUpperCase()] : [];
     // For trader analysis, use selected trader ID
-    const traders = reportType === 'trader_portfolio' ? selectedTraders : [];
+    const tradersToUse = reportType === 'trader_portfolio' ? selectedTraders : [];
     
     onSubmit({
       reportType,
       assets,
-      traderIds: traders,
+      traderIds: tradersToUse,
       horizon,
       extraInstructions,
       outputMode,
+      templateId: selectedTemplateId || undefined,
     });
   };
 
@@ -219,10 +225,38 @@ export function AnalysisInput({ onSubmit, isLoading, preselectedTrader, preselec
           )}
         </div>
 
+        {/* Template Selector */}
+        {templates && templates.length > 0 && (
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2">
+              <FileText className="h-4 w-4" />
+              Analysis Template
+            </Label>
+            <Select value={selectedTemplateId} onValueChange={setSelectedTemplateId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a template (optional)" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">No template</SelectItem>
+                {templates.map((template) => (
+                  <SelectItem key={template.id} value={template.id}>
+                    <div className="flex flex-col">
+                      <span>{template.name}</span>
+                      {template.description && (
+                        <span className="text-xs text-muted-foreground">{template.description}</span>
+                      )}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
         {/* Horizon */}
         <div className="space-y-2">
           <Label>Investment Horizon</Label>
-          <RadioGroup 
+          <RadioGroup
             value={horizon} 
             onValueChange={(v) => setHorizon(v as Horizon)}
             className="flex gap-4"

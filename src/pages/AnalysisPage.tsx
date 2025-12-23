@@ -29,6 +29,7 @@ export default function AnalysisPage() {
     horizon: Horizon;
     extraInstructions: string;
     outputMode: 'quick' | 'full';
+    templateId?: string;
   }) => {
     setIsLoading(true);
     setResult(null);
@@ -42,6 +43,7 @@ export default function AnalysisPage() {
           horizon: data.horizon,
           extraInstructions: data.extraInstructions,
           outputMode: data.outputMode,
+          templateId: data.templateId,
         },
       });
 
@@ -122,7 +124,8 @@ export default function AnalysisPage() {
         
         {result && (
           <AnalysisResult 
-            report={result} 
+            report={result}
+            reportId={reportId || undefined}
             onSave={handleSave}
             onStarForIC={handleStarForIC}
           />

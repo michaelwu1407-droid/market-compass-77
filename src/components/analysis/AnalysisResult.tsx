@@ -4,14 +4,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import type { Report } from '@/types';
 import { cn } from '@/lib/utils';
+import { AnalysisQAChat } from './AnalysisQAChat';
 
 interface AnalysisResultProps {
   report: Partial<Report>;
+  reportId?: string;
   onSave?: () => void;
   onStarForIC?: () => void;
 }
 
-export function AnalysisResult({ report, onSave, onStarForIC }: AnalysisResultProps) {
+export function AnalysisResult({ report, reportId, onSave, onStarForIC }: AnalysisResultProps) {
   const ratingColors = {
     buy: 'bg-gain/10 text-gain border-gain',
     hold: 'bg-warning/10 text-warning border-warning',
@@ -100,6 +102,9 @@ export function AnalysisResult({ report, onSave, onStarForIC }: AnalysisResultPr
             }} />
           </div>
         )}
+
+        {/* Q&A Chat */}
+        <AnalysisQAChat report={report} reportId={reportId} />
       </CardContent>
     </Card>
   );
