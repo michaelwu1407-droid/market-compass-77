@@ -6,13 +6,39 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ReportTable } from '@/components/ic/ReportTable';
 import { ReportKanban } from '@/components/ic/ReportKanban';
-import { reports } from '@/data/mockData';
-import type { Report, ReportStatus } from '@/types';
+import { useReports, useUpdateReport, DBReport } from '@/hooks/useReports';
+import type { Report, ReportStatus, Rating } from '@/types';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useNavigate } from 'react-router-dom';
 
 type ViewMode = 'table' | 'kanban';
+
+// Transform DB report to frontend Report type
+function transformReport(dbReport: DBReport): Report {
+  return {
+    id: dbReport.id,
+    user_id: dbReport.created_by || '',
+    report_type: (dbReport.report_type as Report['report_type']) || 'single_stock',
+    title: dbReport.title,
+    input_assets: dbReport.input_assets || [],
+    input_trader_ids: dbReport.input_trader_ids || [],
+    horizon: (dbReport.horizon as Report['horizon']) || '12m',
+    raw_prompt: '',
+    raw_response: dbReport.raw_response || '',
+    summary: dbReport.summary || '',
+    upside_pct_estimate: dbReport.upside_pct_estimate,
+    rating: dbReport.rating as Rating | null,
+    score_6m: dbReport.score_6m,
+    score_12m: dbReport.score_12m,
+    score_long_term: dbReport.score_long_term,
+    status: (dbReport.status as ReportStatus) || 'to_review',
+    created_at: dbReport.created_at || new Date().toISOString(),
+    updated_at: dbReport.updated_at || new Date().toISOString(),
+  };
+}
 
 export default function ICPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('table');
@@ -22,6 +48,12 @@ export default function ICPage() {
   const [horizonFilter, setHorizonFilter] = useState('all');
   const [sortBy, setSortBy] = useState('created_at');
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
+  const navigate = useNavigate();
+
+  const { data: dbReports, isLoading, error } = useReports({ starredForIC: true });
+  const updateReport = useUpdateReport();
+
+  const reports = (dbReports || []).map(transformReport);
 
   // Filter and sort reports
   let filteredReports = [...reports];
@@ -73,6 +105,36 @@ export default function ICPage() {
     rejected: 'bg-loss/10 text-loss',
   };
 
+  const handleRatingChange = (rating: string) => {
+    if (selectedReport) {
+      updateReport.mutate({ id: selectedReport.id, rating });
+      setSelectedReport({ ...selectedReport, rating: rating as Rating });
+    }
+  };
+
+  const handleStatusChange = (status: string) => {
+    if (selectedReport) {
+      updateReport.mutate({ id: selectedReport.id, status });
+      setSelectedReport({ ...selectedReport, status: status as ReportStatus });
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="max-w-7xl mx-auto">
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold mb-1">Investment Committee</h1>
+          <p className="text-muted-foreground">Manage and review starred reports</p>
+        </div>
+        <div className="space-y-4">
+          {[...Array(5)].map((_, i) => (
+            <Skeleton key={i} className="h-16 rounded-lg" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-7xl mx-auto">
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-6">
@@ -80,7 +142,7 @@ export default function ICPage() {
           <h1 className="text-2xl font-bold mb-1">Investment Committee</h1>
           <p className="text-muted-foreground">Manage and review starred reports</p>
         </div>
-        <Button>
+        <Button onClick={() => navigate('/analysis')}>
           <Plus className="h-4 w-4 mr-2" />
           New Report
         </Button>
@@ -170,7 +232,12 @@ export default function ICPage() {
       </div>
 
       {/* Content */}
-      {viewMode === 'table' ? (
+      {filteredReports.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground">
+          <p>No starred reports yet</p>
+          <p className="text-sm mt-2">Create a report and star it for IC review</p>
+        </div>
+      ) : viewMode === 'table' ? (
         <ReportTable reports={filteredReports} onSelect={setSelectedReport} />
       ) : (
         <ReportKanban reports={filteredReports} onSelect={setSelectedReport} />
@@ -236,7 +303,7 @@ export default function ICPage() {
                 </div>
 
                 <div className="flex gap-2">
-                  <Select defaultValue={selectedReport.rating || ''}>
+                  <Select value={selectedReport.rating || ''} onValueChange={handleRatingChange}>
                     <SelectTrigger className="w-32">
                       <SelectValue placeholder="Rating" />
                     </SelectTrigger>
@@ -247,7 +314,7 @@ export default function ICPage() {
                     </SelectContent>
                   </Select>
 
-                  <Select defaultValue={selectedReport.status}>
+                  <Select value={selectedReport.status} onValueChange={handleStatusChange}>
                     <SelectTrigger className="w-40">
                       <SelectValue />
                     </SelectTrigger>

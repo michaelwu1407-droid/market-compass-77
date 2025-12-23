@@ -4,6 +4,8 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { TraderCard } from '@/components/traders/TraderCard';
 import { useTraders } from '@/hooks/useTraders';
+import { useFollowedTraders } from '@/hooks/useFollowedTraders';
+import { useAuth } from '@/contexts/AuthContext';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -14,18 +16,11 @@ export default function TradersPage() {
   const [filter, setFilter] = useState<TraderFilter>('trending');
   const [minTrackRecord, setMinTrackRecord] = useState('12m');
   const [maxRisk, setMaxRisk] = useState([7]);
-  const [followingIds, setFollowingIds] = useState<string[]>([]);
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const { data: traders, isLoading, error } = useTraders();
-
-  const handleFollow = (traderId: string) => {
-    setFollowingIds(prev => 
-      prev.includes(traderId) 
-        ? prev.filter(id => id !== traderId)
-        : [...prev, traderId]
-    );
-  };
+  const { followedTraderIds, isFollowing, toggleFollow, isLoading: followsLoading } = useFollowedTraders();
 
   const handleAnalyse = (traderId: string) => {
     navigate(`/analysis?trader=${traderId}`);
@@ -43,7 +38,7 @@ export default function TradersPage() {
   let filteredTraders = [...(traders || [])];
   
   if (filter === 'following') {
-    filteredTraders = filteredTraders.filter(t => followingIds.includes(t.id));
+    filteredTraders = filteredTraders.filter(t => followedTraderIds.includes(t.id));
   } else if (filter === 'most_copied') {
     filteredTraders = filteredTraders.sort((a, b) => (b.copiers || 0) - (a.copiers || 0));
   }
@@ -87,7 +82,7 @@ export default function TradersPage() {
           <TabsList>
             <TabsTrigger value="trending">Trending</TabsTrigger>
             <TabsTrigger value="most_copied">Most Copied</TabsTrigger>
-            <TabsTrigger value="following">Following ({followingIds.length})</TabsTrigger>
+            <TabsTrigger value="following">Following ({followedTraderIds.length})</TabsTrigger>
           </TabsList>
         </Tabs>
       </div>
@@ -143,8 +138,8 @@ export default function TradersPage() {
           <TraderCard
             key={trader.id}
             trader={trader}
-            isFollowing={followingIds.includes(trader.id)}
-            onFollow={() => handleFollow(trader.id)}
+            isFollowing={isFollowing(trader.id)}
+            onFollow={() => toggleFollow(trader.id)}
             onAnalyse={() => handleAnalyse(trader.id)}
             onStarForIC={() => handleStarForIC(trader.id)}
             onClick={() => handleTraderClick(trader.id)}
