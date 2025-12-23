@@ -195,26 +195,42 @@ serve(async (req) => {
     for (const trader of bullwareTraders) {
       const username = trader.username || trader.userName;
       
+      // Helper to parse AUM strings like "$5M+" to numbers
+      const parseAum = (value: any): number | null => {
+        if (value === null || value === undefined) return null;
+        if (typeof value === 'number') return value;
+        const str = String(value).replace(/[$,+]/g, '').trim();
+        const match = str.match(/^([\d.]+)\s*([KMB])?$/i);
+        if (!match) return null;
+        let num = parseFloat(match[1]);
+        if (isNaN(num)) return null;
+        const suffix = (match[2] || '').toUpperCase();
+        if (suffix === 'K') num *= 1000;
+        if (suffix === 'M') num *= 1000000;
+        if (suffix === 'B') num *= 1000000000;
+        return num;
+      };
+      
       // Prepare Bullaware data
       const bullwareRecord = {
         etoro_username: username,
-        display_name: trader.displayName || trader.fullName || username,
+        display_name: trader.displayName || trader.fullName || trader.fullname || username,
         avatar_url: trader.avatarUrl || trader.avatar,
         bio: trader.aboutMe || trader.bio || null,
         country: trader.country || null,
         risk_score: trader.riskScore || trader.risk || null,
-        gain_12m: trader.gain12Months || trader.yearlyReturn || null,
-        gain_24m: trader.gain24Months || null,
-        max_drawdown: trader.maxDrawdown || trader.maxDailyDrawdown || null,
+        gain_12m: trader.gain12Months || trader.return1Year || trader.yearlyReturn || null,
+        gain_24m: trader.gain24Months || trader.return2Years || null,
+        max_drawdown: trader.maxDrawdown || trader.maxDailyDrawdown || trader.dailyDD || null,
         copiers: trader.copiers || trader.copiersCount || 0,
-        aum: trader.aum || trader.assetsUnderManagement || null,
+        aum: parseAum(trader.aum || trader.assetsUnderManagement),
         profitable_weeks_pct: trader.profitableWeeksPct || trader.winRatio || null,
         profitable_months_pct: trader.profitableMonthsPct || null,
         avg_trades_per_week: trader.tradesPerWeek || trader.avgTradesPerWeek || null,
         avg_holding_time_days: trader.avgHoldingTime || trader.avgPositionDays || null,
         active_since: trader.activeSince || trader.firstActivity || null,
         verified: trader.verified || trader.isVerified || false,
-        tags: trader.tags || trader.tradingStrategy?.split(',') || null,
+        tags: trader.tags || trader.investsIn || null,
         updated_at: new Date().toISOString(),
       };
 
