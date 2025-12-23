@@ -154,11 +154,43 @@ const SECTOR_MAP: Record<string, string> = {
   'CHTR': 'Communication', 'EA': 'Communication', 'ATVI': 'Communication',
   'WBD': 'Communication', 'PARA': 'Communication', 'TTWO': 'Communication',
   
-  // European stocks
+// European stocks - Germany
   'SIE.DE': 'Industrials', 'CBK.DE': 'Financials', 'HEI.DE': 'Industrials',
   'ENR.DE': 'Utilities', 'DBV.PA': 'Healthcare', 'ABVX.PA': 'Healthcare',
+  'SAP.DE': 'Technology', 'ALV.DE': 'Financials', 'DTE.DE': 'Communication',
+  'BAS.DE': 'Materials', 'BMW.DE': 'Consumer Discretionary', 'MBG.DE': 'Consumer Discretionary',
+  'VOW3.DE': 'Consumer Discretionary', 'ADS.DE': 'Consumer Discretionary', 'MUV2.DE': 'Financials',
+  
+  // European stocks - France
+  'OR.PA': 'Consumer Staples', 'MC.PA': 'Consumer Discretionary', 'SAN.PA': 'Healthcare',
+  'BNP.PA': 'Financials', 'AI.PA': 'Industrials', 'AIR.PA': 'Industrials',
+  'TTE.PA': 'Energy', 'SU.PA': 'Materials', 'CAP.PA': 'Technology',
+  
+  // European stocks - Spain
   'SAN.MC': 'Financials', 'CABK.MC': 'Financials', 'FER.MC': 'Industrials',
-  'UCG.MI': 'Financials',
+  'TEF.MC': 'Communication', 'ITX.MC': 'Consumer Discretionary', 'IBE.MC': 'Utilities',
+  
+  // European stocks - Italy
+  'UCG.MI': 'Financials', 'ENI.MI': 'Energy', 'ISP.MI': 'Financials',
+  'ENEL.MI': 'Utilities', 'STM.MI': 'Technology',
+  
+  // UK stocks
+  'RR.L': 'Industrials', 'IAG.L': 'Industrials', 'HSBA.L': 'Financials', 
+  'BP.L': 'Energy', 'SHEL.L': 'Energy', 'ULVR.L': 'Consumer Staples',
+  'AZN.L': 'Healthcare', 'GSK.L': 'Healthcare', 'RIO.L': 'Materials',
+  'BHP.L': 'Materials', 'LLOY.L': 'Financials', 'BARC.L': 'Financials',
+  'VOD.L': 'Communication', 'DGE.L': 'Consumer Staples', 'REL.L': 'Communication',
+  'LSEG.L': 'Financials', 'BA.L': 'Industrials', 'AAL.L': 'Materials',
+  'NG.L': 'Utilities', 'SSE.L': 'Utilities',
+  
+  // Swiss stocks
+  'NESN.SW': 'Consumer Staples', 'NOVN.SW': 'Healthcare', 'ROG.SW': 'Healthcare',
+  'UBS.SW': 'Financials', 'CS.SW': 'Financials', 'ZURN.SW': 'Financials',
+  'ABB.SW': 'Industrials', 'SIKA.SW': 'Materials',
+  
+  // Netherlands
+  'ASML.AS': 'Technology', 'INGA.AS': 'Financials', 'UNA.AS': 'Consumer Staples',
+  'PHIA.AS': 'Healthcare', 'HEIA.AS': 'Consumer Staples',
 };
 
 // US Exchange mapping for well-known stocks
@@ -509,6 +541,8 @@ async function syncTraderDetailsBatch(
       console.log(`[sync-worker] Syncing details for ${trader.etoro_username}...`);
 
       // Fetch portfolio
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let holdingsArray: any[] = [];
       const holdingsRes = await fetch(
         ENDPOINTS.portfolio(trader.etoro_username),
         { 
@@ -521,18 +555,18 @@ async function syncTraderDetailsBatch(
 
       if (holdingsRes.ok) {
         const holdingsData = await holdingsRes.json();
-        const holdings = holdingsData.data || holdingsData.positions || holdingsData.holdings || [];
+        holdingsArray = holdingsData.data || holdingsData.positions || holdingsData.holdings || [];
 
-        console.log(`[sync-worker] Got ${holdings.length} holdings for ${trader.etoro_username}`);
+        console.log(`[sync-worker] Got ${holdingsArray.length} holdings for ${trader.etoro_username}`);
         
         // DEBUG: Log first holding to see available fields
-        if (holdings.length > 0) {
-          console.log(`[sync-worker] Sample holding fields for ${trader.etoro_username}:`, JSON.stringify(holdings[0], null, 2));
+        if (holdingsArray.length > 0) {
+          console.log(`[sync-worker] Sample holding fields for ${trader.etoro_username}:`, JSON.stringify(holdingsArray[0], null, 2));
         }
 
         // Process holdings
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        for (const h of holdings as any[]) {
+        for (const h of holdingsArray as any[]) {
           const symbol = h.symbol || h.instrumentId || h.ticker || h.asset;
           if (!symbol) continue;
 
@@ -616,8 +650,32 @@ async function syncTraderDetailsBatch(
 
       await delay(RATE_LIMIT_DELAY_MS);
 
-      // Fetch instruments to build instrumentId -> symbol mapping
-      let instrumentMap: Record<string, { symbol: string; name: string; type: string }> = {};
+      // Build instrumentId -> symbol mapping from MULTIPLE sources for better coverage
+      // The Bullaware instruments API only returns ~10 entries, so we need alternatives
+      const instrumentMap: Record<string, { symbol: string; name: string; type: string }> = {};
+      
+      // Source 1: Build from portfolio holdings (which have instrumentId from openPositions)
+      // The holdings data has symbol directly, so we can build reverse mapping
+      if (holdingsArray.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        for (const h of holdingsArray as any[]) {
+          const instId = h.instrumentId || h.instrument_id;
+          const symbol = h.symbol || h.ticker;
+          if (instId && symbol) {
+            instrumentMap[String(instId)] = {
+              symbol,
+              name: h.name || h.instrumentName || symbol,
+              type: (h.type || 'stock').toLowerCase(),
+            };
+          }
+        }
+        console.log(`[sync-worker] Built instrument map from holdings with ${Object.keys(instrumentMap).length} entries`);
+      }
+      
+      // Source 2: Query existing assets in database that might have instrumentId mapping
+      // (For future: could add instrumentId column to assets table)
+      
+      // Source 3: Try Bullaware instruments API as backup (limited to ~10 entries)
       try {
         const instrumentsRes = await fetch(
           `${ENDPOINTS.instruments}?limit=1000`,
@@ -635,13 +693,16 @@ async function syncTraderDetailsBatch(
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           for (const inst of instruments as any[]) {
             const instId = String(inst.instrumentId || inst.id);
-            instrumentMap[instId] = {
-              symbol: inst.symbol || inst.ticker || instId,
-              name: inst.name || inst.displayName || inst.instrumentName || inst.symbol || instId,
-              type: (inst.type || inst.instrumentType || 'stock').toLowerCase(),
-            };
+            // Only add if not already in map from holdings
+            if (!instrumentMap[instId]) {
+              instrumentMap[instId] = {
+                symbol: inst.symbol || inst.ticker || instId,
+                name: inst.name || inst.displayName || inst.instrumentName || inst.symbol || instId,
+                type: (inst.type || inst.instrumentType || 'stock').toLowerCase(),
+              };
+            }
           }
-          console.log(`[sync-worker] Built instrument map with ${Object.keys(instrumentMap).length} entries`);
+          console.log(`[sync-worker] Total instrument map entries after API: ${Object.keys(instrumentMap).length}`);
         }
       } catch (err) {
         console.log(`[sync-worker] Could not fetch instruments for mapping:`, err);
