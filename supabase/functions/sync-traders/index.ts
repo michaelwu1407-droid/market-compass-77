@@ -36,7 +36,6 @@ function checkDiscrepancy(
   const fValue = parseFloat(String(firecrawl));
 
   if (isNaN(bValue) || isNaN(fValue)) {
-    // String comparison
     if (String(bullaware) !== String(firecrawl)) {
       return {
         entity_type: 'trader',
@@ -50,7 +49,6 @@ function checkDiscrepancy(
       };
     }
   } else {
-    // Numeric comparison
     if (bValue === 0 && fValue === 0) return null;
     const diffPct = bValue !== 0 ? Math.abs((bValue - fValue) / bValue * 100) : Math.abs(fValue) * 100;
     
@@ -97,22 +95,16 @@ async function scrapeTraderFromEtoro(username: string, firecrawlApiKey: string):
     const data = await response.json();
     const markdown = data.data?.markdown || data.markdown || '';
 
-    // Parse scraped data to extract metrics
     const parsed: any = {};
-
-    // Try to extract risk score (usually shown as "Risk Score: X")
     const riskMatch = markdown.match(/risk\s*(?:score)?[:\s]*(\d+)/i);
     if (riskMatch) parsed.risk_score = parseInt(riskMatch[1]);
 
-    // Try to extract copiers count
     const copiersMatch = markdown.match(/(\d+(?:,\d+)*)\s*copiers/i);
     if (copiersMatch) parsed.copiers = parseInt(copiersMatch[1].replace(/,/g, ''));
 
-    // Try to extract 12M return
     const return12mMatch = markdown.match(/(?:12\s*(?:mo?n?th?s?|M))[:\s]*([-+]?\d+(?:\.\d+)?)\s*%/i);
     if (return12mMatch) parsed.gain_12m = parseFloat(return12mMatch[1]);
 
-    // Try to extract max drawdown
     const drawdownMatch = markdown.match(/(?:max\s*)?draw\s*down[:\s]*([-+]?\d+(?:\.\d+)?)\s*%?/i);
     if (drawdownMatch) parsed.max_drawdown = parseFloat(drawdownMatch[1]);
 
@@ -123,6 +115,22 @@ async function scrapeTraderFromEtoro(username: string, firecrawlApiKey: string):
     console.error(`Error scraping ${username}:`, error);
     return null;
   }
+}
+
+// Helper to parse AUM strings like "$5M+" to numbers
+function parseAum(value: any): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') return value;
+  const str = String(value).replace(/[$,+]/g, '').trim();
+  const match = str.match(/^([\d.]+)\s*([KMB])?$/i);
+  if (!match) return null;
+  let num = parseFloat(match[1]);
+  if (isNaN(num)) return null;
+  const suffix = (match[2] || '').toUpperCase();
+  if (suffix === 'K') num *= 1000;
+  if (suffix === 'M') num *= 1000000;
+  if (suffix === 'B') num *= 1000000000;
+  return num;
 }
 
 serve(async (req) => {
@@ -140,78 +148,98 @@ serve(async (req) => {
       throw new Error('BULLAWARE_API_KEY is not configured');
     }
 
-    const hasFirecrawl = !!FIRECRAWL_API_KEY;
-    console.log(`Starting trader sync. Cross-checking enabled: ${hasFirecrawl}`);
-
+    // Parse request options
     let usernames: string[] = [];
+    let enableCrossCheck = false; // Default: skip Firecrawl to save credits
+    let force = false;
+    
     try {
       const body = await req.json();
       usernames = body.usernames || [];
+      enableCrossCheck = body.enableCrossCheck ?? false;
+      force = body.force ?? false;
     } catch {
       // No body
     }
 
-    // Fetch from Bullaware API
-    const bullwareUrl = usernames.length > 0 
-      ? `https://api.bullaware.com/v1/investors?usernames=${usernames.join(',')}`
-      : 'https://api.bullaware.com/v1/investors';
-
-    console.log(`Fetching from Bullaware: ${bullwareUrl}`);
-
-    const bullwareResponse = await fetch(bullwareUrl, {
-      headers: {
-        'Authorization': `Bearer ${BULLAWARE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!bullwareResponse.ok) {
-      const errorText = await bullwareResponse.text();
-      console.error('Bullaware API error:', bullwareResponse.status, errorText);
-      throw new Error(`Bullaware API error: ${bullwareResponse.status}`);
-    }
-
-    const responseText = await bullwareResponse.text();
-    console.log('Raw Bullaware response (first 1000 chars):', responseText.substring(0, 1000));
-    
-    const bullwareData = JSON.parse(responseText);
-    console.log('Response type:', typeof bullwareData);
-    console.log('Response keys:', Array.isArray(bullwareData) ? 'ARRAY' : Object.keys(bullwareData));
-    
-    // Handle multiple possible response formats
-    const bullwareTraders = bullwareData.data 
-      || bullwareData.investors 
-      || bullwareData.traders
-      || bullwareData.items 
-      || bullwareData.results 
-      || (Array.isArray(bullwareData) ? bullwareData : []);
-    
-    console.log(`Received ${bullwareTraders.length} traders from Bullaware`);
+    const hasFirecrawl = !!FIRECRAWL_API_KEY && enableCrossCheck;
+    console.log(`Starting trader sync. Cross-checking enabled: ${hasFirecrawl}, Force: ${force}`);
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+
+    // Fetch ALL traders from Bullaware with pagination
+    let allBullwareTraders: any[] = [];
+    let page = 1;
+    const pageSize = 100;
+    
+    if (usernames.length > 0) {
+      // Specific usernames requested
+      const bullwareUrl = `https://api.bullaware.com/v1/investors?usernames=${usernames.join(',')}`;
+      console.log(`Fetching specific traders from Bullaware: ${bullwareUrl}`);
+      
+      const response = await fetch(bullwareUrl, {
+        headers: {
+          'Authorization': `Bearer ${BULLAWARE_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Bullaware API error: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      allBullwareTraders = data.items || data.data || data.investors || (Array.isArray(data) ? data : []);
+    } else {
+      // Fetch all with pagination
+      let hasMore = true;
+      
+      while (hasMore) {
+        const bullwareUrl = `https://api.bullaware.com/v1/investors?page=${page}&limit=${pageSize}`;
+        console.log(`Fetching page ${page} from Bullaware...`);
+        
+        const response = await fetch(bullwareUrl, {
+          headers: {
+            'Authorization': `Bearer ${BULLAWARE_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Bullaware API error: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        const items = data.items || data.data || data.investors || (Array.isArray(data) ? data : []);
+        
+        allBullwareTraders.push(...items);
+        console.log(`Page ${page}: received ${items.length} traders (total: ${allBullwareTraders.length})`);
+        
+        // Check if more pages exist
+        const total = data.total || data.totalCount;
+        if (total && allBullwareTraders.length >= total) {
+          hasMore = false;
+        } else if (items.length < pageSize) {
+          hasMore = false;
+        } else {
+          page++;
+          // Safety limit
+          if (page > 50) {
+            console.log('Reached page limit, stopping pagination');
+            hasMore = false;
+          }
+        }
+      }
+    }
+
+    console.log(`Total traders from Bullaware: ${allBullwareTraders.length}`);
+
     const discrepancies: DiscrepancyLog[] = [];
     const tradersToUpsert: any[] = [];
 
-    for (const trader of bullwareTraders) {
+    for (const trader of allBullwareTraders) {
       const username = trader.username || trader.userName;
       
-      // Helper to parse AUM strings like "$5M+" to numbers
-      const parseAum = (value: any): number | null => {
-        if (value === null || value === undefined) return null;
-        if (typeof value === 'number') return value;
-        const str = String(value).replace(/[$,+]/g, '').trim();
-        const match = str.match(/^([\d.]+)\s*([KMB])?$/i);
-        if (!match) return null;
-        let num = parseFloat(match[1]);
-        if (isNaN(num)) return null;
-        const suffix = (match[2] || '').toUpperCase();
-        if (suffix === 'K') num *= 1000;
-        if (suffix === 'M') num *= 1000000;
-        if (suffix === 'B') num *= 1000000000;
-        return num;
-      };
-      
-      // Prepare Bullaware data
       const bullwareRecord = {
         etoro_username: username,
         display_name: trader.displayName || trader.fullName || trader.fullname || username,
@@ -234,12 +262,11 @@ serve(async (req) => {
         updated_at: new Date().toISOString(),
       };
 
-      // Cross-check with Firecrawl if available
+      // Cross-check with Firecrawl ONLY if explicitly enabled
       if (hasFirecrawl) {
         const firecrawlData = await scrapeTraderFromEtoro(username, FIRECRAWL_API_KEY!);
         
         if (firecrawlData) {
-          // Get trader ID for discrepancy logging
           const { data: existingTrader } = await supabase
             .from('traders')
             .select('id')
@@ -248,7 +275,6 @@ serve(async (req) => {
           
           const traderId = existingTrader?.id || 'pending';
 
-          // Check each cross-check field
           for (const field of CROSS_CHECK_FIELDS) {
             const bullValue = (bullwareRecord as any)[field];
             const fireValue = firecrawlData[field];
@@ -282,7 +308,6 @@ serve(async (req) => {
 
     // Log discrepancies to database
     if (discrepancies.length > 0) {
-      // Update entity IDs for new traders
       for (const disc of discrepancies) {
         if (disc.entity_id === 'pending') {
           const trader = upsertedData?.find(t => t.etoro_username === disc.entity_name);
@@ -308,7 +333,7 @@ serve(async (req) => {
         synced: upsertedData?.length || 0,
         discrepancies_logged: discrepancies.length,
         cross_checking_enabled: hasFirecrawl,
-        message: `Synced ${upsertedData?.length || 0} traders, found ${discrepancies.length} discrepancies`,
+        message: `Synced ${upsertedData?.length || 0} traders${hasFirecrawl ? ` with cross-check, found ${discrepancies.length} discrepancies` : ' (quick mode)'}`,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

@@ -8,6 +8,7 @@ const corsHeaders = {
 
 const HOLDINGS_CROSS_CHECK_FIELDS = ['allocation_pct', 'profit_loss_pct'];
 const DISCREPANCY_THRESHOLD_PCT = 5;
+const BATCH_SIZE = 5; // Process traders in parallel batches
 
 interface DiscrepancyLog {
   entity_type: string;
@@ -81,12 +82,10 @@ async function scrapePortfolioFromEtoro(username: string, firecrawlApiKey: strin
     const data = await response.json();
     const markdown = data.data?.markdown || data.markdown || '';
 
-    // Parse holdings from markdown - look for patterns like "AAPL 15.5% +12.3%"
     const holdings: any[] = [];
     const lines = markdown.split('\n');
     
     for (const line of lines) {
-      // Pattern: Symbol followed by percentages
       const match = line.match(/([A-Z]{1,5})\s+(\d+(?:\.\d+)?)\s*%\s*([-+]?\d+(?:\.\d+)?)\s*%/);
       if (match) {
         holdings.push({
@@ -121,22 +120,31 @@ serve(async (req) => {
       throw new Error('BULLAWARE_API_KEY is not configured');
     }
 
-    const hasFirecrawl = !!FIRECRAWL_API_KEY;
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
+    // Parse request options
     let username: string | null = null;
+    let enableCrossCheck = false; // Default: skip Firecrawl to save credits
+    let force = false;
+    let hoursStale = 6; // Only sync traders not updated in X hours
+    
     try {
       const body = await req.json();
-      username = body.username;
+      username = body.username || null;
+      enableCrossCheck = body.enableCrossCheck ?? false;
+      force = body.force ?? false;
+      hoursStale = body.hoursStale ?? 6;
     } catch {
       // No body
     }
 
-    console.log(`Syncing details for trader: ${username || 'all traders'}. Cross-checking: ${hasFirecrawl}`);
+    const hasFirecrawl = !!FIRECRAWL_API_KEY && enableCrossCheck;
+    console.log(`Syncing details. Cross-check: ${hasFirecrawl}, Force: ${force}, HoursStale: ${hoursStale}`);
 
     let tradersToSync: { id: string; etoro_username: string }[] = [];
     
     if (username) {
+      // Specific trader requested
       const { data: trader } = await supabase
         .from('traders')
         .select('id, etoro_username')
@@ -144,22 +152,34 @@ serve(async (req) => {
         .maybeSingle();
       
       if (trader) tradersToSync = [trader];
-    } else {
+    } else if (force) {
+      // Force: sync all traders
       const { data: allTraders } = await supabase
         .from('traders')
         .select('id, etoro_username');
       
       tradersToSync = allTraders || [];
+    } else {
+      // Incremental: only sync stale traders
+      const staleThreshold = new Date(Date.now() - hoursStale * 3600000).toISOString();
+      const { data: staleTraders } = await supabase
+        .from('traders')
+        .select('id, etoro_username, updated_at')
+        .or(`updated_at.lt.${staleThreshold},updated_at.is.null`);
+      
+      tradersToSync = staleTraders || [];
+      console.log(`Found ${tradersToSync.length} stale traders (not updated in ${hoursStale}h)`);
     }
 
-    console.log(`Processing ${tradersToSync.length} traders`);
+    console.log(`Processing ${tradersToSync.length} traders in batches of ${BATCH_SIZE}`);
 
     let totalHoldings = 0;
     let totalTrades = 0;
     let totalPerformance = 0;
     const allDiscrepancies: DiscrepancyLog[] = [];
 
-    for (const trader of tradersToSync) {
+    // Process trader details function
+    async function processTrader(trader: { id: string; etoro_username: string }) {
       try {
         // Fetch portfolio from Bullaware
         const portfolioResponse = await fetch(
@@ -187,12 +207,11 @@ serve(async (req) => {
           }));
         }
 
-        // Cross-check with Firecrawl if available
+        // Cross-check with Firecrawl ONLY if explicitly enabled
         if (hasFirecrawl && bullwareHoldings.length > 0) {
           const firecrawlHoldings = await scrapePortfolioFromEtoro(trader.etoro_username, FIRECRAWL_API_KEY!);
           
           if (firecrawlHoldings && firecrawlHoldings.length > 0) {
-            // Match holdings by symbol and compare
             for (const bHolding of bullwareHoldings) {
               const fHolding = firecrawlHoldings.find(f => f.symbol === bHolding.symbol);
               if (fHolding) {
@@ -213,7 +232,7 @@ serve(async (req) => {
           }
         }
 
-        // Save holdings (always use Bullaware data)
+        // Save holdings
         if (bullwareHoldings.length > 0) {
           await supabase
             .from('trader_holdings')
@@ -228,7 +247,7 @@ serve(async (req) => {
           if (!holdingsError) totalHoldings += holdingsToInsert.length;
         }
 
-        // Fetch and save trades (Bullaware only - no Firecrawl equivalent)
+        // Fetch and save trades
         const tradesResponse = await fetch(
           `https://api.bullaware.com/v1/investors/${trader.etoro_username}/trades`,
           {
@@ -259,7 +278,7 @@ serve(async (req) => {
           }
         }
 
-        // Fetch and save performance (Bullaware only)
+        // Fetch and save performance
         const performanceResponse = await fetch(
           `https://api.bullaware.com/v1/investors/${trader.etoro_username}/performance`,
           {
@@ -292,11 +311,24 @@ serve(async (req) => {
           }
         }
 
+        // Update trader's updated_at timestamp
+        await supabase
+          .from('traders')
+          .update({ updated_at: new Date().toISOString() })
+          .eq('id', trader.id);
+
         console.log(`Synced details for ${trader.etoro_username}`);
 
       } catch (traderError) {
         console.error(`Error syncing ${trader.etoro_username}:`, traderError);
       }
+    }
+
+    // Process in parallel batches
+    for (let i = 0; i < tradersToSync.length; i += BATCH_SIZE) {
+      const batch = tradersToSync.slice(i, i + BATCH_SIZE);
+      console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(tradersToSync.length / BATCH_SIZE)}`);
+      await Promise.all(batch.map(trader => processTrader(trader)));
     }
 
     // Log discrepancies
@@ -317,6 +349,7 @@ serve(async (req) => {
         performance_synced: totalPerformance,
         discrepancies_logged: allDiscrepancies.length,
         cross_checking_enabled: hasFirecrawl,
+        mode: force ? 'full' : 'incremental',
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
