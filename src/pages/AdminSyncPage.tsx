@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from '@/hooks/use-toast';
-import { Loader2, RefreshCw, Users, Briefcase, FileText, TrendingUp, CheckCircle, XCircle, Zap, Shield, Clock } from 'lucide-react';
+import { Loader2, RefreshCw, Users, Briefcase, FileText, TrendingUp, CheckCircle, XCircle, Zap, Shield, Clock, Play } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
+import { useQuery } from '@tanstack/react-query';
 
 interface SyncStatus {
   isLoading: boolean;
@@ -21,11 +22,18 @@ interface SyncOptions {
   postLimit: number;
 }
 
+interface SyncState {
+  id: string;
+  last_run: string | null;
+  last_page: number;
+  total_pages: number | null;
+  status: string;
+  updated_at: string;
+}
+
 export default function AdminSyncPage() {
   const [syncStatus, setSyncStatus] = useState<Record<string, SyncStatus>>({
-    traders: { isLoading: false, success: null, message: null },
-    assets: { isLoading: false, success: null, message: null },
-    traderDetails: { isLoading: false, success: null, message: null },
+    worker: { isLoading: false, success: null, message: null },
     posts: { isLoading: false, success: null, message: null },
     dailyMovers: { isLoading: false, success: null, message: null },
   });
@@ -34,6 +42,20 @@ export default function AdminSyncPage() {
     enableCrossCheck: false,
     force: false,
     postLimit: 5,
+  });
+
+  // Fetch sync states from database
+  const { data: syncStates, refetch: refetchSyncStates } = useQuery({
+    queryKey: ['sync-states'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('sync_state')
+        .select('*')
+        .order('id');
+      if (error) throw error;
+      return data as SyncState[];
+    },
+    refetchInterval: 10000, // Refetch every 10 seconds
   });
 
   const updateStatus = (key: string, status: Partial<SyncStatus>) => {
@@ -51,12 +73,17 @@ export default function AdminSyncPage() {
       
       if (error) throw error;
       
+      const message = data?.action === 'skip' 
+        ? 'All data is fresh, nothing to sync'
+        : data?.message || `Synced: ${JSON.stringify(data)}`;
+      
       updateStatus(name, { 
         isLoading: false, 
         success: true, 
-        message: data?.message || `Synced successfully` 
+        message
       });
       toast({ title: 'Success', description: `${functionName} completed` });
+      refetchSyncStates();
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       updateStatus(name, { isLoading: false, success: false, message: errorMessage });
@@ -64,38 +91,48 @@ export default function AdminSyncPage() {
     }
   };
 
-  const syncTraders = () => syncFunction('traders', 'sync-traders', {
-    enableCrossCheck: options.enableCrossCheck,
-    force: options.force,
-  });
-
-  const syncAssets = () => syncFunction('assets', 'sync-assets');
-
-  const syncTraderDetails = () => syncFunction('traderDetails', 'sync-trader-details', {
-    enableCrossCheck: options.enableCrossCheck,
-    force: options.force,
-  });
-
-  const syncPosts = () => syncFunction('posts', 'scrape-posts', {
-    traderLimit: options.postLimit,
-  });
-
+  // Use the new sync-worker for all core syncs
+  const triggerSyncWorker = () => syncFunction('worker', 'sync-worker');
+  const syncPosts = () => syncFunction('posts', 'scrape-posts', { traderLimit: options.postLimit });
   const syncDailyMovers = () => syncFunction('dailyMovers', 'scrape-daily-movers');
 
   const syncAll = async () => {
-    await syncTraders();
-    await syncAssets();
-    await syncTraderDetails();
+    // Trigger worker multiple times to process all priorities
+    for (let i = 0; i < 3; i++) {
+      await triggerSyncWorker();
+    }
     if (options.postLimit > 0) {
       await syncPosts();
     }
     await syncDailyMovers();
   };
 
+  // Format relative time
+  const formatRelativeTime = (dateStr: string | null) => {
+    if (!dateStr) return 'Never';
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return date.toLocaleDateString();
+  };
+
+  // Get status color
+  const getStatusColor = (status: string) => {
+    if (status === 'paginating') return 'text-yellow-600 bg-yellow-100';
+    if (status === 'idle') return 'text-green-600 bg-green-100';
+    return 'text-muted-foreground bg-muted';
+  };
+
   // Estimate time based on options
   const estimateTime = () => {
-    let seconds = 5; // Base time
-    if (options.enableCrossCheck) seconds += 120; // Firecrawl is slow
+    let seconds = 5;
+    if (options.enableCrossCheck) seconds += 120;
     if (options.force) seconds += 30;
     if (options.postLimit > 0) seconds += options.postLimit * 10;
     return seconds < 60 ? `~${seconds}s` : `~${Math.ceil(seconds / 60)}m`;
@@ -104,70 +141,96 @@ export default function AdminSyncPage() {
   // Estimate Firecrawl credits
   const estimateCredits = () => {
     let credits = 0;
-    if (options.enableCrossCheck) credits += 20; // ~1 per trader for cross-check
-    credits += options.postLimit; // 1 per trader for posts
+    if (options.enableCrossCheck) credits += 20;
+    credits += options.postLimit;
     return credits;
   };
-
-  const syncButtons = [
-    { 
-      key: 'traders', 
-      name: 'Sync Traders', 
-      fn: syncTraders, 
-      icon: Users, 
-      desc: 'Fetch trader profiles from Bullaware',
-      usesFirecrawl: options.enableCrossCheck,
-    },
-    { 
-      key: 'assets', 
-      name: 'Sync Assets', 
-      fn: syncAssets, 
-      icon: Briefcase, 
-      desc: 'Fetch asset data from Bullaware',
-      usesFirecrawl: false,
-    },
-    { 
-      key: 'traderDetails', 
-      name: 'Sync Trader Details', 
-      fn: syncTraderDetails, 
-      icon: FileText, 
-      desc: 'Fetch holdings & performance for each trader',
-      usesFirecrawl: options.enableCrossCheck,
-    },
-    { 
-      key: 'posts', 
-      name: 'Scrape Posts', 
-      fn: syncPosts, 
-      icon: FileText, 
-      desc: `Scrape social posts from eToro (${options.postLimit} traders)`,
-      usesFirecrawl: true,
-      disabled: options.postLimit === 0,
-    },
-    { 
-      key: 'dailyMovers', 
-      name: 'Scrape Daily Movers', 
-      fn: syncDailyMovers, 
-      icon: TrendingUp, 
-      desc: 'Fetch trending assets',
-      usesFirecrawl: false,
-    },
-  ];
 
   return (
     <div className="max-w-4xl mx-auto">
       <div className="mb-6">
         <h1 className="text-2xl font-bold mb-2">Admin: Data Sync</h1>
-        <p className="text-muted-foreground">Trigger data sync functions to populate the database</p>
+        <p className="text-muted-foreground">
+          Continuous sync runs every 2 minutes automatically. Trigger manual syncs below.
+        </p>
       </div>
+
+      {/* Sync Status Dashboard */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Clock className="h-5 w-5" />
+            Sync Status
+          </CardTitle>
+          <CardDescription>Real-time sync progress from the continuous worker</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 sm:grid-cols-3">
+            {syncStates?.map((state) => (
+              <div key={state.id} className="p-4 rounded-lg border bg-card">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="font-medium capitalize">{state.id.replace('_', ' ')}</h4>
+                  <Badge className={getStatusColor(state.status)}>
+                    {state.status}
+                  </Badge>
+                </div>
+                <div className="text-sm text-muted-foreground space-y-1">
+                  <div>Last run: {formatRelativeTime(state.last_run)}</div>
+                  {state.total_pages && (
+                    <div>Page: {state.last_page} / {state.total_pages}</div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Quick Actions */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Play className="h-5 w-5" />
+            Manual Sync
+          </CardTitle>
+          <CardDescription>
+            Trigger the sync worker manually (it runs automatically every 2 min)
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex gap-4">
+            <Button 
+              onClick={triggerSyncWorker} 
+              disabled={syncStatus.worker.isLoading}
+              className="flex-1"
+            >
+              {syncStatus.worker.isLoading ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4 mr-2" />
+              )}
+              Trigger Sync Worker
+            </Button>
+            <Button onClick={syncAll} variant="outline" className="flex-1">
+              Sync All (3 cycles)
+            </Button>
+          </div>
+          {syncStatus.worker.message && (
+            <p className={`text-sm ${syncStatus.worker.success ? 'text-green-600' : 'text-destructive'}`}>
+              {syncStatus.worker.message}
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Sync Options */}
       <Card className="mb-6">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Zap className="h-5 w-5" />
-            Sync Options
+            Scraping Options
           </CardTitle>
-          <CardDescription>Configure sync behavior to optimize speed and save Firecrawl credits</CardDescription>
+          <CardDescription>Configure Firecrawl-based scraping (posts use credits)</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="flex items-center justify-between">
@@ -183,22 +246,6 @@ export default function AdminSyncPage() {
             <Switch
               checked={options.enableCrossCheck}
               onCheckedChange={(checked) => setOptions(prev => ({ ...prev, enableCrossCheck: checked }))}
-            />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label className="flex items-center gap-2">
-                <RefreshCw className="h-4 w-4" />
-                Force Full Refresh
-              </Label>
-              <p className="text-sm text-muted-foreground">
-                Sync all traders instead of only stale ones. Slower but ensures everything is updated.
-              </p>
-            </div>
-            <Switch
-              checked={options.force}
-              onCheckedChange={(checked) => setOptions(prev => ({ ...prev, force: checked }))}
             />
           </div>
 
@@ -238,71 +285,83 @@ export default function AdminSyncPage() {
         </CardContent>
       </Card>
 
-      {/* Quick Actions */}
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <RefreshCw className="h-5 w-5" />
-            Quick Actions
-          </CardTitle>
-          <CardDescription>Run all sync functions in sequence</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button onClick={syncAll} size="lg" className="w-full">
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Sync All Data
-          </Button>
-        </CardContent>
-      </Card>
-
-      {/* Individual Sync Buttons */}
+      {/* Additional Sync Functions */}
       <div className="grid gap-4">
-        {syncButtons.map(({ key, name, fn, icon: Icon, desc, usesFirecrawl, disabled }) => {
-          const status = syncStatus[key];
-          return (
-            <Card key={key} className={disabled ? 'opacity-50' : ''}>
-              <CardContent className="flex items-center justify-between py-4">
-                <div className="flex items-center gap-4">
-                  <div className="p-2 rounded-lg bg-secondary">
-                    <Icon className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-medium">{name}</h3>
-                      {usesFirecrawl && (
-                        <Badge variant="outline" className="text-xs">
-                          <Zap className="h-3 w-3 mr-1" />
-                          Firecrawl
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="text-sm text-muted-foreground">{desc}</p>
-                    {status.message && (
-                      <p className={`text-xs mt-1 ${status.success ? 'text-green-600' : 'text-destructive'}`}>
-                        {status.message}
-                      </p>
-                    )}
-                  </div>
-                </div>
+        <Card>
+          <CardContent className="flex items-center justify-between py-4">
+            <div className="flex items-center gap-4">
+              <div className="p-2 rounded-lg bg-secondary">
+                <FileText className="h-5 w-5" />
+              </div>
+              <div>
                 <div className="flex items-center gap-2">
-                  {status.success === true && <CheckCircle className="h-5 w-5 text-green-600" />}
-                  {status.success === false && <XCircle className="h-5 w-5 text-destructive" />}
-                  <Button 
-                    onClick={() => fn()} 
-                    disabled={status.isLoading || disabled}
-                    variant="outline"
-                  >
-                    {status.isLoading ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      'Run'
-                    )}
-                  </Button>
+                  <h3 className="font-medium">Scrape Posts</h3>
+                  <Badge variant="outline" className="text-xs">
+                    <Zap className="h-3 w-3 mr-1" />
+                    Firecrawl
+                  </Badge>
                 </div>
-              </CardContent>
-            </Card>
-          );
-        })}
+                <p className="text-sm text-muted-foreground">
+                  Scrape social posts from eToro ({options.postLimit} traders)
+                </p>
+                {syncStatus.posts.message && (
+                  <p className={`text-xs mt-1 ${syncStatus.posts.success ? 'text-green-600' : 'text-destructive'}`}>
+                    {syncStatus.posts.message}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {syncStatus.posts.success === true && <CheckCircle className="h-5 w-5 text-green-600" />}
+              {syncStatus.posts.success === false && <XCircle className="h-5 w-5 text-destructive" />}
+              <Button 
+                onClick={syncPosts} 
+                disabled={syncStatus.posts.isLoading || options.postLimit === 0}
+                variant="outline"
+              >
+                {syncStatus.posts.isLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  'Run'
+                )}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="flex items-center justify-between py-4">
+            <div className="flex items-center gap-4">
+              <div className="p-2 rounded-lg bg-secondary">
+                <TrendingUp className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="font-medium">Scrape Daily Movers</h3>
+                <p className="text-sm text-muted-foreground">Fetch trending assets</p>
+                {syncStatus.dailyMovers.message && (
+                  <p className={`text-xs mt-1 ${syncStatus.dailyMovers.success ? 'text-green-600' : 'text-destructive'}`}>
+                    {syncStatus.dailyMovers.message}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {syncStatus.dailyMovers.success === true && <CheckCircle className="h-5 w-5 text-green-600" />}
+              {syncStatus.dailyMovers.success === false && <XCircle className="h-5 w-5 text-destructive" />}
+              <Button 
+                onClick={syncDailyMovers} 
+                disabled={syncStatus.dailyMovers.isLoading}
+                variant="outline"
+              >
+                {syncStatus.dailyMovers.isLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  'Run'
+                )}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
