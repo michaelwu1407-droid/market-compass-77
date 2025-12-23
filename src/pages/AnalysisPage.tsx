@@ -1,18 +1,25 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AnalysisInput } from '@/components/analysis/AnalysisInput';
 import { AnalysisResult } from '@/components/analysis/AnalysisResult';
 import { toast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { useUpdateReport } from '@/hooks/useReports';
+import { useTrader } from '@/hooks/useTraders';
 import type { Report, ReportType, Horizon } from '@/types';
 
 export default function AnalysisPage() {
+  const [searchParams] = useSearchParams();
+  const preselectedTraderId = searchParams.get('trader');
+  
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<Partial<Report> | null>(null);
   const [reportId, setReportId] = useState<string | null>(null);
   const navigate = useNavigate();
   const updateReport = useUpdateReport();
+
+  // Fetch preselected trader details
+  const { data: preselectedTrader } = useTrader(preselectedTraderId || undefined);
 
   const handleSubmit = async (data: {
     reportType: ReportType;
@@ -100,7 +107,16 @@ export default function AnalysisPage() {
       </div>
 
       <div className="grid gap-6">
-        <AnalysisInput onSubmit={handleSubmit} isLoading={isLoading} />
+        <AnalysisInput 
+          onSubmit={handleSubmit} 
+          isLoading={isLoading}
+          preselectedTrader={preselectedTrader ? {
+            id: preselectedTrader.id,
+            display_name: preselectedTrader.display_name,
+            etoro_username: preselectedTrader.etoro_username,
+            avatar_url: preselectedTrader.avatar_url,
+          } : undefined}
+        />
         
         {result && (
           <AnalysisResult 

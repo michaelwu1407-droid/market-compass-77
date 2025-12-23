@@ -9,6 +9,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { Skeleton } from '@/components/ui/skeleton';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from '@/hooks/use-toast';
 
 type TraderFilter = 'trending' | 'most_copied' | 'following';
 
@@ -26,7 +28,37 @@ export default function TradersPage() {
     navigate(`/analysis?trader=${traderId}`);
   };
 
-  const handleStarForIC = (traderId: string) => {
+  const handleStarForIC = async (traderId: string) => {
+    // Get trader info for report title
+    const trader = traders?.find(t => t.id === traderId);
+    const title = trader ? `${trader.display_name} Analysis` : 'Trader Analysis';
+    
+    // Create a placeholder report and star it for IC
+    const { data: report, error } = await supabase
+      .from('reports')
+      .insert({
+        title,
+        report_type: 'trader_portfolio',
+        input_trader_ids: [traderId],
+        starred_for_ic: true,
+        status: 'to_review',
+      })
+      .select()
+      .single();
+    
+    if (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to add to IC',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
+    toast({
+      title: 'Added to IC',
+      description: 'Trader added to Investment Committee review',
+    });
     navigate('/ic');
   };
 

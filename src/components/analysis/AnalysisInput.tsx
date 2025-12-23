@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Search, Sparkles } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Search, Sparkles, Check, ChevronsUpDown, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -7,7 +7,19 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { cn } from '@/lib/utils';
+import { useTraders } from '@/hooks/useTraders';
 import type { ReportType, Horizon } from '@/types';
+
+interface PreselectedTrader {
+  id: string;
+  display_name: string;
+  etoro_username: string;
+  avatar_url: string | null;
+}
 
 interface AnalysisInputProps {
   onSubmit: (data: {
@@ -19,21 +31,38 @@ interface AnalysisInputProps {
     outputMode: 'quick' | 'full';
   }) => void;
   isLoading?: boolean;
+  preselectedTrader?: PreselectedTrader;
 }
 
-export function AnalysisInput({ onSubmit, isLoading }: AnalysisInputProps) {
+export function AnalysisInput({ onSubmit, isLoading, preselectedTrader }: AnalysisInputProps) {
   const [reportType, setReportType] = useState<ReportType>('single_stock');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
   const [selectedTraders, setSelectedTraders] = useState<string[]>([]);
+  const [selectedTraderDisplay, setSelectedTraderDisplay] = useState<string>('');
   const [horizon, setHorizon] = useState<Horizon>('12m');
   const [extraInstructions, setExtraInstructions] = useState('');
   const [outputMode, setOutputMode] = useState<'quick' | 'full'>('quick');
+  const [traderSearchOpen, setTraderSearchOpen] = useState(false);
+  const [traderSearchQuery, setTraderSearchQuery] = useState('');
+
+  const { data: traders, isLoading: tradersLoading } = useTraders();
+
+  // Handle preselected trader
+  useEffect(() => {
+    if (preselectedTrader) {
+      setReportType('trader_portfolio');
+      setSelectedTraders([preselectedTrader.id]);
+      setSelectedTraderDisplay(preselectedTrader.display_name);
+      setSearchQuery(preselectedTrader.etoro_username);
+    }
+  }, [preselectedTrader]);
 
   const handleSubmit = () => {
-    // For demo, use search query as asset/trader selection
+    // For stock analysis, use search query
     const assets = reportType !== 'trader_portfolio' ? [searchQuery.toUpperCase()] : [];
-    const traders = reportType === 'trader_portfolio' ? [searchQuery] : [];
+    // For trader analysis, use selected trader ID
+    const traders = reportType === 'trader_portfolio' ? selectedTraders : [];
     
     onSubmit({
       reportType,
@@ -44,6 +73,27 @@ export function AnalysisInput({ onSubmit, isLoading }: AnalysisInputProps) {
       outputMode,
     });
   };
+
+  const handleTraderSelect = (traderId: string) => {
+    const trader = traders?.find(t => t.id === traderId);
+    if (trader) {
+      setSelectedTraders([traderId]);
+      setSelectedTraderDisplay(trader.display_name);
+      setSearchQuery(trader.etoro_username);
+    }
+    setTraderSearchOpen(false);
+  };
+
+  const filteredTraders = traders?.filter(trader => {
+    if (!traderSearchQuery) return true;
+    const query = traderSearchQuery.toLowerCase();
+    return (
+      trader.display_name.toLowerCase().includes(query) ||
+      trader.etoro_username.toLowerCase().includes(query)
+    );
+  }).slice(0, 10) || [];
+
+  const isTraderMode = reportType === 'trader_portfolio';
 
   return (
     <Card>
@@ -69,17 +119,95 @@ export function AnalysisInput({ onSubmit, isLoading }: AnalysisInputProps) {
         {/* Search Input */}
         <div className="space-y-2">
           <Label>
-            {reportType === 'trader_portfolio' ? 'Search Trader' : 'Search Ticker(s)'}
+            {isTraderMode ? 'Search Trader' : 'Search Ticker(s)'}
           </Label>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder={reportType === 'trader_portfolio' ? 'e.g. JayMedrow' : 'e.g. NVDA, AAPL'}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-            />
-          </div>
+          
+          {isTraderMode ? (
+            <Popover open={traderSearchOpen} onOpenChange={setTraderSearchOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={traderSearchOpen}
+                  className="w-full justify-between font-normal h-10"
+                >
+                  {selectedTraderDisplay ? (
+                    <div className="flex items-center gap-2">
+                      <User className="h-4 w-4 text-muted-foreground" />
+                      {selectedTraderDisplay}
+                    </div>
+                  ) : (
+                    <span className="text-muted-foreground">Select a trader...</span>
+                  )}
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[400px] p-0" align="start">
+                <Command shouldFilter={false}>
+                  <CommandInput 
+                    placeholder="Search traders..." 
+                    value={traderSearchQuery}
+                    onValueChange={setTraderSearchQuery}
+                  />
+                  <CommandList>
+                    {tradersLoading ? (
+                      <div className="p-4 text-center text-sm text-muted-foreground">
+                        Loading traders...
+                      </div>
+                    ) : filteredTraders.length === 0 ? (
+                      <CommandEmpty>No traders found.</CommandEmpty>
+                    ) : (
+                      <CommandGroup>
+                        {filteredTraders.map((trader) => (
+                          <CommandItem
+                            key={trader.id}
+                            value={trader.id}
+                            onSelect={handleTraderSelect}
+                            className="flex items-center gap-3 p-2"
+                          >
+                            <Avatar className="h-8 w-8">
+                              <AvatarImage src={trader.avatar_url || undefined} />
+                              <AvatarFallback>
+                                {trader.display_name.slice(0, 2).toUpperCase()}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium truncate">{trader.display_name}</div>
+                              <div className="text-xs text-muted-foreground">@{trader.etoro_username}</div>
+                            </div>
+                            {trader.gain_12m !== null && trader.gain_12m !== undefined && (
+                              <span className={cn(
+                                "text-xs font-medium",
+                                trader.gain_12m >= 0 ? "text-gain" : "text-loss"
+                              )}>
+                                {trader.gain_12m >= 0 ? '+' : ''}{trader.gain_12m.toFixed(1)}%
+                              </span>
+                            )}
+                            <Check
+                              className={cn(
+                                "h-4 w-4",
+                                selectedTraders.includes(trader.id) ? "opacity-100" : "opacity-0"
+                              )}
+                            />
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    )}
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          ) : (
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="e.g. NVDA, AAPL"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+          )}
         </div>
 
         {/* Horizon */}
@@ -155,7 +283,7 @@ export function AnalysisInput({ onSubmit, isLoading }: AnalysisInputProps) {
           onClick={handleSubmit} 
           className="w-full" 
           size="lg"
-          disabled={!searchQuery || isLoading}
+          disabled={(!searchQuery && selectedTraders.length === 0) || isLoading}
         >
           {isLoading ? (
             <>

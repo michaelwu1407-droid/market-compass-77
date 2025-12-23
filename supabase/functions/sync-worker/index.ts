@@ -107,19 +107,13 @@ Deno.serve(async (req) => {
       tradersState?.status === 'paginating' || 
       isStale(tradersState?.last_run, STALE_HOURS_TRADERS);
 
-    if (needsTradersPagination) {
-      console.log('[sync-worker] Priority 1: Syncing traders list...');
-      const result = await syncTradersBatch(supabase, bullwareApiKey, tradersState);
-      return new Response(JSON.stringify({ 
-        action: 'sync_traders', 
-        ...result 
-      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
-
-    // Priority 2: Check for stale trader details
+    // IMPORTANT: Also sync trader details while paginating traders
+    // This ensures portfolio data gets populated even while we're still discovering traders
     const staleTraders = await getStaleTraders(supabase, BATCH_SIZE_DETAILS, STALE_HOURS_DETAILS);
+    
+    // Prioritize trader details if we have any stale ones (for portfolio data)
     if (staleTraders.length > 0) {
-      console.log(`[sync-worker] Priority 2: Syncing ${staleTraders.length} stale trader details...`);
+      console.log(`[sync-worker] Syncing ${staleTraders.length} stale trader details (priority over pagination)...`);
       const result = await syncTraderDetailsBatch(supabase, bullwareApiKey, staleTraders);
       return new Response(JSON.stringify({ 
         action: 'sync_trader_details', 
@@ -127,7 +121,16 @@ Deno.serve(async (req) => {
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // Priority 3: Check if assets need refresh
+    if (needsTradersPagination) {
+      console.log('[sync-worker] Syncing traders list...');
+      const result = await syncTradersBatch(supabase, bullwareApiKey, tradersState);
+      return new Response(JSON.stringify({ 
+        action: 'sync_traders', 
+        ...result 
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // Priority 2: Check if assets need refresh
     const assetsState = states['assets'];
     if (isStale(assetsState?.last_run, STALE_HOURS_ASSETS)) {
       console.log('[sync-worker] Priority 3: Syncing assets...');
