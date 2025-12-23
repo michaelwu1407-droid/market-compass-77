@@ -4,27 +4,85 @@ import { FeedCard } from '@/components/feed/FeedCard';
 import { TraderMiniCard } from '@/components/feed/TraderMiniCard';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { feedItems, traders, followedTraderIds } from '@/data/mockData';
+import { Skeleton } from '@/components/ui/skeleton';
+import { usePosts } from '@/hooks/usePosts';
+import { useTraders } from '@/hooks/useTraders';
 import { useIsMobile } from '@/hooks/use-mobile';
-import type { FeedItem } from '@/types';
+import type { FeedItem, Post as FeedPost, Trader as FeedTrader } from '@/types';
 
 type FilterType = 'all' | 'following' | 'assets' | 'traders' | 'saved';
 
 export default function FeedPage() {
   const [filter, setFilter] = useState<FilterType>('all');
-  const [selectedItem, setSelectedItem] = useState<FeedItem | null>(null);
   const navigate = useNavigate();
   const isMobile = useIsMobile();
+  
+  const { data: posts, isLoading: postsLoading } = usePosts();
+  const { data: traders, isLoading: tradersLoading } = useTraders();
 
-  const followedTraders = traders.filter(t => followedTraderIds.includes(t.id));
+  // Transform database posts to FeedItem format
+  const feedItems: FeedItem[] = (posts || []).map((post) => {
+    // Map database trader to FeedPost trader format
+    const mappedTrader: FeedTrader | undefined = post.traders ? {
+      id: post.traders.id,
+      etoro_trader_id: post.traders.etoro_username,
+      display_name: post.traders.display_name,
+      avatar_url: post.traders.avatar_url || '',
+      bio: post.traders.bio || '',
+      risk_score: post.traders.risk_score || 0,
+      return_12m: post.traders.gain_12m || 0,
+      return_24m: post.traders.gain_24m || 0,
+      max_drawdown: post.traders.max_drawdown || 0,
+      num_copiers: post.traders.copiers || 0,
+      style_tags: post.traders.tags || [],
+      created_at: post.traders.created_at || '',
+      updated_at: post.traders.updated_at || '',
+      profitable_weeks_pct: post.traders.profitable_weeks_pct || 0,
+      profitable_months_pct: post.traders.profitable_months_pct || 0,
+      aum: post.traders.aum,
+      active_since: post.traders.active_since || '',
+      country: post.traders.country || '',
+      verified: post.traders.verified || false,
+      avg_trade_duration_days: post.traders.avg_holding_time_days || 0,
+      trades_per_week: post.traders.avg_trades_per_week || 0,
+      win_rate: 0,
+      long_short_ratio: 0,
+      sharpe_ratio: null,
+      sortino_ratio: null,
+      daily_var: null,
+      beta: null,
+      monthly_returns: [],
+      performance_history: [],
+      copier_history: [],
+    } : undefined;
+
+    const feedPost: FeedPost = {
+      id: post.id,
+      source: 'etoro',
+      source_post_id: post.etoro_post_id || '',
+      trader_id: post.trader_id,
+      asset_id: null,
+      text: post.content,
+      created_at: post.posted_at || post.created_at || '',
+      like_count: post.likes || 0,
+      comment_count: post.comments || 0,
+      raw_json: {},
+      trader: mappedTrader,
+    };
+
+    return {
+      id: post.id,
+      type: 'post' as const,
+      data: feedPost,
+      created_at: post.posted_at || post.created_at || '',
+    };
+  });
+
+  // Get first 5 traders as "followed" for demo
+  const followedTraders = (traders || []).slice(0, 5);
 
   const handleViewTrader = (traderId: string) => {
     navigate(`/traders/${traderId}`);
-  };
-
-  const handleViewAsset = (assetId: string) => {
-    // For now, navigate to analysis with asset pre-filled
-    navigate('/analysis');
   };
 
   const handleAnalyse = (item: FeedItem) => {
@@ -34,6 +92,8 @@ export default function FeedPage() {
   const handleStarForIC = (item: FeedItem) => {
     navigate('/ic');
   };
+
+  const isLoading = postsLoading || tradersLoading;
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -62,16 +122,30 @@ export default function FeedPage() {
             <div className="sticky top-24 space-y-4">
               <div className="bg-card rounded-xl border border-border p-4">
                 <h3 className="font-semibold mb-3 text-sm">Traders You Follow</h3>
-                <div className="space-y-1">
-                  {followedTraders.map(trader => (
-                    <TraderMiniCard
-                      key={trader.id}
-                      trader={trader}
-                      isFollowing
-                      onClick={() => handleViewTrader(trader.id)}
-                    />
-                  ))}
-                </div>
+                {tradersLoading ? (
+                  <div className="space-y-2">
+                    {[1, 2, 3].map((i) => (
+                      <Skeleton key={i} className="h-10 w-full" />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    {followedTraders.map(trader => (
+                      <TraderMiniCard
+                        key={trader.id}
+                        trader={{
+                          id: trader.id,
+                          display_name: trader.display_name,
+                          avatar_url: trader.avatar_url || '',
+                          return_12m: trader.gain_12m || 0,
+                          risk_score: trader.risk_score || 0,
+                        }}
+                        isFollowing
+                        onClick={() => handleViewTrader(trader.id)}
+                      />
+                    ))}
+                  </div>
+                )}
                 <Button variant="ghost" size="sm" className="w-full mt-3" onClick={() => navigate('/traders')}>
                   Discover more traders
                 </Button>
@@ -82,16 +156,28 @@ export default function FeedPage() {
 
         {/* Main Feed */}
         <div className="flex-1 min-w-0">
-          <div className="space-y-4">
-            {feedItems.map((item) => (
-              <FeedCard
-                key={item.id}
-                item={item}
-                onAnalyse={handleAnalyse}
-                onStarForIC={handleStarForIC}
-              />
-            ))}
-          </div>
+          {isLoading ? (
+            <div className="space-y-4">
+              {[1, 2, 3, 4].map((i) => (
+                <Skeleton key={i} className="h-48 w-full rounded-xl" />
+              ))}
+            </div>
+          ) : feedItems.length > 0 ? (
+            <div className="space-y-4">
+              {feedItems.map((item) => (
+                <FeedCard
+                  key={item.id}
+                  item={item}
+                  onAnalyse={handleAnalyse}
+                  onStarForIC={handleStarForIC}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-12 text-muted-foreground">
+              <p>No posts found. Run the scrape-posts edge function to fetch data.</p>
+            </div>
+          )}
         </div>
 
         {/* Right Context Panel - Desktop only */}
@@ -110,8 +196,8 @@ export default function FeedPage() {
                     <span className="font-medium">{followedTraders.length}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-sm text-muted-foreground">New trades</span>
-                    <span className="font-medium text-primary">4</span>
+                    <span className="text-sm text-muted-foreground">Total traders</span>
+                    <span className="font-medium text-primary">{traders?.length || 0}</span>
                   </div>
                 </div>
               </div>
