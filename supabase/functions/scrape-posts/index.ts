@@ -42,6 +42,19 @@ function analyzeSentiment(text: string): string {
   return 'neutral';
 }
 
+// Clean escaped markdown characters from Firecrawl
+function cleanEscapedContent(content: string): string {
+  return content
+    .replace(/\\\\/g, '\n')    // \\ -> newline
+    .replace(/\\_/g, '_')       // \_ -> underscore
+    .replace(/\\n/g, '\n')      // Literal \n string -> newline
+    .replace(/\\\[/g, '[')      // \[ -> bracket
+    .replace(/\\\]/g, ']')      // \] -> bracket
+    .replace(/\\\*/g, '*')      // \* -> asterisk
+    .replace(/\\#/g, '#')       // \# -> hash
+    .replace(/\\-/g, '-');      // \- -> dash
+}
+
 async function scrapeEtoroFeed(firecrawlApiKey: string, traderUsernames: string[]): Promise<ScrapedPost[]> {
   const allPosts: ScrapedPost[] = [];
 
@@ -110,7 +123,7 @@ async function scrapeEtoroFeed(firecrawlApiKey: string, traderUsernames: string[
 
         allPosts.push({
           trader_username: username,
-          content: content.substring(0, 1000),
+          content: cleanEscapedContent(content).substring(0, 1000),
           posted_at: postedAt.toISOString(),
           likes: likesMatch ? parseInt(likesMatch[1]) : 0,
           comments: commentsMatch ? parseInt(commentsMatch[1]) : 0,
