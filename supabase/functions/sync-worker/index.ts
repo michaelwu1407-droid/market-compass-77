@@ -1,0 +1,484 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+const BATCH_SIZE_TRADERS = 10; // Traders per page from Bullaware
+const BATCH_SIZE_DETAILS = 3; // Trader details to sync per run
+const RATE_LIMIT_DELAY_MS = 6000; // 6 seconds between Bullaware calls
+const STALE_HOURS_DETAILS = 2; // Consider trader details stale after 2 hours
+const STALE_HOURS_ASSETS = 24; // Consider assets stale after 24 hours
+const STALE_HOURS_TRADERS = 6; // Re-paginate traders list every 6 hours
+
+interface SyncState {
+  id: string;
+  last_run: string | null;
+  last_page: number;
+  total_pages: number | null;
+  status: string;
+  metadata: Record<string, unknown>;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isStale(lastRun: string | null, hoursThreshold: number): boolean {
+  if (!lastRun) return true;
+  const lastRunDate = new Date(lastRun);
+  const now = new Date();
+  const hoursDiff = (now.getTime() - lastRunDate.getTime()) / (1000 * 60 * 60);
+  return hoursDiff >= hoursThreshold;
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  const bullwareApiKey = Deno.env.get('BULLAWARE_API_KEY')!;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const supabase: any = createClient(supabaseUrl, supabaseServiceKey);
+
+  try {
+    console.log('[sync-worker] Starting sync cycle...');
+
+    // Get current sync states
+    const { data: syncStates, error: stateError } = await supabase
+      .from('sync_state')
+      .select('*');
+
+    if (stateError) throw stateError;
+
+    const states: Record<string, SyncState> = {};
+    for (const state of syncStates || []) {
+      states[state.id] = state;
+    }
+
+    // Priority 1: Check if we need to discover/refresh traders list
+    const tradersState = states['traders'];
+    const needsTradersPagination = 
+      tradersState?.status === 'paginating' || 
+      isStale(tradersState?.last_run, STALE_HOURS_TRADERS);
+
+    if (needsTradersPagination) {
+      console.log('[sync-worker] Priority 1: Syncing traders list...');
+      const result = await syncTradersBatch(supabase, bullwareApiKey, tradersState);
+      return new Response(JSON.stringify({ 
+        action: 'sync_traders', 
+        ...result 
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // Priority 2: Check for stale trader details
+    const staleTraders = await getStaleTraders(supabase, BATCH_SIZE_DETAILS, STALE_HOURS_DETAILS);
+    if (staleTraders.length > 0) {
+      console.log(`[sync-worker] Priority 2: Syncing ${staleTraders.length} stale trader details...`);
+      const result = await syncTraderDetailsBatch(supabase, bullwareApiKey, staleTraders);
+      return new Response(JSON.stringify({ 
+        action: 'sync_trader_details', 
+        ...result 
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // Priority 3: Check if assets need refresh
+    const assetsState = states['assets'];
+    if (isStale(assetsState?.last_run, STALE_HOURS_ASSETS)) {
+      console.log('[sync-worker] Priority 3: Syncing assets...');
+      const result = await syncAssetsBatch(supabase, bullwareApiKey);
+      return new Response(JSON.stringify({ 
+        action: 'sync_assets', 
+        ...result 
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    console.log('[sync-worker] Everything is fresh, skipping this cycle.');
+    return new Response(JSON.stringify({ 
+      action: 'skip', 
+      message: 'All data is fresh' 
+    }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[sync-worker] Error:', errorMessage);
+    return new Response(JSON.stringify({ 
+      error: errorMessage 
+    }), { 
+      status: 500, 
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+    });
+  }
+});
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function syncTradersBatch(
+  supabase: any,
+  apiKey: string,
+  state: SyncState | undefined
+): Promise<{ synced: number; page: number; totalPages: number | null; status: string }> {
+  const currentPage = state?.status === 'paginating' ? state.last_page : 1;
+  
+  // Update state to paginating
+  await supabase
+    .from('sync_state')
+    .upsert({ 
+      id: 'traders', 
+      status: 'paginating', 
+      last_page: currentPage,
+      updated_at: new Date().toISOString()
+    });
+
+  console.log(`[sync-worker] Fetching traders page ${currentPage}...`);
+
+  const response = await fetch(
+    `https://api.bullaware.com/traders?page=${currentPage}&limit=${BATCH_SIZE_TRADERS}`,
+    { headers: { 'Authorization': `Bearer ${apiKey}` } }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Bullaware API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const traders = data.data || data.traders || data || [];
+  const totalPages = data.total_pages || data.totalPages || Math.ceil((data.total || traders.length) / BATCH_SIZE_TRADERS);
+
+  console.log(`[sync-worker] Got ${traders.length} traders from page ${currentPage}/${totalPages}`);
+
+  // Map and upsert traders
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tradersToUpsert = traders.map((t: any) => ({
+    etoro_username: t.username || t.etoro_username,
+    display_name: t.displayName || t.display_name || t.username || t.etoro_username,
+    avatar_url: t.avatarUrl || t.avatar_url || t.avatar,
+    bio: t.bio || t.about,
+    country: t.country,
+    verified: t.verified ?? false,
+    risk_score: t.riskScore ?? t.risk_score,
+    gain_12m: t.gain12m ?? t.gain_12m ?? t.yearlyGain,
+    gain_24m: t.gain24m ?? t.gain_24m,
+    max_drawdown: t.maxDrawdown ?? t.max_drawdown,
+    copiers: t.copiers ?? t.copiersCount ?? 0,
+    aum: t.aum ?? t.assets_under_management,
+    profitable_weeks_pct: t.profitableWeeksPct ?? t.profitable_weeks_pct,
+    profitable_months_pct: t.profitableMonthsPct ?? t.profitable_months_pct,
+    avg_trades_per_week: t.avgTradesPerWeek ?? t.avg_trades_per_week,
+    avg_holding_time_days: t.avgHoldingTimeDays ?? t.avg_holding_time_days,
+    active_since: t.activeSince ?? t.active_since,
+    tags: t.tags || [],
+    updated_at: new Date().toISOString(),
+  }));
+
+  if (tradersToUpsert.length > 0) {
+    const { error } = await supabase
+      .from('traders')
+      .upsert(tradersToUpsert, { onConflict: 'etoro_username' });
+    
+    if (error) {
+      console.error('[sync-worker] Error upserting traders:', error);
+    }
+  }
+
+  // Check if we've finished all pages
+  const isComplete = currentPage >= totalPages;
+  const nextPage = isComplete ? 1 : currentPage + 1;
+  const newStatus = isComplete ? 'idle' : 'paginating';
+
+  // Update state
+  await supabase
+    .from('sync_state')
+    .upsert({ 
+      id: 'traders', 
+      status: newStatus, 
+      last_page: nextPage,
+      total_pages: totalPages,
+      last_run: isComplete ? new Date().toISOString() : state?.last_run,
+      updated_at: new Date().toISOString()
+    });
+
+  return { 
+    synced: tradersToUpsert.length, 
+    page: currentPage, 
+    totalPages, 
+    status: newStatus 
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function getStaleTraders(
+  supabase: any,
+  limit: number,
+  hoursThreshold: number
+): Promise<Array<{ id: string; etoro_username: string }>> {
+  const thresholdTime = new Date();
+  thresholdTime.setHours(thresholdTime.getHours() - hoursThreshold);
+
+  const { data, error } = await supabase
+    .from('traders')
+    .select('id, etoro_username, updated_at')
+    .or(`updated_at.is.null,updated_at.lt.${thresholdTime.toISOString()}`)
+    .order('updated_at', { ascending: true, nullsFirst: true })
+    .limit(limit);
+
+  if (error) {
+    console.error('[sync-worker] Error fetching stale traders:', error);
+    return [];
+  }
+
+  return data || [];
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function syncTraderDetailsBatch(
+  supabase: any,
+  apiKey: string,
+  traders: Array<{ id: string; etoro_username: string }>
+): Promise<{ synced: number; traders: string[] }> {
+  const syncedTraders: string[] = [];
+
+  for (const trader of traders) {
+    try {
+      console.log(`[sync-worker] Syncing details for ${trader.etoro_username}...`);
+
+      // Fetch holdings
+      const holdingsRes = await fetch(
+        `https://api.bullaware.com/traders/${trader.etoro_username}/portfolio`,
+        { headers: { 'Authorization': `Bearer ${apiKey}` } }
+      );
+
+      if (holdingsRes.ok) {
+        const holdingsData = await holdingsRes.json();
+        const holdings = holdingsData.positions || holdingsData.holdings || holdingsData || [];
+
+        // Process holdings
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        for (const h of holdings as any[]) {
+          const symbol = h.symbol || h.instrumentId || h.asset;
+          if (!symbol) continue;
+
+          // Get or create asset
+          let { data: asset } = await supabase
+            .from('assets')
+            .select('id')
+            .eq('symbol', symbol)
+            .single();
+
+          if (!asset) {
+            const { data: newAsset } = await supabase
+              .from('assets')
+              .insert({ symbol, name: h.name || symbol })
+              .select('id')
+              .single();
+            asset = newAsset;
+          }
+
+          if (asset) {
+            await supabase
+              .from('trader_holdings')
+              .upsert({
+                trader_id: trader.id,
+                asset_id: asset.id,
+                allocation_pct: h.allocationPct ?? h.allocation_pct ?? h.allocation,
+                avg_open_price: h.avgOpenPrice ?? h.avg_open_price,
+                current_value: h.currentValue ?? h.current_value ?? h.value,
+                profit_loss_pct: h.profitLossPct ?? h.profit_loss_pct ?? h.pnl,
+                updated_at: new Date().toISOString(),
+              }, { onConflict: 'trader_id,asset_id' });
+          }
+        }
+      }
+
+      await delay(RATE_LIMIT_DELAY_MS);
+
+      // Fetch trades
+      const tradesRes = await fetch(
+        `https://api.bullaware.com/traders/${trader.etoro_username}/trades`,
+        { headers: { 'Authorization': `Bearer ${apiKey}` } }
+      );
+
+      if (tradesRes.ok) {
+        const tradesData = await tradesRes.json();
+        const trades = tradesData.trades || tradesData || [];
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        for (const t of (trades as any[]).slice(0, 20)) { // Limit to recent 20 trades
+          const symbol = t.symbol || t.instrumentId || t.asset;
+          if (!symbol) continue;
+
+          let { data: asset } = await supabase
+            .from('assets')
+            .select('id')
+            .eq('symbol', symbol)
+            .single();
+
+          if (!asset) {
+            const { data: newAsset } = await supabase
+              .from('assets')
+              .insert({ symbol, name: t.name || symbol })
+              .select('id')
+              .single();
+            asset = newAsset;
+          }
+
+          if (asset) {
+            await supabase
+              .from('trades')
+              .upsert({
+                trader_id: trader.id,
+                asset_id: asset.id,
+                action: t.action || t.side || (t.isBuy ? 'buy' : 'sell'),
+                amount: t.amount ?? t.units,
+                price: t.price ?? t.openPrice,
+                percentage_of_portfolio: t.portfolioPercentage,
+                executed_at: t.executedAt ?? t.openDate ?? t.date,
+              }, { ignoreDuplicates: true });
+          }
+        }
+      }
+
+      await delay(RATE_LIMIT_DELAY_MS);
+
+      // Fetch performance
+      const perfRes = await fetch(
+        `https://api.bullaware.com/traders/${trader.etoro_username}/performance`,
+        { headers: { 'Authorization': `Bearer ${apiKey}` } }
+      );
+
+      if (perfRes.ok) {
+        const perfData = await perfRes.json();
+        const monthly = perfData.monthly || perfData.monthlyReturns || [];
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        for (const m of monthly as any[]) {
+          await supabase
+            .from('trader_performance')
+            .upsert({
+              trader_id: trader.id,
+              year: m.year,
+              month: m.month,
+              return_pct: m.return ?? m.returnPct ?? m.gain,
+            }, { onConflict: 'trader_id,year,month' });
+        }
+      }
+
+      // Update trader's updated_at
+      await supabase
+        .from('traders')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', trader.id);
+
+      syncedTraders.push(trader.etoro_username);
+      console.log(`[sync-worker] Completed sync for ${trader.etoro_username}`);
+
+      // Rate limit between traders
+      if (traders.indexOf(trader) < traders.length - 1) {
+        await delay(RATE_LIMIT_DELAY_MS);
+      }
+
+    } catch (err) {
+      console.error(`[sync-worker] Error syncing ${trader.etoro_username}:`, err);
+    }
+  }
+
+  // Update sync state
+  await supabase
+    .from('sync_state')
+    .upsert({ 
+      id: 'trader_details', 
+      last_run: new Date().toISOString(),
+      status: 'idle',
+      updated_at: new Date().toISOString()
+    });
+
+  return { synced: syncedTraders.length, traders: syncedTraders };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function syncAssetsBatch(
+  supabase: any,
+  apiKey: string
+): Promise<{ synced: number }> {
+  let totalSynced = 0;
+  let page = 1;
+  let hasMore = true;
+
+  while (hasMore) {
+    console.log(`[sync-worker] Fetching assets page ${page}...`);
+
+    const response = await fetch(
+      `https://api.bullaware.com/assets?page=${page}&limit=50`,
+      { headers: { 'Authorization': `Bearer ${apiKey}` } }
+    );
+
+    if (!response.ok) {
+      console.error(`[sync-worker] Assets API error: ${response.status}`);
+      break;
+    }
+
+    const data = await response.json();
+    const assets = data.data || data.assets || data || [];
+
+    if (assets.length === 0) {
+      hasMore = false;
+      break;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const assetsToUpsert = assets.map((a: any) => ({
+      symbol: a.symbol || a.ticker,
+      name: a.name || a.displayName || a.symbol,
+      asset_type: a.type || a.asset_type || 'stock',
+      logo_url: a.logoUrl || a.logo_url || a.image,
+      exchange: a.exchange,
+      sector: a.sector,
+      industry: a.industry,
+      market_cap: a.marketCap ?? a.market_cap,
+      pe_ratio: a.peRatio ?? a.pe_ratio,
+      eps: a.eps,
+      dividend_yield: a.dividendYield ?? a.dividend_yield,
+      beta: a.beta,
+      high_52w: a.high52w ?? a.high_52w ?? a.yearHigh,
+      low_52w: a.low52w ?? a.low_52w ?? a.yearLow,
+      avg_volume: a.avgVolume ?? a.avg_volume,
+      current_price: a.currentPrice ?? a.current_price ?? a.price,
+      price_change: a.priceChange ?? a.price_change,
+      price_change_pct: a.priceChangePct ?? a.price_change_pct,
+      updated_at: new Date().toISOString(),
+    }));
+
+    const { error } = await supabase
+      .from('assets')
+      .upsert(assetsToUpsert, { onConflict: 'symbol' });
+
+    if (error) {
+      console.error('[sync-worker] Error upserting assets:', error);
+    } else {
+      totalSynced += assetsToUpsert.length;
+    }
+
+    page++;
+    hasMore = assets.length === 50;
+
+    if (hasMore) {
+      await delay(RATE_LIMIT_DELAY_MS);
+    }
+  }
+
+  // Update sync state
+  await supabase
+    .from('sync_state')
+    .upsert({ 
+      id: 'assets', 
+      last_run: new Date().toISOString(),
+      status: 'idle',
+      updated_at: new Date().toISOString()
+    });
+
+  console.log(`[sync-worker] Synced ${totalSynced} assets`);
+  return { synced: totalSynced };
+}

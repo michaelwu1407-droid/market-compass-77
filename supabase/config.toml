@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.scrape-daily-movers]
 verify_jwt = false
+
+[functions.sync-worker]
+verify_jwt = false
