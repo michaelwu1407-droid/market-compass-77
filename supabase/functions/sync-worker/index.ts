@@ -12,6 +12,7 @@ const ENDPOINTS = {
   portfolio: (username: string) => `${BULLAWARE_BASE}/investors/${username}/portfolio`,
   trades: (username: string) => `${BULLAWARE_BASE}/investors/${username}/trades`,
   performance: (username: string) => `${BULLAWARE_BASE}/investors/${username}/performance`,
+  stats: (username: string) => `${BULLAWARE_BASE}/investors/${username}/stats`,
   instruments: `${BULLAWARE_BASE}/instruments`,
 };
 
@@ -342,21 +343,25 @@ async function syncTraderDetailsBatch(
           }
 
           if (asset) {
-            // Parse allocation - Bullaware API returns it as "value" (percentage of portfolio)
+            // Bullaware API returns:
+            // - "value": percentage allocation of portfolio (e.g. 7.659151 = 7.66%)
+            // - "netProfit": P&L percentage (can be negative)
             const allocationValue = h.value ?? h.allocationPct ?? h.allocation_pct ?? h.allocation ?? h.weight ?? h.percentage ?? h.invested;
-            // Ensure it's a valid number
             const allocation = typeof allocationValue === 'number' ? allocationValue : parseFloat(allocationValue) || 0;
+            
+            // netProfit is the P&L field from Bullaware
+            const pnlValue = h.netProfit ?? h.profitLossPct ?? h.profit_loss_pct ?? h.pnl ?? h.gain ?? h.profitLoss ?? h.pl ?? h.unrealizedPnl ?? h.unrealizedPnlPct ?? h.returnPct ?? h.returns;
+            const pnl = typeof pnlValue === 'number' ? pnlValue : (pnlValue ? parseFloat(pnlValue) : null);
             
             await supabase
               .from('trader_holdings')
               .upsert({
                 trader_id: trader.id,
                 asset_id: asset.id,
-                allocation_pct: allocation,
+                allocation_pct: allocation, // This is the primary allocation field
                 avg_open_price: h.avgOpenPrice ?? h.avg_open_price ?? h.openPrice ?? h.openRate ?? h.avgPrice,
-                current_value: allocation, // Also store in current_value as backup
-        // netProfit is the field returned by Bullaware API
-        profit_loss_pct: h.netProfit ?? h.profitLossPct ?? h.profit_loss_pct ?? h.pnl ?? h.gain ?? h.profitLoss ?? h.pl ?? h.unrealizedPnl ?? h.unrealizedPnlPct ?? h.returnPct ?? h.returns,
+                current_value: allocation, // Keep as backup
+                profit_loss_pct: pnl, // P&L percentage
                 updated_at: new Date().toISOString(),
               }, { onConflict: 'trader_id,asset_id' });
           }
@@ -464,6 +469,63 @@ async function syncTraderDetailsBatch(
         }
       } else {
         console.log(`[sync-worker] Performance fetch failed for ${trader.etoro_username}: ${perfRes.status}`);
+      }
+
+      await delay(RATE_LIMIT_DELAY_MS);
+
+      // Fetch stats (for advanced metrics like Sharpe, Sortino, Alpha, Beta, Volatility)
+      const statsRes = await fetch(
+        ENDPOINTS.stats(trader.etoro_username),
+        { 
+          headers: { 
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          } 
+        }
+      );
+
+      if (statsRes.ok) {
+        const statsData = await statsRes.json();
+        const stats = statsData.data || statsData.stats || statsData;
+        
+        console.log(`[sync-worker] Got stats for ${trader.etoro_username}:`, JSON.stringify(stats, null, 2).slice(0, 500));
+        
+        // Update trader with advanced metrics
+        const advancedMetrics: Record<string, unknown> = {};
+        
+        // Try various field names for each metric
+        if (stats.sharpeRatio !== undefined || stats.sharpe !== undefined || stats.sharpe_ratio !== undefined) {
+          advancedMetrics.sharpe_ratio = stats.sharpeRatio ?? stats.sharpe ?? stats.sharpe_ratio;
+        }
+        if (stats.sortinoRatio !== undefined || stats.sortino !== undefined || stats.sortino_ratio !== undefined) {
+          advancedMetrics.sortino_ratio = stats.sortinoRatio ?? stats.sortino ?? stats.sortino_ratio;
+        }
+        if (stats.alpha !== undefined) {
+          advancedMetrics.alpha = stats.alpha;
+        }
+        if (stats.beta !== undefined) {
+          advancedMetrics.beta = stats.beta;
+        }
+        if (stats.volatility !== undefined || stats.stdDev !== undefined || stats.standardDeviation !== undefined) {
+          advancedMetrics.volatility = stats.volatility ?? stats.stdDev ?? stats.standardDeviation;
+        }
+        if (stats.dailyDrawdown !== undefined || stats.dailyDD !== undefined || stats.daily_drawdown !== undefined) {
+          advancedMetrics.daily_drawdown = stats.dailyDrawdown ?? stats.dailyDD ?? stats.daily_drawdown;
+        }
+        // Also grab risk score if available
+        if (stats.riskScore !== undefined || stats.risk !== undefined || stats.risk_score !== undefined) {
+          advancedMetrics.risk_score = stats.riskScore ?? stats.risk ?? stats.risk_score;
+        }
+        
+        if (Object.keys(advancedMetrics).length > 0) {
+          console.log(`[sync-worker] Updating advanced metrics for ${trader.etoro_username}:`, advancedMetrics);
+          await supabase
+            .from('traders')
+            .update(advancedMetrics)
+            .eq('id', trader.id);
+        }
+      } else {
+        console.log(`[sync-worker] Stats fetch failed for ${trader.etoro_username}: ${statsRes.status}`);
       }
 
       // Update trader's details_synced_at (not updated_at which is for list sync)
