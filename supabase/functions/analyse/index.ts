@@ -22,34 +22,63 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { trader_id, asset_id, analysis_type = 'comprehensive' } = body;
+    console.log('Received analysis request:', JSON.stringify(body));
+    
+    // Support both frontend format (traderIds/assets) and direct format (trader_id/asset_id)
+    const { 
+      trader_id, 
+      asset_id, 
+      traderIds = [], 
+      assets = [],
+      reportType = 'comprehensive',
+      horizon = '12m',
+      extraInstructions = '',
+      outputMode = 'full'
+    } = body;
 
-    if (!trader_id && !asset_id) {
-      throw new Error('Either trader_id or asset_id is required');
-    }
+    // Resolve trader_id from either direct param or array
+    const resolvedTraderId = trader_id || (traderIds.length > 0 ? traderIds[0] : null);
+    // Resolve asset from either direct param or assets array (assets may be symbols, not IDs)
+    const resolvedAssetSymbol = assets.length > 0 ? assets[0] : null;
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
+    // If we have an asset symbol but not an ID, look it up
+    let resolvedAssetId = asset_id;
+    if (!resolvedAssetId && resolvedAssetSymbol) {
+      const { data: asset } = await supabase
+        .from('assets')
+        .select('id')
+        .eq('symbol', resolvedAssetSymbol.toUpperCase())
+        .maybeSingle();
+      resolvedAssetId = asset?.id || null;
+    }
+
+    if (!resolvedTraderId && !resolvedAssetId) {
+      throw new Error('Either a trader or asset must be selected for analysis');
+    }
+
     let contextData: any = {};
     let entityName = '';
+    const analysisType = reportType === 'trader_portfolio' ? 'trader' : reportType;
 
     // Fetch data for analysis context
-    if (trader_id) {
+    if (resolvedTraderId) {
       const { data: trader } = await supabase
         .from('traders')
         .select('*')
-        .eq('id', trader_id)
+        .eq('id', resolvedTraderId)
         .single();
 
       const { data: holdings } = await supabase
         .from('trader_holdings')
         .select('*, assets(*)')
-        .eq('trader_id', trader_id);
+        .eq('trader_id', resolvedTraderId);
 
       const { data: performance } = await supabase
         .from('trader_performance')
         .select('*')
-        .eq('trader_id', trader_id)
+        .eq('trader_id', resolvedTraderId)
         .order('year', { ascending: false })
         .order('month', { ascending: false })
         .limit(24);
@@ -57,39 +86,39 @@ serve(async (req) => {
       const { data: recentTrades } = await supabase
         .from('trades')
         .select('*, assets(*)')
-        .eq('trader_id', trader_id)
+        .eq('trader_id', resolvedTraderId)
         .order('executed_at', { ascending: false })
         .limit(20);
 
       contextData = { trader, holdings, performance, recentTrades };
       entityName = trader?.display_name || 'Unknown Trader';
 
-    } else if (asset_id) {
+    } else if (resolvedAssetId) {
       const { data: asset } = await supabase
         .from('assets')
         .select('*')
-        .eq('id', asset_id)
+        .eq('id', resolvedAssetId)
         .single();
 
       const { data: priceHistory } = await supabase
         .from('price_history')
         .select('*')
-        .eq('asset_id', asset_id)
+        .eq('asset_id', resolvedAssetId)
         .order('date', { ascending: false })
         .limit(90);
 
       const { data: topHolders } = await supabase
         .from('trader_holdings')
         .select('*, traders(*)')
-        .eq('asset_id', asset_id)
+        .eq('asset_id', resolvedAssetId)
         .order('allocation_pct', { ascending: false })
         .limit(10);
 
       contextData = { asset, priceHistory, topHolders };
-      entityName = asset?.name || 'Unknown Asset';
+      entityName = asset?.name || resolvedAssetSymbol || 'Unknown Asset';
     }
 
-    console.log(`Generating ${analysis_type} analysis for ${entityName}`);
+    console.log(`Generating ${analysisType} analysis for ${entityName} (horizon: ${horizon})`);
 
     // Build the prompt based on analysis type
     const systemPrompt = `You are an expert investment analyst providing institutional-grade research reports. 
@@ -99,9 +128,12 @@ Your analysis should be:
 - Actionable with specific recommendations
 - Professional in tone but accessible
 
-Format your response in clear sections with headers.`;
+Investment horizon context: ${horizon === '6m' ? '6 months' : horizon === '12m' ? '12 months' : 'Long term (2+ years)'}
 
-    const userPrompt = trader_id 
+Format your response in clear sections with headers.
+${extraInstructions ? `\nAdditional focus: ${extraInstructions}` : ''}`;
+
+    const userPrompt = resolvedTraderId 
       ? `Analyze this eToro copy trader based on their profile and trading data:
 
 TRADER PROFILE:
@@ -116,7 +148,7 @@ ${JSON.stringify(contextData.performance, null, 2)}
 RECENT TRADES (last 20):
 ${JSON.stringify(contextData.recentTrades, null, 2)}
 
-Provide a ${analysis_type} analysis including:
+Provide a ${outputMode === 'quick' ? 'concise bullet-point summary' : 'comprehensive analysis'} including:
 1. Executive Summary (2-3 sentences)
 2. Performance Analysis (returns, risk-adjusted metrics, drawdown assessment)
 3. Trading Style Assessment (holding period, frequency, sector concentration)
@@ -135,7 +167,7 @@ ${JSON.stringify(contextData.priceHistory?.slice(0, 30), null, 2)}
 TOP TRADERS HOLDING THIS ASSET:
 ${JSON.stringify(contextData.topHolders, null, 2)}
 
-Provide a ${analysis_type} analysis including:
+Provide a ${outputMode === 'quick' ? 'concise bullet-point summary' : 'comprehensive analysis'} including:
 1. Executive Summary
 2. Valuation Analysis (PE, EPS, comparison to sector)
 3. Technical Analysis (price trends, support/resistance)
@@ -156,7 +188,7 @@ Provide a ${analysis_type} analysis including:
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
         ],
-        max_tokens: 2000,
+        max_tokens: outputMode === 'quick' ? 1000 : 2000,
         temperature: 0.7,
       }),
     });
@@ -176,13 +208,17 @@ Provide a ${analysis_type} analysis including:
     const { data: report, error: reportError } = await supabase
       .from('reports')
       .insert({
-        title: `${analysis_type.charAt(0).toUpperCase() + analysis_type.slice(1)} Analysis: ${entityName}`,
+        title: `${analysisType.charAt(0).toUpperCase() + analysisType.slice(1)} Analysis: ${entityName}`,
         content: analysisContent,
-        trader_id: trader_id || null,
-        asset_id: asset_id || null,
-        report_type: analysis_type,
+        summary: analysisContent.slice(0, 500),
+        trader_id: resolvedTraderId || null,
+        asset_id: resolvedAssetId || null,
+        report_type: analysisType,
+        horizon: horizon,
         ai_generated: true,
         status: 'completed',
+        input_trader_ids: resolvedTraderId ? [resolvedTraderId] : null,
+        input_assets: resolvedAssetSymbol ? [resolvedAssetSymbol] : null,
       })
       .select()
       .single();
@@ -196,7 +232,9 @@ Provide a ${analysis_type} analysis including:
         success: true,
         report_id: report?.id,
         title: report?.title,
+        summary: analysisContent.slice(0, 500),
         content: analysisContent,
+        raw_response: analysisContent,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
