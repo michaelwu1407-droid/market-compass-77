@@ -15,6 +15,7 @@ interface ScrapedPost {
   mentioned_symbols: string[];
   sentiment?: string;
   content_hash: string;
+  etoro_url: string;
 }
 
 function extractSymbols(text: string): string[] {
@@ -188,7 +189,15 @@ async function scrapeEtoroFeed(firecrawlApiKey: string, traderUsernames: string[
           url,
           formats: ['markdown'],
           onlyMainContent: true,
-          waitFor: 3000,
+          waitFor: 5000,
+          actions: [
+            // Click all "Show More" / "Read More" buttons to expand full content
+            { type: 'click', selector: '[data-testid="show-more-button"]' },
+            { type: 'click', selector: 'button:has-text("Show more")' },
+            { type: 'click', selector: 'button:has-text("Read more")' },
+            { type: 'click', selector: '.show-more-button' },
+            { type: 'wait', milliseconds: 1500 }
+          ]
         }),
       });
 
@@ -258,6 +267,7 @@ async function scrapeEtoroFeed(firecrawlApiKey: string, traderUsernames: string[
           mentioned_symbols: extractSymbols(content),
           sentiment: analyzeSentiment(content),
           content_hash: contentHash,
+          etoro_url: url,
         });
         
         validPostsFound++;
