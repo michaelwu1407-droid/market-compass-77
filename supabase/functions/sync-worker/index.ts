@@ -236,18 +236,30 @@ const INSTRUMENT_ID_MAP: Record<string, { symbol: string; type: string }> = {
   '1001': { symbol: 'BTC', type: 'crypto' },
   '5888': { symbol: 'BTC', type: 'crypto' },
   '1002': { symbol: 'ETH', type: 'crypto' },
+  '1003': { symbol: 'XRP', type: 'crypto' },
+  '1004': { symbol: 'LTC', type: 'crypto' },
   '1009': { symbol: 'XRP', type: 'crypto' },
   '1006': { symbol: 'LTC', type: 'crypto' },
   '1007': { symbol: 'DASH', type: 'crypto' },
+  '1021': { symbol: 'BCH', type: 'crypto' },
   '1058': { symbol: 'ADA', type: 'crypto' },
   '1060': { symbol: 'IOTA', type: 'crypto' },
   '1064': { symbol: 'XLM', type: 'crypto' },
   '1072': { symbol: 'EOS', type: 'crypto' },
   '1081': { symbol: 'BNB', type: 'crypto' },
+  '1130': { symbol: 'TRX', type: 'crypto' },
   '1135': { symbol: 'SOL', type: 'crypto' },
   '1159': { symbol: 'DOGE', type: 'crypto' },
   '1238': { symbol: 'AVAX', type: 'crypto' },
   '1239': { symbol: 'MATIC', type: 'crypto' },
+  
+  // Commodities
+  '18': { symbol: 'GOLD', type: 'commodity' },
+  '63': { symbol: 'OIL', type: 'commodity' },
+  '91': { symbol: 'OIL', type: 'commodity' },
+  
+  // Forex pairs
+  '310': { symbol: 'EUR/USD', type: 'forex' },
   
   // Major US Tech Stocks
   '1': { symbol: 'AAPL', type: 'stock' },
@@ -258,9 +270,6 @@ const INSTRUMENT_ID_MAP: Record<string, { symbol: string; type: string }> = {
   '7': { symbol: 'NVDA', type: 'stock' },
   '8': { symbol: 'TSLA', type: 'stock' },
   '10': { symbol: 'NFLX', type: 'stock' },
-  '18': { symbol: 'GOLD', type: 'commodity' },
-  '91': { symbol: 'OIL', type: 'commodity' },
-  '310': { symbol: 'EUR/USD', type: 'forex' },
   
   // Palantir and other popular stocks (discovered from logs)
   '10215': { symbol: 'PLTR', type: 'stock' },
@@ -274,6 +283,16 @@ const INSTRUMENT_ID_MAP: Record<string, { symbol: string; type: string }> = {
   '4278': { symbol: 'COIN', type: 'stock' },
   '7991': { symbol: 'RIVN', type: 'stock' },
   '8897': { symbol: 'SMCI', type: 'stock' },
+  
+  // Additional discovered instrument IDs from logs
+  '3012': { symbol: 'PYPL', type: 'stock' },
+  '3200': { symbol: 'SQ', type: 'stock' },
+  '3221': { symbol: 'ZM', type: 'stock' },
+  '3236': { symbol: 'SNOW', type: 'stock' },
+  '3237': { symbol: 'DASH', type: 'stock' },
+  '4237': { symbol: 'RBLX', type: 'stock' },
+  '4441': { symbol: 'HOOD', type: 'stock' },
+  '8739': { symbol: 'CRWD', type: 'stock' },
   
   // Additional common stocks
   '100': { symbol: 'JPM', type: 'stock' },
@@ -948,25 +967,46 @@ async function syncTraderDetailsBatch(
             // Bullaware positions array fields: positionId, isBuy, openRate, closeRate, openDateTime, closeDateTime, netProfit
             const positionId = t.positionId ? Number(t.positionId) : null;
             
-            await supabase
-              .from('trades')
-              .upsert({
-                trader_id: trader.id,
-                asset_id: asset.id,
-                position_id: positionId,
-                action: t.isBuy === true ? 'buy' : t.isBuy === false ? 'sell' : (t.action || t.side || t.type || 'unknown'),
-                open_price: t.openRate ?? t.openPrice ?? null,
-                close_price: t.closeRate ?? t.closePrice ?? null,
-                profit_loss_pct: t.netProfit ?? null,
-                open_date: t.openDateTime ?? t.openDate ?? null,
-                executed_at: t.closeDateTime ?? t.executedAt ?? t.date ?? t.timestamp ?? null,
-                amount: t.amount ?? t.units ?? t.quantity ?? null,
-                price: t.closeRate ?? t.closePrice ?? t.openRate ?? t.openPrice ?? null,
-                percentage_of_portfolio: t.portfolioPercentage ?? t.weight ?? null,
-              }, { 
-                onConflict: 'position_id',
-                ignoreDuplicates: false 
-              });
+            const tradeData = {
+              trader_id: trader.id,
+              asset_id: asset.id,
+              position_id: positionId,
+              action: t.isBuy === true ? 'buy' : t.isBuy === false ? 'sell' : (t.action || t.side || t.type || 'unknown'),
+              open_price: t.openRate ?? t.openPrice ?? null,
+              close_price: t.closeRate ?? t.closePrice ?? null,
+              profit_loss_pct: t.netProfit ?? null,
+              open_date: t.openDateTime ?? t.openDate ?? null,
+              executed_at: t.closeDateTime ?? t.executedAt ?? t.date ?? t.timestamp ?? null,
+              amount: t.amount ?? t.units ?? t.quantity ?? null,
+              price: t.closeRate ?? t.closePrice ?? t.openRate ?? t.openPrice ?? null,
+              percentage_of_portfolio: t.portfolioPercentage ?? t.weight ?? null,
+            };
+            
+            // If we have a valid position_id, use upsert with the composite index
+            // Otherwise, just insert (skip duplicates based on trader_id + asset_id + executed_at)
+            if (positionId !== null) {
+              await supabase
+                .from('trades')
+                .upsert(tradeData, { 
+                  onConflict: 'trader_id,position_id',
+                  ignoreDuplicates: false 
+                });
+            } else {
+              // For trades without position_id, check if similar trade already exists
+              const { data: existingTrade } = await supabase
+                .from('trades')
+                .select('id')
+                .eq('trader_id', trader.id)
+                .eq('asset_id', asset.id)
+                .eq('executed_at', tradeData.executed_at)
+                .maybeSingle();
+              
+              if (!existingTrade) {
+                await supabase
+                  .from('trades')
+                  .insert(tradeData);
+              }
+            }
           }
         }
       } else {
