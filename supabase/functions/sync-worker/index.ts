@@ -342,8 +342,8 @@ async function syncTraderDetailsBatch(
           }
 
           if (asset) {
-            // Parse allocation - API returns it in different fields
-            const allocationValue = h.allocationPct ?? h.allocation_pct ?? h.allocation ?? h.weight ?? h.percentage ?? h.invested;
+            // Parse allocation - Bullaware API returns it as "value" (percentage of portfolio)
+            const allocationValue = h.value ?? h.allocationPct ?? h.allocation_pct ?? h.allocation ?? h.weight ?? h.percentage ?? h.invested;
             // Ensure it's a valid number
             const allocation = typeof allocationValue === 'number' ? allocationValue : parseFloat(allocationValue) || 0;
             
@@ -355,7 +355,8 @@ async function syncTraderDetailsBatch(
                 allocation_pct: allocation,
                 avg_open_price: h.avgOpenPrice ?? h.avg_open_price ?? h.openPrice ?? h.openRate ?? h.avgPrice,
                 current_value: allocation, // Also store in current_value as backup
-                profit_loss_pct: h.profitLossPct ?? h.profit_loss_pct ?? h.pnl ?? h.gain ?? h.profitLoss ?? h.pl ?? h.unrealizedPnl ?? h.unrealizedPnlPct ?? h.returnPct ?? h.returns,
+        // netProfit is the field returned by Bullaware API
+        profit_loss_pct: h.netProfit ?? h.profitLossPct ?? h.profit_loss_pct ?? h.pnl ?? h.gain ?? h.profitLoss ?? h.pl ?? h.unrealizedPnl ?? h.unrealizedPnlPct ?? h.returnPct ?? h.returns,
                 updated_at: new Date().toISOString(),
               }, { onConflict: 'trader_id,asset_id' });
           }
@@ -379,7 +380,8 @@ async function syncTraderDetailsBatch(
 
       if (tradesRes.ok) {
         const tradesData = await tradesRes.json();
-        const trades = tradesData.data || tradesData.trades || tradesData.items || [];
+        // Bullaware returns trades in "positions" array for closed positions
+        const trades = tradesData.positions || tradesData.data || tradesData.trades || tradesData.items || [];
 
         console.log(`[sync-worker] Got ${trades.length} trades for ${trader.etoro_username}`);
         
@@ -412,16 +414,17 @@ async function syncTraderDetailsBatch(
           }
 
           if (asset) {
+            // Bullaware positions array fields: isBuy, openRate, closeRate, openDateTime, closeDateTime, netProfit
             await supabase
               .from('trades')
               .upsert({
                 trader_id: trader.id,
                 asset_id: asset.id,
-                action: t.action || t.side || t.type || (t.isBuy ? 'buy' : 'sell'),
-                amount: t.amount ?? t.units ?? t.quantity,
-                price: t.price ?? t.openPrice ?? t.rate,
+                action: t.action || t.side || t.type || (t.isBuy === true ? 'buy' : t.isBuy === false ? 'sell' : 'unknown'),
+                amount: t.amount ?? t.units ?? t.quantity ?? t.netProfit,
+                price: t.price ?? t.openRate ?? t.openPrice ?? t.rate ?? t.closeRate,
                 percentage_of_portfolio: t.portfolioPercentage ?? t.weight,
-                executed_at: t.executedAt ?? t.openDate ?? t.date ?? t.timestamp,
+                executed_at: t.executedAt ?? t.closeDateTime ?? t.openDateTime ?? t.openDate ?? t.date ?? t.timestamp,
               }, { ignoreDuplicates: true });
           }
         }
