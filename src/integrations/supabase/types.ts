@@ -19,6 +19,7 @@ export type Database = {
           asset_type: string | null
           avg_volume: number | null
           beta: number | null
+          country: string | null
           created_at: string | null
           current_price: number | null
           dividend_yield: number | null
@@ -42,6 +43,7 @@ export type Database = {
           asset_type?: string | null
           avg_volume?: number | null
           beta?: number | null
+          country?: string | null
           created_at?: string | null
           current_price?: number | null
           dividend_yield?: number | null
@@ -65,6 +67,7 @@ export type Database = {
           asset_type?: string | null
           avg_volume?: number | null
           beta?: number | null
+          country?: string | null
           created_at?: string | null
           current_price?: number | null
           dividend_yield?: number | null
@@ -454,6 +457,41 @@ export type Database = {
         }
         Relationships: []
       }
+      trader_equity_history: {
+        Row: {
+          benchmark_value: number | null
+          created_at: string | null
+          date: string
+          equity_value: number
+          id: string
+          trader_id: string | null
+        }
+        Insert: {
+          benchmark_value?: number | null
+          created_at?: string | null
+          date: string
+          equity_value: number
+          id?: string
+          trader_id?: string | null
+        }
+        Update: {
+          benchmark_value?: number | null
+          created_at?: string | null
+          date?: string
+          equity_value?: number
+          id?: string
+          trader_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trader_equity_history_trader_id_fkey"
+            columns: ["trader_id"]
+            isOneToOne: false
+            referencedRelation: "traders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       trader_holdings: {
         Row: {
           allocation_pct: number | null
@@ -537,6 +575,38 @@ export type Database = {
           },
         ]
       }
+      trader_portfolio_history: {
+        Row: {
+          created_at: string | null
+          date: string
+          holdings: Json
+          id: string
+          trader_id: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          date: string
+          holdings?: Json
+          id?: string
+          trader_id?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          date?: string
+          holdings?: Json
+          id?: string
+          trader_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trader_portfolio_history_trader_id_fkey"
+            columns: ["trader_id"]
+            isOneToOne: false
+            referencedRelation: "traders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       traders: {
         Row: {
           active_since: string | null
@@ -567,6 +637,7 @@ export type Database = {
           updated_at: string | null
           verified: boolean | null
           volatility: number | null
+          weekly_drawdown: number | null
         }
         Insert: {
           active_since?: string | null
@@ -597,6 +668,7 @@ export type Database = {
           updated_at?: string | null
           verified?: boolean | null
           volatility?: number | null
+          weekly_drawdown?: number | null
         }
         Update: {
           active_since?: string | null
@@ -627,6 +699,7 @@ export type Database = {
           updated_at?: string | null
           verified?: boolean | null
           volatility?: number | null
+          weekly_drawdown?: number | null
         }
         Relationships: []
       }
