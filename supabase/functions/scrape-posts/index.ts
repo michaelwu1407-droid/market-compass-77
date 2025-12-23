@@ -14,6 +14,7 @@ interface ScrapedPost {
   comments?: number;
   mentioned_symbols: string[];
   sentiment?: string;
+  content_hash: string;
 }
 
 function extractSymbols(text: string): string[] {
@@ -42,17 +43,131 @@ function analyzeSentiment(text: string): string {
   return 'neutral';
 }
 
-// Clean escaped markdown characters from Firecrawl
-function cleanEscapedContent(content: string): string {
-  return content
-    .replace(/\\\\/g, '\n')    // \\ -> newline
-    .replace(/\\_/g, '_')       // \_ -> underscore
-    .replace(/\\n/g, '\n')      // Literal \n string -> newline
-    .replace(/\\\[/g, '[')      // \[ -> bracket
-    .replace(/\\\]/g, ']')      // \] -> bracket
-    .replace(/\\\*/g, '*')      // \* -> asterisk
-    .replace(/\\#/g, '#')       // \# -> hash
-    .replace(/\\-/g, '-');      // \- -> dash
+// Generate a hash for content to detect duplicates
+async function generateContentHash(username: string, content: string): Promise<string> {
+  // Use first 200 chars of cleaned content + username for hash
+  const normalizedContent = content
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+    .substring(0, 200);
+  
+  const data = new TextEncoder().encode(`${username}:${normalizedContent}`);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.slice(0, 8).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Clean content server-side - extract only actual post text
+function extractPostContent(rawContent: string): string {
+  let content = rawContent;
+  
+  // Remove all boilerplate sections AGGRESSIVELY
+  const boilerplatePatterns = [
+    // Navigation and headers
+    /^.*?(?=\[?\d+[hdwmy]\]?|\d+\s*(?:hour|minute|day|week|month)s?\s*ago)/is,
+    // Similar Traders section
+    /Similar Traders[\s\S]*/gi,
+    /People who copy[\s\S]*/gi,
+    // Performance tables
+    /Performance[\s\S]*?(?:\n\n\n|$)/gi,
+    /\|[^|]+\|[^|]+\|.*\n?/g,
+    /^\s*[-|:]+\s*$/gm,
+    // Stats blocks
+    /(?:Risk|AUM|Return|Profit|Loss|Trades?|Portfolio|Copiers|Weekly DD|Daily DD|Max DD)[\s:]+[\d.,]+%?[KMB]?/gi,
+    // Profile headers
+    /\[@?[\w-]+\]\([^)]+\)/g,
+    /!\[.*?\]\([^)]*\)/g,
+    // Action buttons
+    /\[?(?:Copy|Follow|Like|Share|Comment|Reply)\]?/gi,
+    /Copy Trader/gi,
+    // Navigation items
+    /^(?:Stats|About|Portfolio|Feed|Log in|Register|Home|Markets?)$/gmi,
+    // Risk score badges
+    /Risk Score:?\s*\d+/gi,
+    // Top instruments
+    /Top instruments[\s\S]*?(?:\n\n|$)/gi,
+    // Allocation tables
+    /(?:Stocks?|ETFs?|Crypto|Commodities|Currencies)\s*[\d.]+%/gi,
+    // Time markers (but keep the content after)
+    /(?:Posted|Updated)\s*(?:\d+\s*(?:hour|minute|day|week|month)s?\s*ago)?/gi,
+    // Link markdown
+    /\[([^\]]+)\]\([^)]+\)/g,
+    // Multiple newlines
+    /\n{3,}/g,
+  ];
+  
+  for (const pattern of boilerplatePatterns) {
+    content = content.replace(pattern, (match, p1) => {
+      // For link markdown, keep the text
+      if (pattern.source.includes('\\[([^\\]]+)\\]')) {
+        return p1 || '';
+      }
+      return '\n';
+    });
+  }
+  
+  // Clean up escaped markdown
+  content = content
+    .replace(/\\\\/g, '\n')
+    .replace(/\\_/g, '_')
+    .replace(/\\n/g, '\n')
+    .replace(/\\\[/g, '[')
+    .replace(/\\\]/g, ']')
+    .replace(/\\\*/g, '*')
+    .replace(/\\#/g, '#')
+    .replace(/\\-/g, '-');
+  
+  // Remove lines that are just numbers or stats
+  const lines = content.split('\n').filter(line => {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+    if (trimmed.length < 3) return false;
+    // Skip lines that are mostly numbers/percentages
+    if (/^[\d.,\s%$+-]+$/.test(trimmed)) return false;
+    // Skip single word navigational items
+    if (/^(?:Stats|Feed|Portfolio|About|Copy|Follow)$/i.test(trimmed)) return false;
+    return true;
+  });
+  
+  content = lines.join('\n').trim();
+  
+  // Remove any remaining leading/trailing whitespace and normalize
+  content = content
+    .replace(/^\s+|\s+$/g, '')
+    .replace(/\n{2,}/g, '\n\n')
+    .trim();
+  
+  return content;
+}
+
+// Check if content looks like a real post
+function isValidPost(content: string): boolean {
+  if (content.length < 30) return false;
+  if (content.length > 2000) return false;
+  
+  // Must have enough letters (not just numbers/symbols)
+  const letters = (content.match(/[a-zA-Z]/g) || []).length;
+  const alphaRatio = letters / content.length;
+  if (alphaRatio < 0.4) return false;
+  
+  // Must not be mostly boilerplate
+  const boilerplateIndicators = [
+    'Similar Traders',
+    'People who copy',
+    'Top instruments',
+    'Risk Score',
+    'Copy Trader',
+  ];
+  for (const indicator of boilerplateIndicators) {
+    if (content.includes(indicator)) return false;
+  }
+  
+  // Should have at least 3 words
+  const words = content.split(/\s+/).filter(w => w.length > 2);
+  if (words.length < 3) return false;
+  
+  return true;
 }
 
 async function scrapeEtoroFeed(firecrawlApiKey: string, traderUsernames: string[]): Promise<ScrapedPost[]> {
@@ -85,80 +200,52 @@ async function scrapeEtoroFeed(firecrawlApiKey: string, traderUsernames: string[
       const data = await response.json();
       const markdown = data.data?.markdown || data.markdown || '';
 
-      // Aggressively clean non-post content
-      const cleanedMarkdown = markdown
-        // Remove Similar Traders sections entirely
-        .replace(/Similar Traders[\s\S]*?(?=\n#{1,3}\s|\n\n\n|$)/gi, '')
-        // Remove Performance tables
-        .replace(/Performance \(Since.*?\)[\s\S]*?(?=\n#{1,3}\s|\n\n\n|$)/gi, '')
-        .replace(/Performance\s*\n\s*\|[\s\S]*?(?=\n\n\n|$)/gi, '')
-        // Remove all markdown tables (stats, performance)
-        .replace(/\|[^|]+\|[^|]+\|.*\n?/g, '')
-        .replace(/^\s*[-|:]+\s*$/gm, '')
-        // Remove navigation and UI elements
-        .replace(/Follow\s+Copy/gi, '')
-        .replace(/Copy Trader/gi, '')
-        .replace(/Risk Score:?\s*\d+/gi, '')
-        .replace(/Copiers:?\s*[\d,]+/gi, '')
-        .replace(/AUM:?\s*\$?[\d,]+[KMB]?/gi, '')
-        // Remove stats lines
-        .replace(/^\s*(?:Risk|AUM|Return|Profit|Loss|Trades?|Portfolio):\s*.*$/gmi, '')
-        // Remove boilerplate text
-        .replace(/People who copy .* also copy/gi, '')
-        .replace(/Top instruments traded/gi, '')
-        .replace(/\[Copy\]/gi, '')
-        .replace(/\[Follow\]/gi, '')
-        // Remove image markdown
-        .replace(/!\[.*?\]\(.*?\)/g, '')
-        // Remove consecutive newlines
-        .replace(/\n{4,}/g, '\n\n\n');
+      // Split by common post separators
+      const rawBlocks = markdown.split(/---|\n\n\n+|\n(?=\[?\d+[hdwmy]\])/);
       
-      // Split into post blocks and filter
-      const postBlocks = cleanedMarkdown.split(/---|\n\n\n/).filter((block: string) => {
-        const trimmed = block.trim();
-        // Must have real content (not just stats or nav)
-        if (trimmed.length < 50) return false;
-        // Skip navigation-like content
-        if (/^(Stats|About|Portfolio|Feed|Log in|Register|Copy|Follow)$/i.test(trimmed)) return false;
-        // Skip if mostly numbers/stats
-        const alphaRatio = (trimmed.match(/[a-zA-Z]/g) || []).length / trimmed.length;
-        if (alphaRatio < 0.3) return false;
-        // Skip if contains boilerplate patterns
-        if (/Similar Traders|People who copy|Top instruments/i.test(trimmed)) return false;
-        return true;
-      });
-
-      for (const block of postBlocks.slice(0, 10)) {
-        const content = block.trim();
-        if (content.length < 30) continue;
-
-        const timeMatch = content.match(/(\d+)\s*(hour|minute|day|week|month)s?\s*ago/i);
-        let postedAt = new Date();
-        if (timeMatch) {
-          const value = parseInt(timeMatch[1]);
-          const unit = timeMatch[2].toLowerCase();
-          if (unit.startsWith('hour')) postedAt.setHours(postedAt.getHours() - value);
-          else if (unit.startsWith('minute')) postedAt.setMinutes(postedAt.getMinutes() - value);
-          else if (unit.startsWith('day')) postedAt.setDate(postedAt.getDate() - value);
-          else if (unit.startsWith('week')) postedAt.setDate(postedAt.getDate() - value * 7);
-          else if (unit.startsWith('month')) postedAt.setMonth(postedAt.getMonth() - value);
+      let validPostsFound = 0;
+      for (const block of rawBlocks) {
+        if (validPostsFound >= 5) break; // Max 5 posts per trader
+        
+        const content = extractPostContent(block);
+        
+        if (!isValidPost(content)) {
+          continue;
         }
 
-        const likesMatch = content.match(/(\d+)\s*(?:like|heart)/i);
-        const commentsMatch = content.match(/(\d+)\s*comment/i);
+        // Parse timestamp
+        const timeMatch = block.match(/\[?(\d+)\s*([hdwmy])\]?|(\d+)\s*(hour|minute|day|week|month)s?\s*ago/i);
+        let postedAt = new Date();
+        if (timeMatch) {
+          const value = parseInt(timeMatch[1] || timeMatch[3]);
+          const unit = (timeMatch[2] || timeMatch[4] || '').toLowerCase();
+          if (unit === 'h' || unit.startsWith('hour')) postedAt.setHours(postedAt.getHours() - value);
+          else if (unit === 'm' || unit.startsWith('minute')) postedAt.setMinutes(postedAt.getMinutes() - value);
+          else if (unit === 'd' || unit.startsWith('day')) postedAt.setDate(postedAt.getDate() - value);
+          else if (unit === 'w' || unit.startsWith('week')) postedAt.setDate(postedAt.getDate() - value * 7);
+          else if (unit === 'y' || unit.startsWith('month')) postedAt.setMonth(postedAt.getMonth() - value);
+        }
+
+        const likesMatch = block.match(/(\d+)\s*(?:like|heart)/i);
+        const commentsMatch = block.match(/(\d+)\s*comment/i);
+        
+        const contentHash = await generateContentHash(username, content);
 
         allPosts.push({
           trader_username: username,
-          content: cleanEscapedContent(content).substring(0, 1000),
+          content: content.substring(0, 1000),
           posted_at: postedAt.toISOString(),
           likes: likesMatch ? parseInt(likesMatch[1]) : 0,
           comments: commentsMatch ? parseInt(commentsMatch[1]) : 0,
           mentioned_symbols: extractSymbols(content),
           sentiment: analyzeSentiment(content),
+          content_hash: contentHash,
         });
+        
+        validPostsFound++;
       }
 
-      console.log(`Scraped ${postBlocks.length} posts for ${username}`);
+      console.log(`Found ${validPostsFound} valid posts for ${username}`);
 
     } catch (error) {
       console.error(`Error scraping ${username} feed:`, error);
@@ -186,7 +273,7 @@ serve(async (req) => {
 
     // Parse request options
     let usernames: string[] = [];
-    let traderLimit = 10; // Default: only scrape top 10 traders to save credits
+    let traderLimit = 10;
     
     try {
       const body = await req.json();
@@ -197,7 +284,6 @@ serve(async (req) => {
     }
 
     if (usernames.length === 0) {
-      // Get traders from DB, ordered by copiers (most popular first)
       const { data: traders } = await supabase
         .from('traders')
         .select('etoro_username, copiers')
@@ -208,7 +294,6 @@ serve(async (req) => {
     }
 
     console.log(`Scraping posts for ${usernames.length} traders (limit: ${traderLimit})`);
-    console.log(`Estimated Firecrawl credits: ~${usernames.length}`);
 
     const scrapedPosts = await scrapeEtoroFeed(FIRECRAWL_API_KEY, usernames);
     console.log(`Total scraped posts: ${scrapedPosts.length}`);
@@ -220,20 +305,37 @@ serve(async (req) => {
     
     const traderMap = new Map((traders || []).map(t => [t.etoro_username, t.id]));
 
-    // Prepare posts for insertion
-    const postsToInsert = scrapedPosts
-      .filter(post => traderMap.has(post.trader_username))
-      .map(post => ({
-        trader_id: traderMap.get(post.trader_username),
-        content: post.content,
-        posted_at: post.posted_at,
-        likes: post.likes || 0,
-        comments: post.comments || 0,
-        mentioned_symbols: post.mentioned_symbols,
-        sentiment: post.sentiment,
-        source: 'etoro',
-      }));
+    // Check for existing posts by content hash (stored in etoro_post_id)
+    const contentHashes = scrapedPosts.map(p => p.content_hash);
+    const { data: existingPosts } = await supabase
+      .from('posts')
+      .select('etoro_post_id')
+      .in('etoro_post_id', contentHashes);
+    
+    const existingHashes = new Set((existingPosts || []).map(p => p.etoro_post_id));
+    
+    // Filter out duplicates
+    const newPosts = scrapedPosts.filter(post => 
+      traderMap.has(post.trader_username) && 
+      !existingHashes.has(post.content_hash)
+    );
+    
+    console.log(`New posts to insert: ${newPosts.length} (${scrapedPosts.length - newPosts.length} duplicates skipped)`);
 
+    // Prepare posts for insertion (use content_hash as etoro_post_id for dedup)
+    const postsToInsert = newPosts.map(post => ({
+      trader_id: traderMap.get(post.trader_username),
+      content: post.content,
+      posted_at: post.posted_at,
+      likes: post.likes || 0,
+      comments: post.comments || 0,
+      mentioned_symbols: post.mentioned_symbols,
+      sentiment: post.sentiment,
+      source: 'etoro',
+      etoro_post_id: post.content_hash, // Use hash as unique ID
+    }));
+
+    let insertedCount = 0;
     if (postsToInsert.length > 0) {
       const { data: inserted, error } = await supabase
         .from('posts')
@@ -245,18 +347,8 @@ serve(async (req) => {
         throw error;
       }
 
-      console.log(`Inserted ${inserted?.length || 0} posts`);
-
-      return new Response(
-        JSON.stringify({
-          success: true,
-          traders_processed: usernames.length,
-          posts_scraped: scrapedPosts.length,
-          posts_inserted: inserted?.length || 0,
-          firecrawl_credits_used: usernames.length,
-        }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      insertedCount = inserted?.length || 0;
+      console.log(`Inserted ${insertedCount} new posts`);
     }
 
     return new Response(
@@ -264,9 +356,9 @@ serve(async (req) => {
         success: true,
         traders_processed: usernames.length,
         posts_scraped: scrapedPosts.length,
-        posts_inserted: 0,
+        posts_inserted: insertedCount,
+        duplicates_skipped: scrapedPosts.length - newPosts.length,
         firecrawl_credits_used: usernames.length,
-        message: 'No matching posts to insert',
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
