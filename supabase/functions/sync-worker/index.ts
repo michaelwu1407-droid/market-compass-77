@@ -485,6 +485,39 @@ async function syncTraderDetailsBatch(
 
       await delay(RATE_LIMIT_DELAY_MS);
 
+      // Fetch instruments to build instrumentId -> symbol mapping
+      let instrumentMap: Record<string, { symbol: string; name: string; type: string }> = {};
+      try {
+        const instrumentsRes = await fetch(
+          `${ENDPOINTS.instruments}?limit=1000`,
+          { 
+            headers: { 
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json'
+            } 
+          }
+        );
+        
+        if (instrumentsRes.ok) {
+          const instrumentsData = await instrumentsRes.json();
+          const instruments = instrumentsData.items || instrumentsData.data || instrumentsData.instruments || [];
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          for (const inst of instruments as any[]) {
+            const instId = String(inst.instrumentId || inst.id);
+            instrumentMap[instId] = {
+              symbol: inst.symbol || inst.ticker || instId,
+              name: inst.name || inst.displayName || inst.instrumentName || inst.symbol || instId,
+              type: (inst.type || inst.instrumentType || 'stock').toLowerCase(),
+            };
+          }
+          console.log(`[sync-worker] Built instrument map with ${Object.keys(instrumentMap).length} entries`);
+        }
+      } catch (err) {
+        console.log(`[sync-worker] Could not fetch instruments for mapping:`, err);
+      }
+
+      await delay(RATE_LIMIT_DELAY_MS);
+
       // Fetch trades
       const tradesRes = await fetch(
         ENDPOINTS.trades(trader.etoro_username),
@@ -506,15 +539,35 @@ async function syncTraderDetailsBatch(
         // DEBUG: Log first trade to see available fields
         if (trades.length > 0) {
           console.log(`[sync-worker] Sample trade fields for ${trader.etoro_username}:`, JSON.stringify(trades[0], null, 2));
-        } else {
-          // Log the full response to understand the API structure
-          console.log(`[sync-worker] Trades response structure for ${trader.etoro_username}:`, JSON.stringify(tradesData, null, 2).slice(0, 500));
         }
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         for (const t of (trades as any[]).slice(0, 20)) {
-          const symbol = t.symbol || t.instrumentId || t.ticker || t.asset;
+          // First try to get symbol directly, then fallback to instrumentId lookup
+          let symbol = t.symbol || t.ticker;
+          let assetName = t.name || t.instrumentName;
+          let assetType = 'stock';
+          
+          // If we only have instrumentId, look it up
+          if (!symbol && t.instrumentId) {
+            const instId = String(t.instrumentId);
+            const mapped = instrumentMap[instId];
+            if (mapped) {
+              symbol = mapped.symbol;
+              assetName = assetName || mapped.name;
+              assetType = mapped.type;
+              console.log(`[sync-worker] Mapped instrumentId ${instId} -> ${symbol}`);
+            } else {
+              // Skip trades with unknown instrumentId
+              console.log(`[sync-worker] Unknown instrumentId ${instId}, skipping trade`);
+              continue;
+            }
+          }
+          
           if (!symbol) continue;
+
+          // Infer exchange/country from symbol
+          const inferred = inferExchangeFromSymbol(symbol);
 
           let { data: asset } = await supabase
             .from('assets')
@@ -525,7 +578,13 @@ async function syncTraderDetailsBatch(
           if (!asset) {
             const { data: newAsset } = await supabase
               .from('assets')
-              .insert({ symbol, name: t.name || t.instrumentName || symbol })
+              .insert({ 
+                symbol, 
+                name: assetName || symbol,
+                asset_type: assetType,
+                exchange: inferred.exchange,
+                country: inferred.country,
+              })
               .select('id')
               .single();
             asset = newAsset;
@@ -711,8 +770,9 @@ async function syncTraderDetailsBatch(
         if (metrics.sortinoRatio !== undefined || metrics.sortino !== undefined || metrics.sortino_ratio !== undefined) {
           advancedMetrics.sortino_ratio = metrics.sortinoRatio ?? metrics.sortino ?? metrics.sortino_ratio;
         }
-        if (metrics.alpha !== undefined) {
-          advancedMetrics.alpha = metrics.alpha;
+        // Map jensensAlpha to alpha
+        if (metrics.jensensAlpha !== undefined || metrics.alpha !== undefined || metrics.jensenAlpha !== undefined) {
+          advancedMetrics.alpha = metrics.jensensAlpha ?? metrics.alpha ?? metrics.jensenAlpha;
         }
         if (metrics.beta !== undefined) {
           advancedMetrics.beta = metrics.beta;
@@ -722,6 +782,19 @@ async function syncTraderDetailsBatch(
         }
         if (metrics.dailyDrawdown !== undefined || metrics.dailyDD !== undefined || metrics.daily_drawdown !== undefined) {
           advancedMetrics.daily_drawdown = metrics.dailyDrawdown ?? metrics.dailyDD ?? metrics.daily_drawdown;
+        }
+        // Save additional ratios from Bullaware
+        if (metrics.omegaRatio !== undefined || metrics.omega !== undefined) {
+          advancedMetrics.omega_ratio = metrics.omegaRatio ?? metrics.omega;
+        }
+        if (metrics.treynorRatio !== undefined || metrics.treynor !== undefined) {
+          advancedMetrics.treynor_ratio = metrics.treynorRatio ?? metrics.treynor;
+        }
+        if (metrics.calmarRatio !== undefined || metrics.calmar !== undefined) {
+          advancedMetrics.calmar_ratio = metrics.calmarRatio ?? metrics.calmar;
+        }
+        if (metrics.informationRatio !== undefined || metrics.information !== undefined) {
+          advancedMetrics.information_ratio = metrics.informationRatio ?? metrics.information;
         }
         
         if (Object.keys(advancedMetrics).length > 0) {
