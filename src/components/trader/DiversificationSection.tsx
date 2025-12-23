@@ -1,13 +1,15 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DiversificationChart } from '@/components/charts/DiversificationChart';
+import { DiversificationTables } from '@/components/trader/DiversificationTables';
 import { PieChart } from 'lucide-react';
 import type { TraderHolding } from '@/hooks/useTraderHoldings';
 
 interface DiversificationSectionProps {
   holdings: TraderHolding[];
+  showTables?: boolean;
 }
 
-export function DiversificationSection({ holdings }: DiversificationSectionProps) {
+export function DiversificationSection({ holdings, showTables = true }: DiversificationSectionProps) {
   if (!holdings || holdings.length === 0) {
     return null;
   }
@@ -52,20 +54,24 @@ export function DiversificationSection({ holdings }: DiversificationSectionProps
     }));
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <PieChart className="h-4 w-4" />
-          Portfolio Diversification
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="grid md:grid-cols-3 gap-6">
-          <DiversificationChart data={sectorData} title="By Sector" />
-          <DiversificationChart data={typeData} title="By Asset Type" />
-          <DiversificationChart data={topHoldings} title="Top Holdings" />
-        </div>
-      </CardContent>
-    </Card>
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <PieChart className="h-4 w-4" />
+            Portfolio Diversification
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid md:grid-cols-3 gap-6">
+            <DiversificationChart data={sectorData} title="By Sector" />
+            <DiversificationChart data={typeData} title="By Asset Type" />
+            <DiversificationChart data={topHoldings} title="Top Holdings" />
+          </div>
+        </CardContent>
+      </Card>
+      
+      {showTables && <DiversificationTables holdings={holdings} />}
+    </div>
   );
 }

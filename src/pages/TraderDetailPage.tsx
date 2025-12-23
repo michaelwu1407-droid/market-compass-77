@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, TrendingUp, AlertTriangle, Users, Sparkles, Star, CheckCircle2, Calendar, Target, Clock, BarChart3, PieChart } from 'lucide-react';
+import { ArrowLeft, TrendingUp, AlertTriangle, Users, Sparkles, Star, CheckCircle2, Calendar, Target, Clock, BarChart3, PieChart, LineChart } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +9,8 @@ import { RiskGauge } from '@/components/charts/RiskGauge';
 import { MonthlyReturnsGrid } from '@/components/charts/MonthlyReturnsGrid';
 import { AllocationPieChart } from '@/components/charts/AllocationPieChart';
 import { PerformanceBarChart } from '@/components/charts/PerformanceBarChart';
+import { PerformanceVsBenchmarkChart } from '@/components/charts/PerformanceVsBenchmarkChart';
+import { PortfolioHistoryChart } from '@/components/charts/PortfolioHistoryChart';
 import { PerformanceMetrics } from '@/components/trader/PerformanceMetrics';
 import { HoldingsTable } from '@/components/trader/HoldingsTable';
 import { DiversificationSection } from '@/components/trader/DiversificationSection';
@@ -21,6 +23,8 @@ import { useTrader } from '@/hooks/useTraders';
 import { useTraderHoldings } from '@/hooks/useTraderHoldings';
 import { useTraderTrades } from '@/hooks/useTraderTrades';
 import { useTraderPerformance } from '@/hooks/useTraderPerformance';
+import { useTraderEquityHistory } from '@/hooks/useTraderEquityHistory';
+import { useTraderPortfolioHistory } from '@/hooks/useTraderPortfolioHistory';
 import { useTraderPosts } from '@/hooks/usePosts';
 import { useAnalyse } from '@/hooks/useAnalyse';
 import { useFollowedTraders } from '@/hooks/useFollowedTraders';
@@ -47,6 +51,8 @@ export default function TraderDetailPage() {
   const { data: holdings } = useTraderHoldings(traderId);
   const { data: trades } = useTraderTrades(traderId);
   const { data: performance } = useTraderPerformance(traderId);
+  const { data: equityHistory } = useTraderEquityHistory(traderId);
+  const { data: portfolioHistory } = useTraderPortfolioHistory(traderId);
   const { data: posts } = useTraderPosts(traderId);
 
   const following = traderId ? isFollowing(traderId) : false;
@@ -247,6 +253,21 @@ export default function TraderDetailPage() {
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
+          {/* Performance vs Benchmark Chart */}
+          {equityHistory && equityHistory.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <LineChart className="h-4 w-4" />
+                  Performance vs S&P 500
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <PerformanceVsBenchmarkChart data={equityHistory} height={280} />
+              </CardContent>
+            </Card>
+          )}
+
           {/* Performance Metrics */}
           <PerformanceMetrics 
             performance={performance || []}
@@ -310,6 +331,21 @@ export default function TraderDetailPage() {
         </TabsContent>
 
         <TabsContent value="portfolio" className="space-y-6">
+          {/* Portfolio History Stacked Area Chart */}
+          {portfolioHistory && portfolioHistory.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <BarChart3 className="h-4 w-4" />
+                  Portfolio Composition Over Time
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <PortfolioHistoryChart data={portfolioHistory} height={280} />
+              </CardContent>
+            </Card>
+          )}
+
           {/* Diversification Section */}
           <DiversificationSection holdings={holdings || []} />
 

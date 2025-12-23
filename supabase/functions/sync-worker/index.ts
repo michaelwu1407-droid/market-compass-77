@@ -11,8 +11,10 @@ const ENDPOINTS = {
   investors: `${BULLAWARE_BASE}/investors`,
   investorDetails: (username: string) => `${BULLAWARE_BASE}/investors/${username}`, // Contains monthlyReturns, yearlyReturns, profitableWeeksPct, etc.
   portfolio: (username: string) => `${BULLAWARE_BASE}/investors/${username}/portfolio`,
+  portfolioHistory: (username: string) => `${BULLAWARE_BASE}/investors/${username}/history`, // Portfolio composition over time
   trades: (username: string) => `${BULLAWARE_BASE}/investors/${username}/trades`,
   metrics: (username: string) => `${BULLAWARE_BASE}/investors/${username}/metrics`,
+  metricsHistory: (username: string) => `${BULLAWARE_BASE}/investors/${username}/metrics/history`, // Equity curve over time
   riskScore: (username: string) => `${BULLAWARE_BASE}/investors/${username}/risk-score/monthly`,
   instruments: `${BULLAWARE_BASE}/instruments`,
 };
@@ -504,6 +506,9 @@ async function syncTraderDetailsBatch(
         if (investor.dailyDD !== undefined && investor.dailyDD !== null) {
           traderUpdates.daily_drawdown = investor.dailyDD;
         }
+        if (investor.weeklyDD !== undefined && investor.weeklyDD !== null) {
+          traderUpdates.weekly_drawdown = investor.weeklyDD;
+        }
         // Also capture additional useful metrics if available
         if (investor.maxDrawdown !== undefined && investor.maxDrawdown !== null) {
           traderUpdates.max_drawdown = investor.maxDrawdown;
@@ -620,6 +625,86 @@ async function syncTraderDetailsBatch(
         console.log(`[sync-worker] Metrics fetch failed for ${trader.etoro_username}: ${metricsRes.status}`);
       }
 
+      await delay(RATE_LIMIT_DELAY_MS);
+
+      // Fetch equity/metrics history for performance vs benchmark chart
+      const metricsHistoryRes = await fetch(
+        ENDPOINTS.metricsHistory(trader.etoro_username),
+        { 
+          headers: { 
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          } 
+        }
+      );
+
+      if (metricsHistoryRes.ok) {
+        const historyData = await metricsHistoryRes.json();
+        const points = historyData.points || historyData.data || historyData.history || [];
+        
+        console.log(`[sync-worker] Got ${points.length} equity history points for ${trader.etoro_username}`);
+        
+        // Save equity history points (format: { date, equity, benchmark })
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        for (const point of (points as any[]).slice(-365)) { // Keep last 365 days
+          const date = point.date || point.timestamp;
+          const equity = point.equity ?? point.value ?? point.cumReturn ?? point.cumulativeReturn;
+          const benchmark = point.benchmark ?? point.spx ?? point.sp500 ?? point.benchmarkReturn;
+          
+          if (date && equity !== undefined) {
+            await supabase
+              .from('trader_equity_history')
+              .upsert({
+                trader_id: trader.id,
+                date: typeof date === 'string' ? date.split('T')[0] : new Date(date).toISOString().split('T')[0],
+                equity_value: equity,
+                benchmark_value: benchmark,
+              }, { onConflict: 'trader_id,date' });
+          }
+        }
+      } else {
+        console.log(`[sync-worker] Metrics history fetch failed for ${trader.etoro_username}: ${metricsHistoryRes.status}`);
+      }
+
+      await delay(RATE_LIMIT_DELAY_MS);
+
+      // Fetch portfolio history for stacked area chart
+      const portfolioHistoryRes = await fetch(
+        ENDPOINTS.portfolioHistory(trader.etoro_username),
+        { 
+          headers: { 
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          } 
+        }
+      );
+
+      if (portfolioHistoryRes.ok) {
+        const historyData = await portfolioHistoryRes.json();
+        const snapshots = historyData.data || historyData.snapshots || historyData.history || [];
+        
+        console.log(`[sync-worker] Got ${snapshots.length} portfolio history snapshots for ${trader.etoro_username}`);
+        
+        // Save portfolio snapshots (format: { date, holdings: [{symbol, value}] })
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        for (const snapshot of (snapshots as any[]).slice(-52)) { // Keep last 52 weeks
+          const date = snapshot.date || snapshot.timestamp;
+          const holdings = snapshot.holdings || snapshot.positions || snapshot.portfolio || [];
+          
+          if (date && holdings.length > 0) {
+            await supabase
+              .from('trader_portfolio_history')
+              .upsert({
+                trader_id: trader.id,
+                date: typeof date === 'string' ? date.split('T')[0] : new Date(date).toISOString().split('T')[0],
+                holdings: holdings,
+              }, { onConflict: 'trader_id,date' });
+          }
+        }
+      } else {
+        console.log(`[sync-worker] Portfolio history fetch failed for ${trader.etoro_username}: ${portfolioHistoryRes.status}`);
+      }
+
       // Update trader's details_synced_at (not updated_at which is for list sync)
       await supabase
         .from('traders')
@@ -699,6 +784,7 @@ async function syncAssetsBatch(
       exchange: a.exchange || a.market,
       sector: a.sector,
       industry: a.industry,
+      country: a.country || a.countryCode || a.region, // Add country for geographic diversification
       market_cap: a.marketCap ?? a.market_cap,
       pe_ratio: a.peRatio ?? a.pe_ratio ?? a.pe,
       eps: a.eps,
