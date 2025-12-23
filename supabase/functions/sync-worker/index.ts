@@ -5,9 +5,19 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// CORRECT BULLAWARE API ENDPOINTS
+const BULLAWARE_BASE = 'https://api.bullaware.com/v1';
+const ENDPOINTS = {
+  investors: `${BULLAWARE_BASE}/investors`,
+  portfolio: (username: string) => `${BULLAWARE_BASE}/investors/${username}/portfolio`,
+  trades: (username: string) => `${BULLAWARE_BASE}/investors/${username}/trades`,
+  performance: (username: string) => `${BULLAWARE_BASE}/investors/${username}/performance`,
+  instruments: `${BULLAWARE_BASE}/instruments`,
+};
+
 const BATCH_SIZE_TRADERS = 10; // Traders per page from Bullaware
-const BATCH_SIZE_DETAILS = 3; // Trader details to sync per run
-const RATE_LIMIT_DELAY_MS = 6000; // 6 seconds between Bullaware calls
+const BATCH_SIZE_DETAILS = 2; // Trader details to sync per run (reduced to avoid rate limits)
+const RATE_LIMIT_DELAY_MS = 7000; // 7 seconds between Bullaware calls (safer for 10 req/min)
 const STALE_HOURS_DETAILS = 2; // Consider trader details stale after 2 hours
 const STALE_HOURS_ASSETS = 24; // Consider assets stale after 24 hours
 const STALE_HOURS_TRADERS = 6; // Re-paginate traders list every 6 hours
@@ -133,11 +143,16 @@ async function syncTradersBatch(
       updated_at: new Date().toISOString()
     });
 
-  console.log(`[sync-worker] Fetching traders page ${currentPage}...`);
+  console.log(`[sync-worker] Fetching traders page ${currentPage} from ${ENDPOINTS.investors}...`);
 
   const response = await fetch(
-    `https://api.bullaware.com/traders?page=${currentPage}&limit=${BATCH_SIZE_TRADERS}`,
-    { headers: { 'Authorization': `Bearer ${apiKey}` } }
+    `${ENDPOINTS.investors}?page=${currentPage}`,
+    { 
+      headers: { 
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      } 
+    }
   );
 
   if (!response.ok) {
@@ -145,31 +160,32 @@ async function syncTradersBatch(
   }
 
   const data = await response.json();
-  const traders = data.data || data.traders || data || [];
-  const totalPages = data.total_pages || data.totalPages || Math.ceil((data.total || traders.length) / BATCH_SIZE_TRADERS);
+  const traders = data.items || data.data || data.investors || [];
+  const total = data.total || data.totalCount || 0;
+  const totalPages = Math.ceil(total / BATCH_SIZE_TRADERS) || 1;
 
-  console.log(`[sync-worker] Got ${traders.length} traders from page ${currentPage}/${totalPages}`);
+  console.log(`[sync-worker] Got ${traders.length} traders from page ${currentPage}, total: ${total}`);
 
   // Map and upsert traders
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tradersToUpsert = traders.map((t: any) => ({
-    etoro_username: t.username || t.etoro_username,
-    display_name: t.displayName || t.display_name || t.username || t.etoro_username,
-    avatar_url: t.avatarUrl || t.avatar_url || t.avatar,
-    bio: t.bio || t.about,
+    etoro_username: t.username || t.userName || t.etoro_username,
+    display_name: t.displayName || t.display_name || t.username || t.userName,
+    avatar_url: t.avatarUrl || t.avatar_url || t.avatar || t.image,
+    bio: t.bio || t.about || t.description,
     country: t.country,
-    verified: t.verified ?? false,
-    risk_score: t.riskScore ?? t.risk_score,
-    gain_12m: t.gain12m ?? t.gain_12m ?? t.yearlyGain,
-    gain_24m: t.gain24m ?? t.gain_24m,
-    max_drawdown: t.maxDrawdown ?? t.max_drawdown,
-    copiers: t.copiers ?? t.copiersCount ?? 0,
-    aum: t.aum ?? t.assets_under_management,
-    profitable_weeks_pct: t.profitableWeeksPct ?? t.profitable_weeks_pct,
-    profitable_months_pct: t.profitableMonthsPct ?? t.profitable_months_pct,
-    avg_trades_per_week: t.avgTradesPerWeek ?? t.avg_trades_per_week,
-    avg_holding_time_days: t.avgHoldingTimeDays ?? t.avg_holding_time_days,
-    active_since: t.activeSince ?? t.active_since,
+    verified: t.verified ?? t.isVerified ?? false,
+    risk_score: t.riskScore ?? t.risk_score ?? t.risk,
+    gain_12m: t.gain12m ?? t.gain_12m ?? t.yearlyGain ?? t.returnYear,
+    gain_24m: t.gain24m ?? t.gain_24m ?? t.return2Years,
+    max_drawdown: t.maxDrawdown ?? t.max_drawdown ?? t.drawdown,
+    copiers: t.copiers ?? t.copiersCount ?? t.copiersNum ?? 0,
+    aum: t.aum ?? t.assetsUnderManagement ?? t.assets_under_management,
+    profitable_weeks_pct: t.profitableWeeksPct ?? t.profitable_weeks_pct ?? t.profitableWeeks,
+    profitable_months_pct: t.profitableMonthsPct ?? t.profitable_months_pct ?? t.profitableMonths,
+    avg_trades_per_week: t.avgTradesPerWeek ?? t.avg_trades_per_week ?? t.tradesPerWeek,
+    avg_holding_time_days: t.avgHoldingTimeDays ?? t.avg_holding_time_days ?? t.holdingTime,
+    active_since: t.activeSince ?? t.active_since ?? t.memberSince,
     tags: t.tags || [],
     updated_at: new Date().toISOString(),
   }));
@@ -185,7 +201,7 @@ async function syncTradersBatch(
   }
 
   // Check if we've finished all pages
-  const isComplete = currentPage >= totalPages;
+  const isComplete = currentPage >= totalPages || traders.length === 0;
   const nextPage = isComplete ? 1 : currentPage + 1;
   const newStatus = isComplete ? 'idle' : 'paginating';
 
@@ -245,20 +261,27 @@ async function syncTraderDetailsBatch(
     try {
       console.log(`[sync-worker] Syncing details for ${trader.etoro_username}...`);
 
-      // Fetch holdings
+      // Fetch portfolio
       const holdingsRes = await fetch(
-        `https://api.bullaware.com/traders/${trader.etoro_username}/portfolio`,
-        { headers: { 'Authorization': `Bearer ${apiKey}` } }
+        ENDPOINTS.portfolio(trader.etoro_username),
+        { 
+          headers: { 
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          } 
+        }
       );
 
       if (holdingsRes.ok) {
         const holdingsData = await holdingsRes.json();
-        const holdings = holdingsData.positions || holdingsData.holdings || holdingsData || [];
+        const holdings = holdingsData.data || holdingsData.positions || holdingsData.holdings || [];
+
+        console.log(`[sync-worker] Got ${holdings.length} holdings for ${trader.etoro_username}`);
 
         // Process holdings
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         for (const h of holdings as any[]) {
-          const symbol = h.symbol || h.instrumentId || h.asset;
+          const symbol = h.symbol || h.instrumentId || h.ticker || h.asset;
           if (!symbol) continue;
 
           // Get or create asset
@@ -271,7 +294,7 @@ async function syncTraderDetailsBatch(
           if (!asset) {
             const { data: newAsset } = await supabase
               .from('assets')
-              .insert({ symbol, name: h.name || symbol })
+              .insert({ symbol, name: h.name || h.instrumentName || symbol })
               .select('id')
               .single();
             asset = newAsset;
@@ -283,31 +306,40 @@ async function syncTraderDetailsBatch(
               .upsert({
                 trader_id: trader.id,
                 asset_id: asset.id,
-                allocation_pct: h.allocationPct ?? h.allocation_pct ?? h.allocation,
-                avg_open_price: h.avgOpenPrice ?? h.avg_open_price,
-                current_value: h.currentValue ?? h.current_value ?? h.value,
-                profit_loss_pct: h.profitLossPct ?? h.profit_loss_pct ?? h.pnl,
+                allocation_pct: h.allocationPct ?? h.allocation_pct ?? h.allocation ?? h.weight,
+                avg_open_price: h.avgOpenPrice ?? h.avg_open_price ?? h.openPrice,
+                current_value: h.currentValue ?? h.current_value ?? h.value ?? h.invested,
+                profit_loss_pct: h.profitLossPct ?? h.profit_loss_pct ?? h.pnl ?? h.gain,
                 updated_at: new Date().toISOString(),
               }, { onConflict: 'trader_id,asset_id' });
           }
         }
+      } else {
+        console.log(`[sync-worker] Portfolio fetch failed for ${trader.etoro_username}: ${holdingsRes.status}`);
       }
 
       await delay(RATE_LIMIT_DELAY_MS);
 
       // Fetch trades
       const tradesRes = await fetch(
-        `https://api.bullaware.com/traders/${trader.etoro_username}/trades`,
-        { headers: { 'Authorization': `Bearer ${apiKey}` } }
+        ENDPOINTS.trades(trader.etoro_username),
+        { 
+          headers: { 
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          } 
+        }
       );
 
       if (tradesRes.ok) {
         const tradesData = await tradesRes.json();
-        const trades = tradesData.trades || tradesData || [];
+        const trades = tradesData.data || tradesData.trades || tradesData.items || [];
+
+        console.log(`[sync-worker] Got ${trades.length} trades for ${trader.etoro_username}`);
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        for (const t of (trades as any[]).slice(0, 20)) { // Limit to recent 20 trades
-          const symbol = t.symbol || t.instrumentId || t.asset;
+        for (const t of (trades as any[]).slice(0, 20)) {
+          const symbol = t.symbol || t.instrumentId || t.ticker || t.asset;
           if (!symbol) continue;
 
           let { data: asset } = await supabase
@@ -319,7 +351,7 @@ async function syncTraderDetailsBatch(
           if (!asset) {
             const { data: newAsset } = await supabase
               .from('assets')
-              .insert({ symbol, name: t.name || symbol })
+              .insert({ symbol, name: t.name || t.instrumentName || symbol })
               .select('id')
               .single();
             asset = newAsset;
@@ -331,27 +363,36 @@ async function syncTraderDetailsBatch(
               .upsert({
                 trader_id: trader.id,
                 asset_id: asset.id,
-                action: t.action || t.side || (t.isBuy ? 'buy' : 'sell'),
-                amount: t.amount ?? t.units,
-                price: t.price ?? t.openPrice,
-                percentage_of_portfolio: t.portfolioPercentage,
-                executed_at: t.executedAt ?? t.openDate ?? t.date,
+                action: t.action || t.side || t.type || (t.isBuy ? 'buy' : 'sell'),
+                amount: t.amount ?? t.units ?? t.quantity,
+                price: t.price ?? t.openPrice ?? t.rate,
+                percentage_of_portfolio: t.portfolioPercentage ?? t.weight,
+                executed_at: t.executedAt ?? t.openDate ?? t.date ?? t.timestamp,
               }, { ignoreDuplicates: true });
           }
         }
+      } else {
+        console.log(`[sync-worker] Trades fetch failed for ${trader.etoro_username}: ${tradesRes.status}`);
       }
 
       await delay(RATE_LIMIT_DELAY_MS);
 
       // Fetch performance
       const perfRes = await fetch(
-        `https://api.bullaware.com/traders/${trader.etoro_username}/performance`,
-        { headers: { 'Authorization': `Bearer ${apiKey}` } }
+        ENDPOINTS.performance(trader.etoro_username),
+        { 
+          headers: { 
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          } 
+        }
       );
 
       if (perfRes.ok) {
         const perfData = await perfRes.json();
-        const monthly = perfData.monthly || perfData.monthlyReturns || [];
+        const monthly = perfData.data || perfData.monthly || perfData.monthlyReturns || [];
+
+        console.log(`[sync-worker] Got ${monthly.length} performance records for ${trader.etoro_username}`);
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         for (const m of monthly as any[]) {
@@ -361,9 +402,11 @@ async function syncTraderDetailsBatch(
               trader_id: trader.id,
               year: m.year,
               month: m.month,
-              return_pct: m.return ?? m.returnPct ?? m.gain,
+              return_pct: m.return ?? m.returnPct ?? m.gain ?? m.value,
             }, { onConflict: 'trader_id,year,month' });
         }
+      } else {
+        console.log(`[sync-worker] Performance fetch failed for ${trader.etoro_username}: ${perfRes.status}`);
       }
 
       // Update trader's updated_at
@@ -406,13 +449,19 @@ async function syncAssetsBatch(
   let totalSynced = 0;
   let page = 1;
   let hasMore = true;
+  const pageSize = 50;
 
   while (hasMore) {
-    console.log(`[sync-worker] Fetching assets page ${page}...`);
+    console.log(`[sync-worker] Fetching assets page ${page} from ${ENDPOINTS.instruments}...`);
 
     const response = await fetch(
-      `https://api.bullaware.com/assets?page=${page}&limit=50`,
-      { headers: { 'Authorization': `Bearer ${apiKey}` } }
+      `${ENDPOINTS.instruments}?page=${page}&limit=${pageSize}`,
+      { 
+        headers: { 
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        } 
+      }
     );
 
     if (!response.ok) {
@@ -421,33 +470,35 @@ async function syncAssetsBatch(
     }
 
     const data = await response.json();
-    const assets = data.data || data.assets || data || [];
+    const assets = data.items || data.data || data.instruments || [];
 
     if (assets.length === 0) {
       hasMore = false;
       break;
     }
 
+    console.log(`[sync-worker] Got ${assets.length} assets from page ${page}`);
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const assetsToUpsert = assets.map((a: any) => ({
-      symbol: a.symbol || a.ticker,
-      name: a.name || a.displayName || a.symbol,
-      asset_type: a.type || a.asset_type || 'stock',
-      logo_url: a.logoUrl || a.logo_url || a.image,
-      exchange: a.exchange,
+      symbol: a.symbol || a.ticker || a.instrumentId,
+      name: a.name || a.displayName || a.instrumentName || a.symbol,
+      asset_type: a.type || a.asset_type || a.instrumentType || 'stock',
+      logo_url: a.logoUrl || a.logo_url || a.image || a.icon,
+      exchange: a.exchange || a.market,
       sector: a.sector,
       industry: a.industry,
       market_cap: a.marketCap ?? a.market_cap,
-      pe_ratio: a.peRatio ?? a.pe_ratio,
+      pe_ratio: a.peRatio ?? a.pe_ratio ?? a.pe,
       eps: a.eps,
-      dividend_yield: a.dividendYield ?? a.dividend_yield,
+      dividend_yield: a.dividendYield ?? a.dividend_yield ?? a.dividend,
       beta: a.beta,
-      high_52w: a.high52w ?? a.high_52w ?? a.yearHigh,
-      low_52w: a.low52w ?? a.low_52w ?? a.yearLow,
-      avg_volume: a.avgVolume ?? a.avg_volume,
-      current_price: a.currentPrice ?? a.current_price ?? a.price,
-      price_change: a.priceChange ?? a.price_change,
-      price_change_pct: a.priceChangePct ?? a.price_change_pct,
+      high_52w: a.high52w ?? a.high_52w ?? a.yearHigh ?? a.week52High,
+      low_52w: a.low52w ?? a.low_52w ?? a.yearLow ?? a.week52Low,
+      avg_volume: a.avgVolume ?? a.avg_volume ?? a.averageVolume,
+      current_price: a.currentPrice ?? a.current_price ?? a.price ?? a.lastPrice,
+      price_change: a.priceChange ?? a.price_change ?? a.change,
+      price_change_pct: a.priceChangePct ?? a.price_change_pct ?? a.changePercent,
       updated_at: new Date().toISOString(),
     }));
 
@@ -462,7 +513,7 @@ async function syncAssetsBatch(
     }
 
     page++;
-    hasMore = assets.length === 50;
+    hasMore = assets.length === pageSize;
 
     if (hasMore) {
       await delay(RATE_LIMIT_DELAY_MS);
