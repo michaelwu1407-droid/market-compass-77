@@ -14,26 +14,35 @@ interface Drawdown {
 interface DrawdownsTableProps {
   drawdowns: Drawdown[];
   maxDrawdown?: number | null;
+  dailyDrawdown?: number | null;
 }
 
-export function DrawdownsTable({ drawdowns, maxDrawdown }: DrawdownsTableProps) {
+export function DrawdownsTable({ drawdowns, maxDrawdown, dailyDrawdown }: DrawdownsTableProps) {
   if (!drawdowns || drawdowns.length === 0) {
     return (
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
             <TrendingDown className="h-4 w-4" />
-            Historical Drawdowns
+            Drawdowns
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 mb-4">
+        <CardContent className="space-y-3">
+          <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
             <span className="text-sm text-muted-foreground">Maximum Drawdown</span>
             <span className="text-xl font-bold text-loss">
               {maxDrawdown ? `${maxDrawdown.toFixed(1)}%` : '-'}
             </span>
           </div>
-          <p className="text-sm text-muted-foreground">
+          {dailyDrawdown !== null && dailyDrawdown !== undefined && (
+            <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+              <span className="text-sm text-muted-foreground">Daily Drawdown</span>
+              <span className="text-lg font-semibold text-loss">
+                {dailyDrawdown.toFixed(1)}%
+              </span>
+            </div>
+          )}
+          <p className="text-xs text-muted-foreground">
             Detailed drawdown history not available yet.
           </p>
         </CardContent>

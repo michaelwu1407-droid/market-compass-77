@@ -540,14 +540,17 @@ export type Database = {
       traders: {
         Row: {
           active_since: string | null
+          alpha: number | null
           aum: number | null
           avatar_url: string | null
           avg_holding_time_days: number | null
           avg_trades_per_week: number | null
+          beta: number | null
           bio: string | null
           copiers: number | null
           country: string | null
           created_at: string | null
+          daily_drawdown: number | null
           details_synced_at: string | null
           display_name: string
           etoro_username: string
@@ -558,20 +561,26 @@ export type Database = {
           profitable_months_pct: number | null
           profitable_weeks_pct: number | null
           risk_score: number | null
+          sharpe_ratio: number | null
+          sortino_ratio: number | null
           tags: string[] | null
           updated_at: string | null
           verified: boolean | null
+          volatility: number | null
         }
         Insert: {
           active_since?: string | null
+          alpha?: number | null
           aum?: number | null
           avatar_url?: string | null
           avg_holding_time_days?: number | null
           avg_trades_per_week?: number | null
+          beta?: number | null
           bio?: string | null
           copiers?: number | null
           country?: string | null
           created_at?: string | null
+          daily_drawdown?: number | null
           details_synced_at?: string | null
           display_name: string
           etoro_username: string
@@ -582,20 +591,26 @@ export type Database = {
           profitable_months_pct?: number | null
           profitable_weeks_pct?: number | null
           risk_score?: number | null
+          sharpe_ratio?: number | null
+          sortino_ratio?: number | null
           tags?: string[] | null
           updated_at?: string | null
           verified?: boolean | null
+          volatility?: number | null
         }
         Update: {
           active_since?: string | null
+          alpha?: number | null
           aum?: number | null
           avatar_url?: string | null
           avg_holding_time_days?: number | null
           avg_trades_per_week?: number | null
+          beta?: number | null
           bio?: string | null
           copiers?: number | null
           country?: string | null
           created_at?: string | null
+          daily_drawdown?: number | null
           details_synced_at?: string | null
           display_name?: string
           etoro_username?: string
@@ -606,9 +621,12 @@ export type Database = {
           profitable_months_pct?: number | null
           profitable_weeks_pct?: number | null
           risk_score?: number | null
+          sharpe_ratio?: number | null
+          sortino_ratio?: number | null
           tags?: string[] | null
           updated_at?: string | null
           verified?: boolean | null
+          volatility?: number | null
         }
         Relationships: []
       }

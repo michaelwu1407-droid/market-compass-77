@@ -23,6 +23,8 @@ import { useTraderTrades } from '@/hooks/useTraderTrades';
 import { useTraderPerformance } from '@/hooks/useTraderPerformance';
 import { useTraderPosts } from '@/hooks/usePosts';
 import { useAnalyse } from '@/hooks/useAnalyse';
+import { useFollowedTraders } from '@/hooks/useFollowedTraders';
+import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow, format } from 'date-fns';
 
@@ -38,12 +40,16 @@ export default function TraderDetailPage() {
   const { traderId } = useParams();
   const navigate = useNavigate();
   const analyseMutation = useAnalyse();
+  const { user } = useAuth();
+  const { isFollowing, toggleFollow } = useFollowedTraders();
 
   const { data: trader, isLoading: traderLoading, error: traderError } = useTrader(traderId);
   const { data: holdings } = useTraderHoldings(traderId);
   const { data: trades } = useTraderTrades(traderId);
   const { data: performance } = useTraderPerformance(traderId);
   const { data: posts } = useTraderPosts(traderId);
+
+  const following = traderId ? isFollowing(traderId) : false;
 
   const handleAnalyse = () => {
     if (traderId) {
@@ -147,9 +153,22 @@ export default function TraderDetailPage() {
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button variant="secondary">
-                    <Users className="h-4 w-4 mr-2" />
-                    Follow
+                  <Button 
+                    variant={following ? "default" : "secondary"}
+                    onClick={() => traderId && toggleFollow(traderId)}
+                    disabled={!user}
+                  >
+                    {following ? (
+                      <>
+                        <CheckCircle2 className="h-4 w-4 mr-2" />
+                        Following
+                      </>
+                    ) : (
+                      <>
+                        <Users className="h-4 w-4 mr-2" />
+                        Follow
+                      </>
+                    )}
                   </Button>
                   <Button onClick={handleAnalyse} disabled={analyseMutation.isPending}>
                     <Sparkles className="h-4 w-4 mr-2" />
@@ -331,8 +350,18 @@ export default function TraderDetailPage() {
 
           {/* Advanced Metrics */}
           <div className="grid md:grid-cols-2 gap-6">
-            <AdvancedMetricsCard />
-            <DrawdownsTable drawdowns={[]} maxDrawdown={trader.max_drawdown} />
+            <AdvancedMetricsCard 
+              sharpeRatio={trader.sharpe_ratio}
+              sortinoRatio={trader.sortino_ratio}
+              beta={trader.beta}
+              alpha={trader.alpha}
+              volatility={trader.volatility}
+            />
+            <DrawdownsTable 
+              drawdowns={[]} 
+              maxDrawdown={trader.max_drawdown} 
+              dailyDrawdown={trader.daily_drawdown}
+            />
           </div>
 
           {/* Diversification Section */}
