@@ -191,11 +191,17 @@ serve(async (req) => {
       const data = await response.json();
       allBullwareTraders = data.items || data.data || data.investors || (Array.isArray(data) ? data : []);
     } else {
-      // Fetch all with pagination
+      // Fetch all with pagination (no limit param - let API decide page size)
       let hasMore = true;
       
       while (hasMore) {
-        const bullwareUrl = `https://api.bullaware.com/v1/investors?page=${page}&limit=${pageSize}`;
+        // Rate limiting: wait 6 seconds between requests (10 req/min limit)
+        if (page > 1) {
+          console.log(`Waiting 6 seconds for rate limiting...`);
+          await new Promise(resolve => setTimeout(resolve, 6000));
+        }
+        
+        const bullwareUrl = `https://api.bullaware.com/v1/investors?page=${page}`;
         console.log(`Fetching page ${page} from Bullaware...`);
         
         const response = await fetch(bullwareUrl, {
@@ -212,20 +218,23 @@ serve(async (req) => {
         const data = await response.json();
         const items = data.items || data.data || data.investors || (Array.isArray(data) ? data : []);
         
+        console.log(`API response: total=${data.total || 'unknown'}, items=${items.length}, page=${page}`);
+        
         allBullwareTraders.push(...items);
-        console.log(`Page ${page}: received ${items.length} traders (total: ${allBullwareTraders.length})`);
+        console.log(`Page ${page}: received ${items.length} traders (cumulative: ${allBullwareTraders.length})`);
         
         // Check if more pages exist
         const total = data.total || data.totalCount;
         if (total && allBullwareTraders.length >= total) {
           hasMore = false;
-        } else if (items.length < pageSize) {
+        } else if (items.length === 0) {
+          // No more items returned
           hasMore = false;
         } else {
           page++;
-          // Safety limit
-          if (page > 50) {
-            console.log('Reached page limit, stopping pagination');
+          // Safety limit - increased to 100 pages for larger datasets
+          if (page > 100) {
+            console.log('Reached max page limit (100), stopping pagination');
             hasMore = false;
           }
         }
