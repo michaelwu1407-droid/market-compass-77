@@ -945,18 +945,28 @@ async function syncTraderDetailsBatch(
           }
 
           if (asset) {
-            // Bullaware positions array fields: isBuy, openRate, closeRate, openDateTime, closeDateTime, netProfit
+            // Bullaware positions array fields: positionId, isBuy, openRate, closeRate, openDateTime, closeDateTime, netProfit
+            const positionId = t.positionId ? Number(t.positionId) : null;
+            
             await supabase
               .from('trades')
               .upsert({
                 trader_id: trader.id,
                 asset_id: asset.id,
-                action: t.action || t.side || t.type || (t.isBuy === true ? 'buy' : t.isBuy === false ? 'sell' : 'unknown'),
-                amount: t.amount ?? t.units ?? t.quantity ?? t.netProfit,
-                price: t.price ?? t.openRate ?? t.openPrice ?? t.rate ?? t.closeRate,
-                percentage_of_portfolio: t.portfolioPercentage ?? t.weight,
-                executed_at: t.executedAt ?? t.closeDateTime ?? t.openDateTime ?? t.openDate ?? t.date ?? t.timestamp,
-              }, { ignoreDuplicates: true });
+                position_id: positionId,
+                action: t.isBuy === true ? 'buy' : t.isBuy === false ? 'sell' : (t.action || t.side || t.type || 'unknown'),
+                open_price: t.openRate ?? t.openPrice ?? null,
+                close_price: t.closeRate ?? t.closePrice ?? null,
+                profit_loss_pct: t.netProfit ?? null,
+                open_date: t.openDateTime ?? t.openDate ?? null,
+                executed_at: t.closeDateTime ?? t.executedAt ?? t.date ?? t.timestamp ?? null,
+                amount: t.amount ?? t.units ?? t.quantity ?? null,
+                price: t.closeRate ?? t.closePrice ?? t.openRate ?? t.openPrice ?? null,
+                percentage_of_portfolio: t.portfolioPercentage ?? t.weight ?? null,
+              }, { 
+                onConflict: 'position_id',
+                ignoreDuplicates: false 
+              });
           }
         }
       } else {

@@ -723,33 +723,48 @@ export type Database = {
           action: string
           amount: number | null
           asset_id: string | null
+          close_price: number | null
           created_at: string | null
           executed_at: string | null
           id: string
+          open_date: string | null
+          open_price: number | null
           percentage_of_portfolio: number | null
+          position_id: number | null
           price: number | null
+          profit_loss_pct: number | null
           trader_id: string | null
         }
         Insert: {
           action: string
           amount?: number | null
           asset_id?: string | null
+          close_price?: number | null
           created_at?: string | null
           executed_at?: string | null
           id?: string
+          open_date?: string | null
+          open_price?: number | null
           percentage_of_portfolio?: number | null
+          position_id?: number | null
           price?: number | null
+          profit_loss_pct?: number | null
           trader_id?: string | null
         }
         Update: {
           action?: string
           amount?: number | null
           asset_id?: string | null
+          close_price?: number | null
           created_at?: string | null
           executed_at?: string | null
           id?: string
+          open_date?: string | null
+          open_price?: number | null
           percentage_of_portfolio?: number | null
+          position_id?: number | null
           price?: number | null
+          profit_loss_pct?: number | null
           trader_id?: string | null
         }
         Relationships: [
