@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
-import { Heart, MessageCircle, TrendingUp, Eye, Sparkles, Star, Bookmark, BookmarkCheck } from 'lucide-react';
+import { Heart, MessageCircle, TrendingUp, Eye, Sparkles, Star, Bookmark, BookmarkCheck, ExternalLink } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -72,6 +72,19 @@ export function FeedCard({ item, onAnalyse, onStarForIC, onSave, onUnsave, isSav
 
         {/* Content - render markdown with images */}
         <MarkdownContent content={post.text} className="mb-3" />
+        
+        {/* Show link to full post if content is truncated */}
+        {post.text?.includes('[...]') && post.trader?.etoro_trader_id && (
+          <a 
+            href={`https://www.etoro.com/people/${post.trader.etoro_trader_id}/feed`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs text-primary hover:underline mb-3"
+          >
+            <ExternalLink className="h-3 w-3" />
+            Read full post on eToro
+          </a>
+        )}
 
         {/* Meta */}
         <div className="flex items-center gap-4 text-xs text-muted-foreground mb-3">
