@@ -19,6 +19,7 @@ export function usePosts() {
       if (error) throw error;
       return data as Post[];
     },
+    refetchInterval: 10 * 60 * 1000, // Refresh every 10 minutes
   });
 }
 

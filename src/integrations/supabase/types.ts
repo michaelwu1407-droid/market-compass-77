@@ -54,6 +54,7 @@ export type Database = {
           beta: number | null
           country: string | null
           created_at: string | null
+          currency: string | null
           current_price: number | null
           dividend_yield: number | null
           eps: number | null
@@ -79,6 +80,7 @@ export type Database = {
           beta?: number | null
           country?: string | null
           created_at?: string | null
+          currency?: string | null
           current_price?: number | null
           dividend_yield?: number | null
           eps?: number | null
@@ -104,6 +106,7 @@ export type Database = {
           beta?: number | null
           country?: string | null
           created_at?: string | null
+          currency?: string | null
           current_price?: number | null
           dividend_yield?: number | null
           eps?: number | null

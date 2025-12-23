@@ -9,6 +9,7 @@ interface PriceChartProps {
   showRangeSelector?: boolean;
   color?: 'gain' | 'loss' | 'primary';
   type?: 'line' | 'area';
+  currency?: string;
 }
 
 const timeRanges = [
@@ -20,12 +21,25 @@ const timeRanges = [
   { label: 'All', days: 9999 },
 ];
 
+const currencySymbols: Record<string, string> = {
+  USD: '$',
+  GBP: '£',
+  GBp: 'p',
+  GBX: 'p',
+  EUR: '€',
+  JPY: '¥',
+  CHF: 'CHF ',
+  CAD: 'C$',
+  AUD: 'A$',
+};
+
 export function PriceChart({ 
   data, 
   height = 300, 
   showRangeSelector = true,
   color = 'primary',
-  type = 'area'
+  type = 'area',
+  currency = 'USD'
 }: PriceChartProps) {
   const [selectedRange, setSelectedRange] = useState('1Y');
 
@@ -36,7 +50,13 @@ export function PriceChart({
   const filteredData = data.filter(d => new Date(d.date) >= cutoffDate);
   const valueKey = 'price' in (data[0] || {}) ? 'price' : 'value';
 
-  const values = filteredData.map(d => d.price ?? d.value ?? 0);
+  // Handle pence conversion for display
+  const isPence = currency === 'GBp' || currency === 'GBX';
+  const displayData = isPence 
+    ? filteredData.map(d => ({ ...d, [valueKey]: (d[valueKey as keyof typeof d] as number) / 100 }))
+    : filteredData;
+
+  const values = displayData.map(d => d.price ?? d.value ?? 0);
   const minValue = Math.min(...values) * 0.95;
   const maxValue = Math.max(...values) * 1.05;
   const isPositive = values.length >= 2 && values[values.length - 1] >= values[0];
@@ -44,6 +64,10 @@ export function PriceChart({
   const strokeColor = color === 'gain' ? 'hsl(var(--gain))' : 
                       color === 'loss' ? 'hsl(var(--loss))' : 
                       isPositive ? 'hsl(var(--gain))' : 'hsl(var(--loss))';
+
+  // Get the display currency symbol
+  const displayCurrency = isPence ? 'GBP' : currency;
+  const currencySymbol = currencySymbols[displayCurrency] || '$';
 
   const formatDate = (date: string) => {
     const d = new Date(date);
@@ -55,9 +79,19 @@ export function PriceChart({
 
   const formatValue = (value: number) => {
     if (valueKey === 'price') {
-      return `$${value.toFixed(2)}`;
+      return `${currencySymbol}${value.toFixed(2)}`;
     }
     return value.toFixed(1);
+  };
+
+  const formatYAxis = (value: number) => {
+    if (valueKey === 'price') {
+      if (value >= 1000) {
+        return `${currencySymbol}${(value / 1000).toFixed(1)}k`;
+      }
+      return `${currencySymbol}${value.toFixed(0)}`;
+    }
+    return value.toFixed(0);
   };
 
   const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number }>; label?: string }) => {
@@ -92,7 +126,7 @@ export function PriceChart({
 
       <ResponsiveContainer width="100%" height={height}>
         {type === 'area' ? (
-          <AreaChart data={filteredData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
+          <AreaChart data={displayData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
             <defs>
               <linearGradient id={`gradient-${color}`} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor={strokeColor} stopOpacity={0.3} />
@@ -109,11 +143,11 @@ export function PriceChart({
             />
             <YAxis 
               domain={[minValue, maxValue]}
-              tickFormatter={(v) => valueKey === 'price' ? `$${v}` : v}
+              tickFormatter={formatYAxis}
               tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
               axisLine={false}
               tickLine={false}
-              width={50}
+              width={60}
             />
             <Tooltip content={<CustomTooltip />} />
             <Area
@@ -125,7 +159,7 @@ export function PriceChart({
             />
           </AreaChart>
         ) : (
-          <LineChart data={filteredData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
+          <LineChart data={displayData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
             <XAxis 
               dataKey="date" 
               tickFormatter={formatDate}
@@ -135,11 +169,11 @@ export function PriceChart({
             />
             <YAxis 
               domain={[minValue, maxValue]}
-              tickFormatter={(v) => valueKey === 'price' ? `$${v}` : v}
+              tickFormatter={formatYAxis}
               tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
               axisLine={false}
               tickLine={false}
-              width={50}
+              width={60}
             />
             <Tooltip content={<CustomTooltip />} />
             <Line

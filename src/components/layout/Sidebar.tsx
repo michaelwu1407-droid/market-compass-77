@@ -8,7 +8,8 @@ import {
   ChevronLeft,
   ChevronRight,
   AlertTriangle,
-  Settings
+  Settings,
+  FileText
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -19,6 +20,7 @@ const navItems = [
   { path: '/daily', icon: Calendar, label: 'Daily' },
   { path: '/traders', icon: Users, label: 'Copy Traders' },
   { path: '/analysis', icon: Sparkles, label: 'Analysis' },
+  { path: '/templates', icon: FileText, label: 'Templates' },
   { path: '/ic', icon: ClipboardCheck, label: 'IC' },
   { path: '/discrepancies', icon: AlertTriangle, label: 'Discrepancies' },
 ];

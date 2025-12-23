@@ -15,6 +15,7 @@ import ICPage from "./pages/ICPage";
 import DiscrepanciesPage from "./pages/DiscrepanciesPage";
 import AuthPage from "./pages/AuthPage";
 import AdminSyncPage from "./pages/AdminSyncPage";
+import TemplatesPage from "./pages/TemplatesPage";
 import NotFound from "./pages/NotFound";
 import { Loader2 } from "lucide-react";
 
@@ -57,6 +58,7 @@ function AppRoutes() {
         <Route path="/analysis" element={<AnalysisPage />} />
         <Route path="/ic" element={<ICPage />} />
         <Route path="/discrepancies" element={<DiscrepanciesPage />} />
+        <Route path="/templates" element={<TemplatesPage />} />
         <Route path="/admin" element={<AdminSyncPage />} />
       </Route>
       <Route path="*" element={<NotFound />} />
