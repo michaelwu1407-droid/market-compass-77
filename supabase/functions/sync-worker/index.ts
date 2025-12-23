@@ -43,6 +43,37 @@ function isStale(lastRun: string | null, hoursThreshold: number): boolean {
   return hoursDiff >= hoursThreshold;
 }
 
+// Parse AUM value string like "5M" or "300K" to number
+function parseAumValue(str: string): number | null {
+  const cleaned = str.replace(/[^0-9.kmb+]/g, '');
+  const num = parseFloat(cleaned);
+  if (isNaN(num)) return null;
+  
+  if (str.includes('b')) return num * 1_000_000_000;
+  if (str.includes('m')) return num * 1_000_000;
+  if (str.includes('k')) return num * 1_000;
+  return num;
+}
+
+// Parse AUM strings like "$5M+", "$100K-$300K" to numeric values
+function parseAum(aumStr: string | number | null | undefined): number | null {
+  if (aumStr === null || aumStr === undefined) return null;
+  if (typeof aumStr === 'number') return aumStr;
+  
+  const str = String(aumStr).replace(/[$,]/g, '').toLowerCase();
+  
+  // Handle ranges like "100k-300k" - take midpoint
+  if (str.includes('-')) {
+    const parts = str.split('-');
+    const low = parseAumValue(parts[0]);
+    const high = parseAumValue(parts[1]);
+    if (low !== null && high !== null) return (low + high) / 2;
+    return low || high;
+  }
+  
+  return parseAumValue(str);
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -180,7 +211,7 @@ async function syncTradersBatch(
     gain_24m: t.gain24m ?? t.gain_24m ?? t.return2Years,
     max_drawdown: t.maxDrawdown ?? t.max_drawdown ?? t.drawdown,
     copiers: t.copiers ?? t.copiersCount ?? t.copiersNum ?? 0,
-    aum: t.aum ?? t.assetsUnderManagement ?? t.assets_under_management,
+    aum: parseAum(t.aum ?? t.assetsUnderManagement ?? t.assets_under_management),
     profitable_weeks_pct: t.profitableWeeksPct ?? t.profitable_weeks_pct ?? t.profitableWeeks,
     profitable_months_pct: t.profitableMonthsPct ?? t.profitable_months_pct ?? t.profitableMonths,
     avg_trades_per_week: t.avgTradesPerWeek ?? t.avg_trades_per_week ?? t.tradesPerWeek,
