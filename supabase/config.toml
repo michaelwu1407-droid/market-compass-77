@@ -29,3 +29,6 @@ verify_jwt = false
 
 [functions.report-qa]
 verify_jwt = false
+
+[functions.refresh-asset]
+verify_jwt = false
