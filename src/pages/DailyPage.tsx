@@ -1,8 +1,9 @@
 import { useNavigate } from 'react-router-dom';
-import { Calendar, TrendingUp, Users, Star } from 'lucide-react';
+import { Calendar, TrendingUp, Users, Star, Clock } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Badge } from '@/components/ui/badge';
 import { DailyMoverRow } from '@/components/daily/DailyMoverRow';
 import { TraderMoveCard } from '@/components/daily/TraderMoveCard';
 import { useTodayMovers } from '@/hooks/useDailyMovers';
@@ -227,18 +228,27 @@ export default function DailyPage() {
     <div className="max-w-5xl mx-auto">
       {/* Hero Card */}
       <Card className="mb-6 bg-gradient-to-br from-primary/5 via-transparent to-accent/10 border-primary/20">
-        <CardContent className="p-6">
-          <div className="flex items-center gap-3 mb-4">
+        <CardContent className="p-4 md:p-6">
+          <div className="flex items-start gap-3 mb-4">
             <div className="p-2 rounded-lg bg-primary/10">
               <Calendar className="h-5 w-5 text-primary" />
             </div>
-            <div>
-              <h1 className="text-2xl font-bold">Today's Market Snapshot</h1>
-              <p className="text-muted-foreground">{format(today, 'EEEE, MMMM d, yyyy')}</p>
+            <div className="flex-1">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <h1 className="text-xl md:text-2xl font-bold">Today's Market Snapshot</h1>
+                <Badge variant="secondary" className="text-xs">
+                  <Clock className="h-3 w-3 mr-1" />
+                  US Market Hours
+                </Badge>
+              </div>
+              <p className="text-muted-foreground text-sm">{format(today, 'EEEE, MMMM d, yyyy')}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Data reflects previous market close (4:00 PM ET) and pre-market activity
+              </p>
             </div>
           </div>
           
-          <div className="space-y-2 pl-12">
+          <div className="space-y-2 pl-0 md:pl-12">
             <p className="text-sm flex items-start gap-2">
               <span className="text-primary mt-1">•</span>
               <span>{summary.topGainer}</span>
@@ -253,16 +263,16 @@ export default function DailyPage() {
 
       {/* Daily Movers Section */}
       <Card className="mb-6">
-        <CardHeader>
+        <CardHeader className="p-4 md:p-6">
           <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
+            <CardTitle className="flex items-center gap-2 text-lg md:text-xl">
               <TrendingUp className="h-5 w-5 text-primary" />
               Daily Movers
             </CardTitle>
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="border-b border-border px-4 py-2">
+          <div className="border-b border-border px-4 py-2 overflow-x-auto">
             <Tabs value={moverFilter} onValueChange={setMoverFilter}>
               <TabsList className="h-9">
                 <TabsTrigger value="all" className="text-xs">All</TabsTrigger>
@@ -314,14 +324,14 @@ export default function DailyPage() {
 
       {/* Traders' Moves */}
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+        <CardHeader className="p-4 md:p-6">
+          <CardTitle className="flex items-center gap-2 text-lg md:text-xl">
             <Users className="h-5 w-5 text-primary" />
             Recent Trader Moves
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="border-b border-border px-4 py-2">
+          <div className="border-b border-border px-4 py-2 overflow-x-auto">
             <Tabs value={tradeFilter} onValueChange={setTradeFilter}>
               <TabsList className="h-9">
                 <TabsTrigger value="all" className="text-xs">All</TabsTrigger>

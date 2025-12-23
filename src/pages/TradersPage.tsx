@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { RefreshCw, Clock } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { TraderCard } from '@/components/traders/TraderCard';
@@ -9,8 +10,10 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
+import { formatDistanceToNow } from 'date-fns';
 
 type TraderFilter = 'trending' | 'most_copied' | 'following';
 
@@ -21,8 +24,25 @@ export default function TradersPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  const { data: traders, isLoading, error } = useTraders();
+  const { data: traders, isLoading, error, refetch, isFetching } = useTraders();
   const { followedTraderIds, isFollowing, toggleFollow, isLoading: followsLoading } = useFollowedTraders();
+
+  // Find the most recent sync time from traders
+  const lastSyncTime = traders?.reduce((latest, trader) => {
+    if (trader.details_synced_at) {
+      const syncDate = new Date(trader.details_synced_at);
+      return syncDate > latest ? syncDate : latest;
+    }
+    return latest;
+  }, new Date(0));
+
+  const handleRefresh = async () => {
+    await refetch();
+    toast({
+      title: 'Refreshed',
+      description: 'Trader data has been refreshed.',
+    });
+  };
 
   const handleAnalyse = (traderId: string) => {
     navigate(`/analysis?trader=${traderId}`);
@@ -104,12 +124,34 @@ export default function TradersPage() {
   return (
     <div className="max-w-6xl mx-auto">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold mb-2">Copy Traders</h1>
-        <p className="text-muted-foreground">Discover and analyse top investor profiles</p>
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div>
+            <h1 className="text-2xl font-bold mb-1">Copy Traders</h1>
+            <p className="text-muted-foreground text-sm">Discover and analyse top investor profiles</p>
+          </div>
+          <div className="flex items-center gap-3">
+            {lastSyncTime && lastSyncTime.getTime() > 0 && (
+              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                <Clock className="h-3 w-3" />
+                <span className="hidden sm:inline">Data synced:</span>
+                <span>{formatDistanceToNow(lastSyncTime, { addSuffix: true })}</span>
+              </div>
+            )}
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handleRefresh}
+              disabled={isFetching}
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
+        </div>
       </div>
 
       {/* Tabs */}
-      <div className="mb-6">
+      <div className="mb-6 overflow-x-auto scrollbar-hide -mx-4 px-4">
         <Tabs value={filter} onValueChange={(v) => setFilter(v as TraderFilter)}>
           <TabsList>
             <TabsTrigger value="trending">Trending</TabsTrigger>
@@ -120,7 +162,7 @@ export default function TradersPage() {
       </div>
 
       {/* Filters */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 p-4 bg-card rounded-lg border border-border">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mb-6 p-4 bg-card rounded-lg border border-border">
         <div className="space-y-2">
           <Label className="text-xs">Minimum Track Record</Label>
           <Select value={minTrackRecord} onValueChange={setMinTrackRecord}>

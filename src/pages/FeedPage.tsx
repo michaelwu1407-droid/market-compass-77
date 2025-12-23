@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { RefreshCw, Clock } from 'lucide-react';
 import { FeedCard } from '@/components/feed/FeedCard';
 import { TraderMiniCard } from '@/components/feed/TraderMiniCard';
 import { Button } from '@/components/ui/button';
@@ -11,21 +12,28 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { useFollowedTraders } from '@/hooks/useFollowedTraders';
 import { useSavedPosts, useSavePost, useUnsavePost } from '@/hooks/useSavedPosts';
 import { isValidPostContent } from '@/components/feed/MarkdownContent';
+import { formatDistanceToNow } from 'date-fns';
 import type { FeedItem, Post as FeedPost, Trader as FeedTrader } from '@/types';
 
 type FilterType = 'all' | 'following' | 'assets' | 'traders' | 'saved';
 
 export default function FeedPage() {
   const [filter, setFilter] = useState<FilterType>('all');
+  const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   
-  const { data: posts, isLoading: postsLoading } = usePosts();
-  const { data: traders, isLoading: tradersLoading } = useTraders();
+  const { data: posts, isLoading: postsLoading, refetch: refetchPosts, isFetching } = usePosts();
+  const { data: traders, isLoading: tradersLoading, refetch: refetchTraders } = useTraders();
   const { followedTraderIds, isLoading: followsLoading, toggleFollow, isFollowing } = useFollowedTraders();
   const { data: savedPostsData, isLoading: savedLoading } = useSavedPosts();
   const savePost = useSavePost();
   const unsavePost = useUnsavePost();
+
+  const handleRefresh = async () => {
+    await Promise.all([refetchPosts(), refetchTraders()]);
+    setLastRefreshed(new Date());
+  };
 
   // Create a Set of saved post IDs for quick lookup
   const savedPostIds = new Set((savedPostsData || []).map(sp => sp.post_id));
@@ -186,8 +194,28 @@ export default function FeedPage() {
   return (
     <div className="max-w-7xl mx-auto">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold mb-2">Discussion Feed</h1>
-        <p className="text-muted-foreground">Posts, trades, and trending assets from your network</p>
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div>
+            <h1 className="text-2xl font-bold mb-1">Discussion Feed</h1>
+            <p className="text-muted-foreground text-sm">Posts and trades from your network</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Clock className="h-3 w-3" />
+              <span className="hidden sm:inline">Last refreshed:</span>
+              <span>{formatDistanceToNow(lastRefreshed, { addSuffix: true })}</span>
+            </div>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handleRefresh}
+              disabled={isFetching}
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
+        </div>
       </div>
 
       {/* Filters */}
