@@ -19,7 +19,7 @@ const ENDPOINTS = {
 
 const BATCH_SIZE_TRADERS = 10; // Traders per page from Bullaware
 const BATCH_SIZE_DETAILS = 2; // Trader details to sync per run (reduced to avoid rate limits)
-const RATE_LIMIT_DELAY_MS = 7000; // 7 seconds between Bullaware calls (safer for 10 req/min)
+const RATE_LIMIT_DELAY_MS = 6000; // 6 seconds between Bullaware calls (10 req/min limit)
 const STALE_HOURS_DETAILS = 2; // Consider trader details stale after 2 hours
 const STALE_HOURS_ASSETS = 24; // Consider assets stale after 24 hours
 const STALE_HOURS_TRADERS = 6; // Re-paginate traders list every 6 hours
