@@ -268,11 +268,12 @@ async function getStaleTraders(
   const thresholdTime = new Date();
   thresholdTime.setHours(thresholdTime.getHours() - hoursThreshold);
 
+  // Use details_synced_at to check staleness (not updated_at which is set during list sync)
   const { data, error } = await supabase
     .from('traders')
-    .select('id, etoro_username, updated_at')
-    .or(`updated_at.is.null,updated_at.lt.${thresholdTime.toISOString()}`)
-    .order('updated_at', { ascending: true, nullsFirst: true })
+    .select('id, etoro_username, details_synced_at')
+    .or(`details_synced_at.is.null,details_synced_at.lt.${thresholdTime.toISOString()}`)
+    .order('details_synced_at', { ascending: true, nullsFirst: true })
     .limit(limit);
 
   if (error) {
@@ -443,10 +444,10 @@ async function syncTraderDetailsBatch(
         console.log(`[sync-worker] Performance fetch failed for ${trader.etoro_username}: ${perfRes.status}`);
       }
 
-      // Update trader's updated_at
+      // Update trader's details_synced_at (not updated_at which is for list sync)
       await supabase
         .from('traders')
-        .update({ updated_at: new Date().toISOString() })
+        .update({ details_synced_at: new Date().toISOString() })
         .eq('id', trader.id);
 
       syncedTraders.push(trader.etoro_username);

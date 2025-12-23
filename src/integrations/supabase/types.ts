@@ -519,6 +519,7 @@ export type Database = {
           copiers: number | null
           country: string | null
           created_at: string | null
+          details_synced_at: string | null
           display_name: string
           etoro_username: string
           gain_12m: number | null
@@ -542,6 +543,7 @@ export type Database = {
           copiers?: number | null
           country?: string | null
           created_at?: string | null
+          details_synced_at?: string | null
           display_name: string
           etoro_username: string
           gain_12m?: number | null
@@ -565,6 +567,7 @@ export type Database = {
           copiers?: number | null
           country?: string | null
           created_at?: string | null
+          details_synced_at?: string | null
           display_name?: string
           etoro_username?: string
           gain_12m?: number | null
