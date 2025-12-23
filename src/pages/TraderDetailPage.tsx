@@ -552,35 +552,60 @@ export default function TraderDetailPage() {
         <TabsContent value="activity">
           <Card>
             <CardHeader>
-              <CardTitle>Recent Trades</CardTitle>
+              <CardTitle>Closed Trades</CardTitle>
             </CardHeader>
             <CardContent>
               {trades && trades.length > 0 ? (
-                <div className="space-y-3">
-                  {trades.map((trade) => (
-                    <div 
-                      key={trade.id}
-                      className="flex items-center justify-between p-3 rounded-lg bg-secondary/30"
-                    >
-                      <div className="flex items-center gap-3">
-                        <Badge variant={trade.action === 'buy' ? 'default' : 'destructive'}>
-                          {trade.action.toUpperCase()}
-                        </Badge>
-                        <div>
-                          <div className="font-medium">{trade.assets?.name || 'Unknown Asset'}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {trade.executed_at && formatDistanceToNow(new Date(trade.executed_at), { addSuffix: true })}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        {trade.price && <div className="font-medium">${trade.price.toFixed(2)}</div>}
-                        {trade.percentage_of_portfolio && (
-                          <div className="text-xs text-muted-foreground">{trade.percentage_of_portfolio}% of portfolio</div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-muted-foreground">
+                        <th className="text-left py-3 px-2 font-medium">Asset</th>
+                        <th className="text-center py-3 px-2 font-medium">Direction</th>
+                        <th className="text-right py-3 px-2 font-medium">Open Date</th>
+                        <th className="text-right py-3 px-2 font-medium">Open Price</th>
+                        <th className="text-right py-3 px-2 font-medium">Close Date</th>
+                        <th className="text-right py-3 px-2 font-medium">Close Price</th>
+                        <th className="text-right py-3 px-2 font-medium">P&L</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {trades.map((trade) => {
+                        const pnl = trade.profit_loss_pct;
+                        const isProfit = pnl !== null && pnl > 0;
+                        const isLoss = pnl !== null && pnl < 0;
+                        
+                        return (
+                          <tr key={trade.id} className="border-b border-border/50 hover:bg-secondary/20">
+                            <td className="py-3 px-2">
+                              <div className="font-medium">{trade.assets?.symbol || 'Unknown'}</div>
+                              <div className="text-xs text-muted-foreground">{trade.assets?.name || ''}</div>
+                            </td>
+                            <td className="py-3 px-2 text-center">
+                              <Badge variant={trade.action === 'buy' ? 'default' : 'destructive'} className="text-xs">
+                                {trade.action === 'buy' ? 'LONG' : 'SHORT'}
+                              </Badge>
+                            </td>
+                            <td className="py-3 px-2 text-right text-muted-foreground">
+                              {trade.open_date ? format(new Date(trade.open_date), 'MMM d, yyyy') : '-'}
+                            </td>
+                            <td className="py-3 px-2 text-right">
+                              {trade.open_price ? `$${trade.open_price.toFixed(2)}` : '-'}
+                            </td>
+                            <td className="py-3 px-2 text-right text-muted-foreground">
+                              {trade.executed_at ? format(new Date(trade.executed_at), 'MMM d, yyyy') : '-'}
+                            </td>
+                            <td className="py-3 px-2 text-right">
+                              {trade.close_price ? `$${trade.close_price.toFixed(2)}` : '-'}
+                            </td>
+                            <td className={`py-3 px-2 text-right font-medium ${isProfit ? 'text-green-500' : isLoss ? 'text-red-500' : ''}`}>
+                              {pnl !== null ? `${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}%` : '-'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               ) : (
                 <div className="text-center py-8">
