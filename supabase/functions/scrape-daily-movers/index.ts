@@ -34,69 +34,13 @@ serve(async (req) => {
     console.log(`[scrape-daily-movers] Found ${assets?.length || 0} assets with price data`);
 
     if (!assets || assets.length === 0) {
-      // Fallback: Get top holdings from traders and mark them as movers
-      console.log('[scrape-daily-movers] No price data, using top holdings as movers...');
+      console.log('[scrape-daily-movers] No assets with price data found.');
+      console.log('[scrape-daily-movers] Run fetch-daily-prices first to get real-time price data.');
       
-      const { data: topHoldings } = await supabase
-        .from('trader_holdings')
-        .select('asset_id, profit_loss_pct, assets(id, symbol, name)')
-        .not('profit_loss_pct', 'is', null)
-        .order('profit_loss_pct', { ascending: false })
-        .limit(20);
-
-      const today = new Date().toISOString().split('T')[0];
-
-      // Delete today's existing movers
-      await supabase
-        .from('daily_movers')
-        .delete()
-        .eq('date', today);
-
-      if (topHoldings && topHoldings.length > 0) {
-        // Get unique assets
-        const seenAssets = new Set<string>();
-        const moversToInsert = topHoldings
-          .filter(h => {
-            const assetId = h.asset_id;
-            if (!assetId || seenAssets.has(assetId)) return false;
-            seenAssets.add(assetId);
-            return true;
-          })
-          .slice(0, 10)
-          .map(h => ({
-            asset_id: h.asset_id,
-            date: today,
-            change_pct: Math.abs(h.profit_loss_pct || 0),
-            direction: (h.profit_loss_pct || 0) >= 0 ? 'up' : 'down',
-          }));
-
-        if (moversToInsert.length > 0) {
-          const { error: insertError } = await supabase
-            .from('daily_movers')
-            .insert(moversToInsert);
-
-          if (insertError) {
-            console.error('[scrape-daily-movers] Error inserting movers:', insertError);
-          } else {
-            console.log(`[scrape-daily-movers] Inserted ${moversToInsert.length} movers from holdings`);
-          }
-
-          return new Response(
-            JSON.stringify({
-              success: true,
-              movers_inserted: moversToInsert.length,
-              source: 'holdings',
-              date: today,
-            }),
-            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          );
-        }
-      }
-
       return new Response(
         JSON.stringify({
-          success: true,
-          message: 'No movers data available',
+          success: false,
+          message: 'No price data available. Run fetch-daily-prices first.',
           movers_inserted: 0,
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

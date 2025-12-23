@@ -206,8 +206,8 @@ export default function DailyPage() {
       : null;
     
     const topGainerText = topGainer?.asset
-      ? `${topGainer.asset.name} (${topGainer.asset.ticker}) leads with ${topGainer.pct_change >= 0 ? '+' : ''}${topGainer.pct_change.toFixed(1)}% P&L`
-      : 'Loading top performers...';
+      ? `${topGainer.asset.name} (${topGainer.asset.ticker}) leads with ${topGainer.pct_change >= 0 ? '+' : ''}${topGainer.pct_change.toFixed(1)}%`
+      : 'Loading daily movers...';
 
     // Find recent followed trader move
     const followedTrade = transformedTrades.find(t => followedTraderIds.includes(t.trader_id));
@@ -251,18 +251,15 @@ export default function DailyPage() {
         </CardContent>
       </Card>
 
-      {/* Top Performer Holdings Section */}
+      {/* Daily Movers Section */}
       <Card className="mb-6">
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle className="flex items-center gap-2">
               <TrendingUp className="h-5 w-5 text-primary" />
-              Top Performer Holdings
+              Daily Movers
             </CardTitle>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Based on historical P&L of tracked traders' holdings
-          </p>
         </CardHeader>
         <CardContent className="p-0">
           <div className="border-b border-border px-4 py-2">
