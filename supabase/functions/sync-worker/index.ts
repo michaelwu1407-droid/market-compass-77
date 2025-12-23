@@ -1021,15 +1021,18 @@ async function syncTraderDetailsBatch(
               percentage_of_portfolio: t.portfolioPercentage ?? t.weight ?? null,
             };
             
-            // If we have a valid position_id, use upsert with the composite index
+            // If we have a valid position_id, use upsert with the unique index on position_id
             // Otherwise, just insert (skip duplicates based on trader_id + asset_id + executed_at)
             if (positionId !== null) {
-              await supabase
+              const { error: upsertError } = await supabase
                 .from('trades')
                 .upsert(tradeData, { 
-                  onConflict: 'trader_id,position_id',
+                  onConflict: 'position_id',
                   ignoreDuplicates: false 
                 });
+              if (upsertError) {
+                console.log(`[sync-worker] Trade upsert error for position ${positionId}:`, upsertError.message);
+              }
             } else {
               // For trades without position_id, check if similar trade already exists
               const { data: existingTrade } = await supabase
@@ -1041,9 +1044,12 @@ async function syncTraderDetailsBatch(
                 .maybeSingle();
               
               if (!existingTrade) {
-                await supabase
+                const { error: insertError } = await supabase
                   .from('trades')
                   .insert(tradeData);
+                if (insertError) {
+                  console.log(`[sync-worker] Trade insert error:`, insertError.message);
+                }
               }
             }
           }
