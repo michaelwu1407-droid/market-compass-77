@@ -12,7 +12,8 @@ const ENDPOINTS = {
   portfolio: (username: string) => `${BULLAWARE_BASE}/investors/${username}/portfolio`,
   trades: (username: string) => `${BULLAWARE_BASE}/investors/${username}/trades`,
   performance: (username: string) => `${BULLAWARE_BASE}/investors/${username}/performance`,
-  stats: (username: string) => `${BULLAWARE_BASE}/investors/${username}/stats`,
+  metrics: (username: string) => `${BULLAWARE_BASE}/investors/${username}/metrics`,
+  riskScore: (username: string) => `${BULLAWARE_BASE}/investors/${username}/risk-score/monthly`,
   instruments: `${BULLAWARE_BASE}/instruments`,
 };
 
@@ -473,9 +474,9 @@ async function syncTraderDetailsBatch(
 
       await delay(RATE_LIMIT_DELAY_MS);
 
-      // Fetch stats (for advanced metrics like Sharpe, Sortino, Alpha, Beta, Volatility)
-      const statsRes = await fetch(
-        ENDPOINTS.stats(trader.etoro_username),
+      // Fetch risk score from dedicated endpoint
+      const riskRes = await fetch(
+        ENDPOINTS.riskScore(trader.etoro_username),
         { 
           headers: { 
             'Authorization': `Bearer ${apiKey}`,
@@ -484,37 +485,76 @@ async function syncTraderDetailsBatch(
         }
       );
 
-      if (statsRes.ok) {
-        const statsData = await statsRes.json();
-        const stats = statsData.data || statsData.stats || statsData;
+      let riskScoreValue: number | null = null;
+      if (riskRes.ok) {
+        const riskData = await riskRes.json();
+        console.log(`[sync-worker] Risk score response for ${trader.etoro_username}:`, JSON.stringify(riskData, null, 2).slice(0, 500));
         
-        console.log(`[sync-worker] Got stats for ${trader.etoro_username}:`, JSON.stringify(stats, null, 2).slice(0, 500));
+        // Extract risk score - could be in various formats
+        const data = riskData.data || riskData;
+        if (Array.isArray(data) && data.length > 0) {
+          // If it's an array, get the latest value
+          const latest = data[data.length - 1];
+          riskScoreValue = latest.value ?? latest.riskScore ?? latest.risk ?? latest;
+        } else if (typeof data === 'number') {
+          riskScoreValue = data;
+        } else if (data.value !== undefined) {
+          riskScoreValue = data.value;
+        } else if (data.riskScore !== undefined) {
+          riskScoreValue = data.riskScore;
+        }
+        
+        if (riskScoreValue !== null) {
+          console.log(`[sync-worker] Setting risk_score=${riskScoreValue} for ${trader.etoro_username}`);
+          await supabase
+            .from('traders')
+            .update({ risk_score: riskScoreValue })
+            .eq('id', trader.id);
+        }
+      } else {
+        console.log(`[sync-worker] Risk score fetch failed for ${trader.etoro_username}: ${riskRes.status}`);
+      }
+
+      await delay(RATE_LIMIT_DELAY_MS);
+
+      // Fetch metrics (for advanced metrics like Sharpe, Sortino, Alpha, Beta, Volatility)
+      const metricsRes = await fetch(
+        ENDPOINTS.metrics(trader.etoro_username),
+        { 
+          headers: { 
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          } 
+        }
+      );
+
+      if (metricsRes.ok) {
+        const metricsData = await metricsRes.json();
+        const metrics = metricsData.data || metricsData.metrics || metricsData;
+        
+        console.log(`[sync-worker] Got metrics for ${trader.etoro_username}:`, JSON.stringify(metrics, null, 2).slice(0, 500));
         
         // Update trader with advanced metrics
         const advancedMetrics: Record<string, unknown> = {};
         
         // Try various field names for each metric
-        if (stats.sharpeRatio !== undefined || stats.sharpe !== undefined || stats.sharpe_ratio !== undefined) {
-          advancedMetrics.sharpe_ratio = stats.sharpeRatio ?? stats.sharpe ?? stats.sharpe_ratio;
+        if (metrics.sharpeRatio !== undefined || metrics.sharpe !== undefined || metrics.sharpe_ratio !== undefined) {
+          advancedMetrics.sharpe_ratio = metrics.sharpeRatio ?? metrics.sharpe ?? metrics.sharpe_ratio;
         }
-        if (stats.sortinoRatio !== undefined || stats.sortino !== undefined || stats.sortino_ratio !== undefined) {
-          advancedMetrics.sortino_ratio = stats.sortinoRatio ?? stats.sortino ?? stats.sortino_ratio;
+        if (metrics.sortinoRatio !== undefined || metrics.sortino !== undefined || metrics.sortino_ratio !== undefined) {
+          advancedMetrics.sortino_ratio = metrics.sortinoRatio ?? metrics.sortino ?? metrics.sortino_ratio;
         }
-        if (stats.alpha !== undefined) {
-          advancedMetrics.alpha = stats.alpha;
+        if (metrics.alpha !== undefined) {
+          advancedMetrics.alpha = metrics.alpha;
         }
-        if (stats.beta !== undefined) {
-          advancedMetrics.beta = stats.beta;
+        if (metrics.beta !== undefined) {
+          advancedMetrics.beta = metrics.beta;
         }
-        if (stats.volatility !== undefined || stats.stdDev !== undefined || stats.standardDeviation !== undefined) {
-          advancedMetrics.volatility = stats.volatility ?? stats.stdDev ?? stats.standardDeviation;
+        if (metrics.volatility !== undefined || metrics.stdDev !== undefined || metrics.standardDeviation !== undefined) {
+          advancedMetrics.volatility = metrics.volatility ?? metrics.stdDev ?? metrics.standardDeviation;
         }
-        if (stats.dailyDrawdown !== undefined || stats.dailyDD !== undefined || stats.daily_drawdown !== undefined) {
-          advancedMetrics.daily_drawdown = stats.dailyDrawdown ?? stats.dailyDD ?? stats.daily_drawdown;
-        }
-        // Also grab risk score if available
-        if (stats.riskScore !== undefined || stats.risk !== undefined || stats.risk_score !== undefined) {
-          advancedMetrics.risk_score = stats.riskScore ?? stats.risk ?? stats.risk_score;
+        if (metrics.dailyDrawdown !== undefined || metrics.dailyDD !== undefined || metrics.daily_drawdown !== undefined) {
+          advancedMetrics.daily_drawdown = metrics.dailyDrawdown ?? metrics.dailyDD ?? metrics.daily_drawdown;
         }
         
         if (Object.keys(advancedMetrics).length > 0) {
@@ -525,7 +565,7 @@ async function syncTraderDetailsBatch(
             .eq('id', trader.id);
         }
       } else {
-        console.log(`[sync-worker] Stats fetch failed for ${trader.etoro_username}: ${statsRes.status}`);
+        console.log(`[sync-worker] Metrics fetch failed for ${trader.etoro_username}: ${metricsRes.status}`);
       }
 
       // Update trader's details_synced_at (not updated_at which is for list sync)
