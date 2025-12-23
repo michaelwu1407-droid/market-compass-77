@@ -1,6 +1,6 @@
-import { useNavigate } from 'react-router-dom';
 import { Sparkles, Star, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { toast } from '@/hooks/use-toast';
 import type { DailyMover } from '@/types';
 import { cn } from '@/lib/utils';
 
@@ -11,13 +11,13 @@ interface DailyMoverRowProps {
 }
 
 export function DailyMoverRow({ mover, onAnalyse, onStarForIC }: DailyMoverRowProps) {
-  const navigate = useNavigate();
   const isPositive = mover.pct_change >= 0;
 
   const handleViewAsset = () => {
-    if (mover.asset) {
-      navigate(`/assets/${mover.asset.id}`);
-    }
+    toast({
+      title: 'Coming Soon',
+      description: 'Asset detail page is coming soon.',
+    });
   };
 
   return (

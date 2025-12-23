@@ -8,24 +8,53 @@ import { TraderMoveCard } from '@/components/daily/TraderMoveCard';
 import { useTodayMovers } from '@/hooks/useDailyMovers';
 import { useRecentTrades } from '@/hooks/useTrades';
 import { useFollowedTradersAssets } from '@/hooks/useFollowedAssets';
+import { useFollowedTraders } from '@/hooks/useFollowedTraders';
+import { useCreateReport } from '@/hooks/useReports';
 import { format } from 'date-fns';
 import { useState, useMemo } from 'react';
+import { toast } from '@/hooks/use-toast';
 
 export default function DailyPage() {
   const [moverFilter, setMoverFilter] = useState('all');
+  const [tradeFilter, setTradeFilter] = useState('all');
   const navigate = useNavigate();
   const today = new Date();
 
   const { data: dailyMovers, isLoading: moversLoading } = useTodayMovers();
   const { data: recentTrades, isLoading: tradesLoading } = useRecentTrades(10);
   const { followedAssetIds, isLoading: followedLoading } = useFollowedTradersAssets();
+  const { followedTraderIds } = useFollowedTraders();
+  const createReport = useCreateReport();
 
-  const handleAnalyse = (assetId?: string) => {
-    navigate('/analysis');
+  const handleAnalyse = (assetSymbol?: string) => {
+    if (assetSymbol) {
+      navigate(`/analysis?asset=${encodeURIComponent(assetSymbol)}`);
+    } else {
+      navigate('/analysis');
+    }
   };
 
-  const handleStarForIC = () => {
-    navigate('/ic');
+  const handleStarForIC = async (assetName?: string, assetSymbol?: string) => {
+    try {
+      await createReport.mutateAsync({
+        title: `Analysis: ${assetName || assetSymbol || 'Asset'}`,
+        report_type: 'single_stock',
+        status: 'draft',
+        starred_for_ic: true,
+        input_assets: assetSymbol ? [assetSymbol] : [],
+      });
+      toast({
+        title: 'Starred for IC',
+        description: `${assetSymbol || 'Asset'} added to Investment Committee queue.`,
+      });
+      navigate('/ic');
+    } catch {
+      toast({
+        title: 'Error',
+        description: 'Failed to star for IC. Please try again.',
+        variant: 'destructive',
+      });
+    }
   };
 
   // Transform daily movers for the DailyMoverRow component
@@ -157,22 +186,38 @@ export default function DailyPage() {
     } : undefined,
   })), [recentTrades]);
 
-  // Generate summary text based on current filter
+  // Filter trades based on selected tab
+  const filteredTrades = useMemo(() => {
+    if (tradeFilter === 'following') {
+      return transformedTrades.filter(trade => 
+        followedTraderIds.includes(trade.trader_id)
+      );
+    }
+    return transformedTrades;
+  }, [tradeFilter, transformedTrades, followedTraderIds]);
+
+  // Generate improved summary with top gainer info
   const getSummaryText = () => {
-    const totalHoldings = transformedMovers.length;
-    const followedCount = transformedMovers.filter(m => followedAssetIds.includes(m.asset_id)).length;
+    // Find top gainer
+    const topGainer = transformedMovers.length > 0 
+      ? transformedMovers.reduce((max, mover) => 
+          mover.pct_change > max.pct_change ? mover : max
+        )
+      : null;
     
-    return {
-      holdings: totalHoldings > 0 
-        ? `${totalHoldings} top performer holdings from tracked traders` 
-        : 'Loading holdings data...',
-      trades: transformedTrades.length > 0 
-        ? `${transformedTrades.length} recent trades from tracked traders` 
-        : 'No recent trades yet',
-      followed: followedAssetIds.length > 0
-        ? `${followedCount} holdings from traders you follow`
-        : 'Follow traders to see their holdings here',
-    };
+    const topGainerText = topGainer?.asset
+      ? `${topGainer.asset.name} (${topGainer.asset.ticker}) leads with ${topGainer.pct_change >= 0 ? '+' : ''}${topGainer.pct_change.toFixed(1)}% P&L`
+      : 'Loading top performers...';
+
+    // Find recent followed trader move
+    const followedTrade = transformedTrades.find(t => followedTraderIds.includes(t.trader_id));
+    const followedText = followedTrade?.trader
+      ? `${followedTrade.trader.display_name} ${followedTrade.trade_type === 'buy' ? 'bought' : 'sold'} ${followedTrade.asset?.ticker || 'an asset'}`
+      : followedTraderIds.length > 0 
+        ? 'No recent moves from followed traders'
+        : 'Follow traders to see their moves';
+
+    return { topGainer: topGainerText, followedMove: followedText };
   };
 
   const summary = getSummaryText();
@@ -196,11 +241,11 @@ export default function DailyPage() {
           <div className="space-y-2 pl-12">
             <p className="text-sm flex items-start gap-2">
               <span className="text-primary mt-1">•</span>
-              <span>{summary.holdings}</span>
+              <span>{summary.topGainer}</span>
             </p>
             <p className="text-sm flex items-start gap-2">
               <span className="text-primary mt-1">•</span>
-              <span>{summary.trades}</span>
+              <span>{summary.followedMove}</span>
             </p>
           </div>
         </CardContent>
@@ -250,8 +295,8 @@ export default function DailyPage() {
                 <DailyMoverRow
                   key={mover.id}
                   mover={mover}
-                  onAnalyse={() => handleAnalyse(mover.asset_id)}
-                  onStarForIC={handleStarForIC}
+                  onAnalyse={() => handleAnalyse(mover.asset?.ticker)}
+                  onStarForIC={() => handleStarForIC(mover.asset?.name, mover.asset?.ticker)}
                 />
               ))}
             </div>
@@ -278,25 +323,42 @@ export default function DailyPage() {
             Recent Trader Moves
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          {tradesLoading ? (
-            <div className="space-y-4">
-              {[1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-24 w-full" />
-              ))}
-            </div>
-          ) : transformedTrades.length > 0 ? (
-            <div className="space-y-4">
-              {transformedTrades.map((trade) => (
-                <TraderMoveCard key={trade.id} trade={trade} />
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-8 text-muted-foreground">
-              <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
-              <p>No recent trades found</p>
-            </div>
-          )}
+        <CardContent className="p-0">
+          <div className="border-b border-border px-4 py-2">
+            <Tabs value={tradeFilter} onValueChange={setTradeFilter}>
+              <TabsList className="h-9">
+                <TabsTrigger value="all" className="text-xs">All</TabsTrigger>
+                <TabsTrigger value="following" className="text-xs">Following</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
+          
+          <div className="p-4">
+            {tradesLoading ? (
+              <div className="space-y-4">
+                {[1, 2, 3].map((i) => (
+                  <Skeleton key={i} className="h-24 w-full" />
+                ))}
+              </div>
+            ) : filteredTrades.length > 0 ? (
+              <div className="space-y-4">
+                {filteredTrades.map((trade) => (
+                  <TraderMoveCard key={trade.id} trade={trade} />
+                ))}
+              </div>
+            ) : tradeFilter === 'following' ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p>No recent moves from followed traders</p>
+                <p className="text-xs mt-1">Follow traders to see their moves here</p>
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p>No recent trades found</p>
+              </div>
+            )}
+          </div>
         </CardContent>
       </Card>
     </div>
