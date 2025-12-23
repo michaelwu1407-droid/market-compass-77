@@ -26,7 +26,6 @@ export function TraderCard({
   const copiers = trader.copiers || 0;
   const gain12m = trader.gain_12m || 0;
   const gain24m = trader.gain_24m || 0;
-  const riskScore = trader.risk_score || 0;
   const tags = trader.tags || [];
 
   return (
@@ -60,7 +59,7 @@ export function TraderCard({
               <AlertTriangle className="h-3 w-3" />
               Risk Score
             </div>
-            <span className="font-bold">{riskScore}/10</span>
+            <span className="font-bold">{trader.risk_score != null ? `${trader.risk_score}/10` : '—'}</span>
           </div>
           <div className="stat-card">
             <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
