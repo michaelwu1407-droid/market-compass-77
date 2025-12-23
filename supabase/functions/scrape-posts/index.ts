@@ -226,14 +226,32 @@ async function scrapeEtoroFeed(firecrawlApiKey: string, traderUsernames: string[
           else if (unit === 'y' || unit.startsWith('month')) postedAt.setMonth(postedAt.getMonth() - value);
         }
 
-        const likesMatch = block.match(/(\d+)\s*(?:like|heart)/i);
-        const commentsMatch = block.match(/(\d+)\s*comment/i);
+        // Extract likes - try multiple formats
+        const likesMatch = block.match(/(?:❤️|👍|♥|💙|🔥)\s*(\d+)/i) ||
+                          block.match(/(\d+)\s*(?:like|heart|❤)/i) ||
+                          block.match(/(\d+)\s*Like/);
+        
+        // Extract comments - try multiple formats  
+        const commentsMatch = block.match(/💬\s*(\d+)/i) ||
+                             block.match(/(\d+)\s*comment/i) ||
+                             block.match(/(\d+)\s*Comment/);
+
+        // Check for truncation (Show More patterns)
+        const isTruncated = /(?:Show [Mm]ore|Read [Mm]ore|\.{3}$|…$)/.test(block);
+        let finalContent = content.substring(0, 1000);
+        if (isTruncated && finalContent.length > 50) {
+          // Mark truncated posts so we know they're partial
+          finalContent = finalContent.replace(/\.{3}$|…$/, '');
+          if (!finalContent.endsWith('[...]')) {
+            finalContent += ' [...]';
+          }
+        }
         
         const contentHash = await generateContentHash(username, content);
 
         allPosts.push({
           trader_username: username,
-          content: content.substring(0, 1000),
+          content: finalContent,
           posted_at: postedAt.toISOString(),
           likes: likesMatch ? parseInt(likesMatch[1]) : 0,
           comments: commentsMatch ? parseInt(commentsMatch[1]) : 0,
