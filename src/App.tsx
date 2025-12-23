@@ -9,6 +9,7 @@ import Index from "./pages/Index";
 import DailyPage from "./pages/DailyPage";
 import TradersPage from "./pages/TradersPage";
 import TraderDetailPage from "./pages/TraderDetailPage";
+import AssetDetailPage from "./pages/AssetDetailPage";
 import AnalysisPage from "./pages/AnalysisPage";
 import ICPage from "./pages/ICPage";
 import DiscrepanciesPage from "./pages/DiscrepanciesPage";
@@ -52,6 +53,7 @@ function AppRoutes() {
         <Route path="/daily" element={<DailyPage />} />
         <Route path="/traders" element={<TradersPage />} />
         <Route path="/traders/:traderId" element={<TraderDetailPage />} />
+        <Route path="/assets/:assetId" element={<AssetDetailPage />} />
         <Route path="/analysis" element={<AnalysisPage />} />
         <Route path="/ic" element={<ICPage />} />
         <Route path="/discrepancies" element={<DiscrepanciesPage />} />
