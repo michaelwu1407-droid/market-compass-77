@@ -85,16 +85,69 @@ export default function FeedPage() {
 
   // Get real followed traders from the database
   const followedTraders = (traders || []).filter(t => followedTraderIds.includes(t.id));
-  
-  // Filter feed items based on selected filter
-  const filteredFeedItems = filter === 'following' 
-    ? feedItems.filter(item => {
-        if (item.type === 'post' && 'trader_id' in item.data) {
-          return item.data.trader_id && followedTraderIds.includes(item.data.trader_id);
+
+  // Deduplicate feed items by etoro_post_id to prevent duplicates
+  const deduplicatedFeedItems = feedItems.reduce((acc, item) => {
+    // Only posts have source_post_id - use type guard
+    if (item.type === 'post') {
+      const postData = item.data as FeedPost;
+      const uniqueKey = postData.source_post_id || `${postData.trader_id}-${item.created_at}`;
+      if (!acc.some(existing => {
+        if (existing.type === 'post') {
+          const existingPost = existing.data as FeedPost;
+          return (existingPost.source_post_id || `${existingPost.trader_id}-${existing.created_at}`) === uniqueKey;
         }
         return false;
-      })
-    : feedItems;
+      })) {
+        acc.push(item);
+      }
+    } else {
+      acc.push(item);
+    }
+    return acc;
+  }, [] as typeof feedItems);
+  
+  // Filter feed items based on selected filter
+  const filteredFeedItems = (() => {
+    switch (filter) {
+      case 'following':
+        return deduplicatedFeedItems.filter(item => {
+          if (item.type === 'post') {
+            const postData = item.data as FeedPost;
+            return postData.trader_id && followedTraderIds.includes(postData.trader_id);
+          }
+          return false;
+        });
+      case 'assets':
+        // Show posts that mention specific assets/symbols (check post text for $SYMBOL patterns)
+        return deduplicatedFeedItems.filter(item => {
+          if (item.type === 'post') {
+            const postData = item.data as FeedPost;
+            const text = postData.text || '';
+            return /\$[A-Z]{1,5}\b/.test(text);
+          }
+          return false;
+        });
+      case 'traders':
+        // Show posts from verified/top traders (by copiers)
+        const topTraderIds = (traders || [])
+          .sort((a, b) => (b.copiers || 0) - (a.copiers || 0))
+          .slice(0, 20)
+          .map(t => t.id);
+        return deduplicatedFeedItems.filter(item => {
+          if (item.type === 'post') {
+            const postData = item.data as FeedPost;
+            return postData.trader_id && topTraderIds.includes(postData.trader_id);
+          }
+          return false;
+        });
+      case 'saved':
+        // TODO: Implement saved posts functionality with a saved_posts table
+        return [];
+      default:
+        return deduplicatedFeedItems;
+    }
+  })();
 
   const handleViewTrader = (traderId: string) => {
     navigate(`/traders/${traderId}`);
