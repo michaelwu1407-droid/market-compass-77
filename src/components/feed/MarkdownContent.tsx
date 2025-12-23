@@ -9,6 +9,16 @@ interface MarkdownContentProps {
 function cleanContent(raw: string): string {
   let text = raw;
   
+  // Fix escaped markdown characters from Firecrawl
+  text = text.replace(/\\\\/g, '\n');    // \\ -> newline
+  text = text.replace(/\\_/g, '_');       // \_ -> underscore
+  text = text.replace(/\\n/g, '\n');      // Literal \n string -> newline
+  text = text.replace(/\\\[/g, '[');      // \[ -> bracket
+  text = text.replace(/\\\]/g, ']');      // \] -> bracket
+  text = text.replace(/\\\*/g, '*');      // \* -> asterisk
+  text = text.replace(/\\#/g, '#');       // \# -> hash
+  text = text.replace(/\\-/g, '-');       // \- -> dash
+  
   // First, try to extract just the post content after common markers
   // Look for patterns like "[12d]" or "[13d]" followed by actual content
   const postDatePattern = /\[(\d+[dhm])\]\([^)]+\)\s*(Edited\s*)?/gi;
