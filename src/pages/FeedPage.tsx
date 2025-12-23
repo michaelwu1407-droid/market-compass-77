@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { usePosts } from '@/hooks/usePosts';
 import { useTraders } from '@/hooks/useTraders';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useFollowedTraders } from '@/hooks/useFollowedTraders';
 import type { FeedItem, Post as FeedPost, Trader as FeedTrader } from '@/types';
 
 type FilterType = 'all' | 'following' | 'assets' | 'traders' | 'saved';
@@ -19,6 +20,7 @@ export default function FeedPage() {
   
   const { data: posts, isLoading: postsLoading } = usePosts();
   const { data: traders, isLoading: tradersLoading } = useTraders();
+  const { followedTraderIds, isLoading: followsLoading, toggleFollow, isFollowing } = useFollowedTraders();
 
   // Transform database posts to FeedItem format
   const feedItems: FeedItem[] = (posts || []).map((post) => {
@@ -78,8 +80,18 @@ export default function FeedPage() {
     };
   });
 
-  // Get first 5 traders as "followed" for demo
-  const followedTraders = (traders || []).slice(0, 5);
+  // Get real followed traders from the database
+  const followedTraders = (traders || []).filter(t => followedTraderIds.includes(t.id));
+  
+  // Filter feed items based on selected filter
+  const filteredFeedItems = filter === 'following' 
+    ? feedItems.filter(item => {
+        if (item.type === 'post' && 'trader_id' in item.data) {
+          return item.data.trader_id && followedTraderIds.includes(item.data.trader_id);
+        }
+        return false;
+      })
+    : feedItems;
 
   const handleViewTrader = (traderId: string) => {
     navigate(`/traders/${traderId}`);
@@ -93,7 +105,7 @@ export default function FeedPage() {
     navigate('/ic');
   };
 
-  const isLoading = postsLoading || tradersLoading;
+  const isLoading = postsLoading || tradersLoading || followsLoading;
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -130,20 +142,26 @@ export default function FeedPage() {
                   </div>
                 ) : (
                   <div className="space-y-1">
-                    {followedTraders.map(trader => (
-                      <TraderMiniCard
-                        key={trader.id}
-                        trader={{
-                          id: trader.id,
-                          display_name: trader.display_name,
-                          avatar_url: trader.avatar_url || '',
-                          return_12m: trader.gain_12m || 0,
-                          risk_score: trader.risk_score || 0,
-                        }}
-                        isFollowing
-                        onClick={() => handleViewTrader(trader.id)}
-                      />
-                    ))}
+                    {followedTraders.length > 0 ? (
+                      followedTraders.map(trader => (
+                        <TraderMiniCard
+                          key={trader.id}
+                          trader={{
+                            id: trader.id,
+                            display_name: trader.display_name,
+                            avatar_url: trader.avatar_url || '',
+                            return_12m: trader.gain_12m || 0,
+                            risk_score: trader.risk_score || 0,
+                          }}
+                          isFollowing
+                          onClick={() => handleViewTrader(trader.id)}
+                        />
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground py-2">
+                        You're not following any traders yet.
+                      </p>
+                    )}
                   </div>
                 )}
                 <Button variant="ghost" size="sm" className="w-full mt-3" onClick={() => navigate('/traders')}>
@@ -162,9 +180,9 @@ export default function FeedPage() {
                 <Skeleton key={i} className="h-48 w-full rounded-xl" />
               ))}
             </div>
-          ) : feedItems.length > 0 ? (
+          ) : filteredFeedItems.length > 0 ? (
             <div className="space-y-4">
-              {feedItems.map((item) => (
+              {filteredFeedItems.map((item) => (
                 <FeedCard
                   key={item.id}
                   item={item}
