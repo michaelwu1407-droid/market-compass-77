@@ -10,6 +10,7 @@ import TradersPage from "./pages/TradersPage";
 import TraderDetailPage from "./pages/TraderDetailPage";
 import AnalysisPage from "./pages/AnalysisPage";
 import ICPage from "./pages/ICPage";
+import DiscrepanciesPage from "./pages/DiscrepanciesPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -28,6 +29,7 @@ const App = () => (
             <Route path="/traders/:traderId" element={<TraderDetailPage />} />
             <Route path="/analysis" element={<AnalysisPage />} />
             <Route path="/ic" element={<ICPage />} />
+            <Route path="/discrepancies" element={<DiscrepanciesPage />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

@@ -130,6 +130,54 @@ export type Database = {
           },
         ]
       }
+      data_discrepancies: {
+        Row: {
+          bullaware_value: string | null
+          created_at: string
+          difference_pct: number | null
+          entity_id: string
+          entity_name: string
+          entity_type: string
+          field_name: string
+          firecrawl_value: string | null
+          id: string
+          notes: string | null
+          reviewed_at: string | null
+          status: string
+          value_used: string
+        }
+        Insert: {
+          bullaware_value?: string | null
+          created_at?: string
+          difference_pct?: number | null
+          entity_id: string
+          entity_name: string
+          entity_type: string
+          field_name: string
+          firecrawl_value?: string | null
+          id?: string
+          notes?: string | null
+          reviewed_at?: string | null
+          status?: string
+          value_used?: string
+        }
+        Update: {
+          bullaware_value?: string | null
+          created_at?: string
+          difference_pct?: number | null
+          entity_id?: string
+          entity_name?: string
+          entity_type?: string
+          field_name?: string
+          firecrawl_value?: string | null
+          id?: string
+          notes?: string | null
+          reviewed_at?: string | null
+          status?: string
+          value_used?: string
+        }
+        Relationships: []
+      }
       posts: {
         Row: {
           asset_ids: string[] | null
