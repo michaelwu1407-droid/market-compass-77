@@ -278,6 +278,30 @@ export type Database = {
           },
         ]
       }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          display_name: string | null
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          id: string
+          updated_at?: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       reports: {
         Row: {
           ai_generated: boolean | null
@@ -285,13 +309,23 @@ export type Database = {
           content: string | null
           created_at: string | null
           created_by: string | null
+          horizon: string | null
           id: string
+          input_assets: string[] | null
+          input_trader_ids: string[] | null
+          rating: string | null
+          raw_response: string | null
           report_type: string | null
+          score_12m: number | null
+          score_6m: number | null
+          score_long_term: number | null
           starred_for_ic: boolean | null
           status: string | null
+          summary: string | null
           title: string
           trader_id: string | null
           updated_at: string | null
+          upside_pct_estimate: number | null
         }
         Insert: {
           ai_generated?: boolean | null
@@ -299,13 +333,23 @@ export type Database = {
           content?: string | null
           created_at?: string | null
           created_by?: string | null
+          horizon?: string | null
           id?: string
+          input_assets?: string[] | null
+          input_trader_ids?: string[] | null
+          rating?: string | null
+          raw_response?: string | null
           report_type?: string | null
+          score_12m?: number | null
+          score_6m?: number | null
+          score_long_term?: number | null
           starred_for_ic?: boolean | null
           status?: string | null
+          summary?: string | null
           title: string
           trader_id?: string | null
           updated_at?: string | null
+          upside_pct_estimate?: number | null
         }
         Update: {
           ai_generated?: boolean | null
@@ -313,13 +357,23 @@ export type Database = {
           content?: string | null
           created_at?: string | null
           created_by?: string | null
+          horizon?: string | null
           id?: string
+          input_assets?: string[] | null
+          input_trader_ids?: string[] | null
+          rating?: string | null
+          raw_response?: string | null
           report_type?: string | null
+          score_12m?: number | null
+          score_6m?: number | null
+          score_long_term?: number | null
           starred_for_ic?: boolean | null
           status?: string | null
+          summary?: string | null
           title?: string
           trader_id?: string | null
           updated_at?: string | null
+          upside_pct_estimate?: number | null
         }
         Relationships: [
           {
@@ -544,15 +598,71 @@ export type Database = {
           },
         ]
       }
+      user_follows: {
+        Row: {
+          created_at: string
+          id: string
+          trader_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          trader_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          trader_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_follows_trader_id_fkey"
+            columns: ["trader_id"]
+            isOneToOne: false
+            referencedRelation: "traders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "user"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -679,6 +789,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "user"],
+    },
   },
 } as const

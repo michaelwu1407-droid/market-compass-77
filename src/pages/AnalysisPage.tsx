@@ -3,59 +3,16 @@ import { useNavigate } from 'react-router-dom';
 import { AnalysisInput } from '@/components/analysis/AnalysisInput';
 import { AnalysisResult } from '@/components/analysis/AnalysisResult';
 import { toast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
+import { useUpdateReport } from '@/hooks/useReports';
 import type { Report, ReportType, Horizon } from '@/types';
-
-// Mock API response
-const mockAnalyse = async (data: {
-  reportType: ReportType;
-  assets: string[];
-  traderIds: string[];
-  horizon: Horizon;
-  extraInstructions: string;
-  outputMode: 'quick' | 'full';
-}): Promise<Partial<Report>> => {
-  // Simulate API delay
-  await new Promise(resolve => setTimeout(resolve, 2000));
-
-  const ticker = data.assets[0] || 'NVDA';
-  
-  return {
-    title: `${ticker} Investment Analysis`,
-    input_assets: data.assets,
-    input_trader_ids: data.traderIds,
-    horizon: data.horizon,
-    summary: `Based on comprehensive analysis, ${ticker} presents a compelling investment opportunity with strong fundamentals and positive momentum. The company benefits from secular growth trends in AI infrastructure.`,
-    upside_pct_estimate: 28,
-    rating: 'buy',
-    score_6m: 7.8,
-    score_12m: 8.5,
-    score_long_term: 9.1,
-    raw_response: `## Executive Summary
-
-${ticker} demonstrates strong competitive positioning in its core markets with expanding margins and robust revenue growth.
-
-## Key Investment Thesis
-
-**Strengths:**
-- Market leadership in core segments
-- Strong balance sheet with minimal debt
-- Expanding addressable market
-
-**Risks:**
-- Valuation premium relative to peers
-- Competition from well-funded rivals
-- Regulatory uncertainty in key markets
-
-## Recommendation
-
-We recommend a **BUY** rating with a ${data.horizon} price target reflecting ${28}% upside from current levels.`,
-  };
-};
 
 export default function AnalysisPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<Partial<Report> | null>(null);
+  const [reportId, setReportId] = useState<string | null>(null);
   const navigate = useNavigate();
+  const updateReport = useUpdateReport();
 
   const handleSubmit = async (data: {
     reportType: ReportType;
@@ -66,17 +23,50 @@ export default function AnalysisPage() {
     outputMode: 'quick' | 'full';
   }) => {
     setIsLoading(true);
+    setResult(null);
+    
     try {
-      const response = await mockAnalyse(data);
-      setResult(response);
+      const { data: response, error } = await supabase.functions.invoke('analyse', {
+        body: {
+          reportType: data.reportType,
+          assets: data.assets,
+          traderIds: data.traderIds,
+          horizon: data.horizon,
+          extraInstructions: data.extraInstructions,
+          outputMode: data.outputMode,
+        },
+      });
+
+      if (error) throw error;
+      
+      if (!response.success) {
+        throw new Error(response.error || 'Analysis failed');
+      }
+
+      setReportId(response.report_id);
+      setResult({
+        title: response.title,
+        input_assets: data.assets,
+        input_trader_ids: data.traderIds,
+        horizon: data.horizon,
+        summary: response.summary,
+        upside_pct_estimate: response.upside_pct_estimate,
+        rating: response.rating,
+        score_6m: response.score_6m,
+        score_12m: response.score_12m,
+        score_long_term: response.score_long_term,
+        raw_response: response.raw_response,
+      });
+      
       toast({
         title: 'Analysis Complete',
         description: 'Your investment analysis is ready.',
       });
     } catch (error) {
+      console.error('Analysis error:', error);
       toast({
         title: 'Analysis Failed',
-        description: 'Unable to complete the analysis. Please try again.',
+        description: error instanceof Error ? error.message : 'Unable to complete the analysis. Please try again.',
         variant: 'destructive',
       });
     } finally {
@@ -91,7 +81,10 @@ export default function AnalysisPage() {
     });
   };
 
-  const handleStarForIC = () => {
+  const handleStarForIC = async () => {
+    if (reportId) {
+      await updateReport.mutateAsync({ id: reportId, starred_for_ic: true });
+    }
     toast({
       title: 'Starred for IC',
       description: 'Report added to Investment Committee queue.',
