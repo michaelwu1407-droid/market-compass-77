@@ -1,9 +1,14 @@
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import type { Trader } from '@/types';
 
 interface TraderMiniCardProps {
-  trader: Trader;
+  trader: {
+    id: string;
+    display_name: string;
+    avatar_url: string;
+    return_12m: number;
+    risk_score: number;
+  };
   onClick?: () => void;
   isFollowing?: boolean;
 }
