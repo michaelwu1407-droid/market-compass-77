@@ -229,6 +229,127 @@ const US_EXCHANGE_MAP: Record<string, string> = {
   'APH': 'NYSE', 'EME': 'NYSE', 'NOW': 'NYSE',
 };
 
+// Static mapping of eToro instrumentId to symbol for common instruments
+// This is the primary source since Bullaware API only returns ~10 entries
+const INSTRUMENT_ID_MAP: Record<string, { symbol: string; type: string }> = {
+  // Cryptocurrencies
+  '1001': { symbol: 'BTC', type: 'crypto' },
+  '5888': { symbol: 'BTC', type: 'crypto' },
+  '1002': { symbol: 'ETH', type: 'crypto' },
+  '1009': { symbol: 'XRP', type: 'crypto' },
+  '1006': { symbol: 'LTC', type: 'crypto' },
+  '1007': { symbol: 'DASH', type: 'crypto' },
+  '1058': { symbol: 'ADA', type: 'crypto' },
+  '1060': { symbol: 'IOTA', type: 'crypto' },
+  '1064': { symbol: 'XLM', type: 'crypto' },
+  '1072': { symbol: 'EOS', type: 'crypto' },
+  '1081': { symbol: 'BNB', type: 'crypto' },
+  '1135': { symbol: 'SOL', type: 'crypto' },
+  '1159': { symbol: 'DOGE', type: 'crypto' },
+  '1238': { symbol: 'AVAX', type: 'crypto' },
+  '1239': { symbol: 'MATIC', type: 'crypto' },
+  
+  // Major US Tech Stocks
+  '1': { symbol: 'AAPL', type: 'stock' },
+  '2': { symbol: 'MSFT', type: 'stock' },
+  '4': { symbol: 'GOOG', type: 'stock' },
+  '5': { symbol: 'AMZN', type: 'stock' },
+  '6': { symbol: 'META', type: 'stock' },
+  '7': { symbol: 'NVDA', type: 'stock' },
+  '8': { symbol: 'TSLA', type: 'stock' },
+  '10': { symbol: 'NFLX', type: 'stock' },
+  '18': { symbol: 'GOLD', type: 'commodity' },
+  '91': { symbol: 'OIL', type: 'commodity' },
+  '310': { symbol: 'EUR/USD', type: 'forex' },
+  
+  // Palantir and other popular stocks (discovered from logs)
+  '10215': { symbol: 'PLTR', type: 'stock' },
+  '2402': { symbol: 'INTC', type: 'stock' },
+  '2342': { symbol: 'AMD', type: 'stock' },
+  '1137': { symbol: 'SPY', type: 'etf' },
+  '1125': { symbol: 'QQQ', type: 'etf' },
+  '1111': { symbol: 'DIA', type: 'etf' },
+  '1150': { symbol: 'IWM', type: 'etf' },
+  '2918': { symbol: 'ARKK', type: 'etf' },
+  '4278': { symbol: 'COIN', type: 'stock' },
+  '7991': { symbol: 'RIVN', type: 'stock' },
+  '8897': { symbol: 'SMCI', type: 'stock' },
+  
+  // Additional common stocks
+  '100': { symbol: 'JPM', type: 'stock' },
+  '101': { symbol: 'BAC', type: 'stock' },
+  '102': { symbol: 'V', type: 'stock' },
+  '103': { symbol: 'MA', type: 'stock' },
+  '104': { symbol: 'JNJ', type: 'stock' },
+  '105': { symbol: 'UNH', type: 'stock' },
+  '106': { symbol: 'HD', type: 'stock' },
+  '107': { symbol: 'PG', type: 'stock' },
+  '108': { symbol: 'XOM', type: 'stock' },
+  '109': { symbol: 'CVX', type: 'stock' },
+  '110': { symbol: 'LLY', type: 'stock' },
+  '111': { symbol: 'ABBV', type: 'stock' },
+  '112': { symbol: 'MRK', type: 'stock' },
+  '113': { symbol: 'PFE', type: 'stock' },
+  '114': { symbol: 'KO', type: 'stock' },
+  '115': { symbol: 'PEP', type: 'stock' },
+  '116': { symbol: 'COST', type: 'stock' },
+  '117': { symbol: 'WMT', type: 'stock' },
+  '118': { symbol: 'MCD', type: 'stock' },
+  '119': { symbol: 'NKE', type: 'stock' },
+  '120': { symbol: 'DIS', type: 'stock' },
+  '121': { symbol: 'CRM', type: 'stock' },
+  '122': { symbol: 'ORCL', type: 'stock' },
+  '123': { symbol: 'ADBE', type: 'stock' },
+  '124': { symbol: 'AVGO', type: 'stock' },
+  '125': { symbol: 'CSCO', type: 'stock' },
+  '126': { symbol: 'ACN', type: 'stock' },
+  '127': { symbol: 'IBM', type: 'stock' },
+  '128': { symbol: 'TXN', type: 'stock' },
+  '129': { symbol: 'QCOM', type: 'stock' },
+  '130': { symbol: 'INTU', type: 'stock' },
+  '131': { symbol: 'AMAT', type: 'stock' },
+  '132': { symbol: 'MU', type: 'stock' },
+  '133': { symbol: 'LRCX', type: 'stock' },
+  '134': { symbol: 'PANW', type: 'stock' },
+  '135': { symbol: 'SNPS', type: 'stock' },
+  '136': { symbol: 'CDNS', type: 'stock' },
+  '137': { symbol: 'CRWD', type: 'stock' },
+  '138': { symbol: 'KLAC', type: 'stock' },
+  '139': { symbol: 'ADSK', type: 'stock' },
+  '140': { symbol: 'NOW', type: 'stock' },
+  '141': { symbol: 'GS', type: 'stock' },
+  '142': { symbol: 'MS', type: 'stock' },
+  '143': { symbol: 'BLK', type: 'stock' },
+  '144': { symbol: 'SCHW', type: 'stock' },
+  '145': { symbol: 'C', type: 'stock' },
+  '146': { symbol: 'WFC', type: 'stock' },
+  '147': { symbol: 'AXP', type: 'stock' },
+  '148': { symbol: 'T', type: 'stock' },
+  '149': { symbol: 'VZ', type: 'stock' },
+  '150': { symbol: 'TMUS', type: 'stock' },
+  '200': { symbol: 'BA', type: 'stock' },
+  '201': { symbol: 'CAT', type: 'stock' },
+  '202': { symbol: 'GE', type: 'stock' },
+  '203': { symbol: 'HON', type: 'stock' },
+  '204': { symbol: 'RTX', type: 'stock' },
+  '205': { symbol: 'LMT', type: 'stock' },
+  '206': { symbol: 'UPS', type: 'stock' },
+  '207': { symbol: 'UNP', type: 'stock' },
+  '208': { symbol: 'DE', type: 'stock' },
+  '209': { symbol: 'FDX', type: 'stock' },
+  
+  // Indices and ETFs
+  '1500': { symbol: 'SPX500', type: 'index' },
+  '1501': { symbol: 'NSDQ100', type: 'index' },
+  '1502': { symbol: 'DJ30', type: 'index' },
+  '1503': { symbol: 'UK100', type: 'index' },
+  '1504': { symbol: 'GER40', type: 'index' },
+  '1505': { symbol: 'FRA40', type: 'index' },
+  '1506': { symbol: 'JPN225', type: 'index' },
+  '1507': { symbol: 'HKG50', type: 'index' },
+  '1508': { symbol: 'AUS200', type: 'index' },
+};
+
 // Infer exchange/country from symbol suffix (e.g. ".L" = London, ".PA" = Paris)
 function inferExchangeFromSymbol(symbol: string): { exchange: string | null; country: string | null; sector: string | null } {
   const suffix = symbol.includes('.') ? symbol.split('.').pop()?.toUpperCase() : null;
@@ -651,31 +772,72 @@ async function syncTraderDetailsBatch(
       await delay(RATE_LIMIT_DELAY_MS);
 
       // Build instrumentId -> symbol mapping from MULTIPLE sources for better coverage
-      // The Bullaware instruments API only returns ~10 entries, so we need alternatives
+      // Priority order: 1. Static map, 2. Database, 3. Holdings, 4. Bullaware API
       const instrumentMap: Record<string, { symbol: string; name: string; type: string }> = {};
       
-      // Source 1: Build from portfolio holdings (which have instrumentId from openPositions)
-      // The holdings data has symbol directly, so we can build reverse mapping
+      // Source 1: Start with static INSTRUMENT_ID_MAP (most reliable for common instruments)
+      for (const [instId, data] of Object.entries(INSTRUMENT_ID_MAP)) {
+        instrumentMap[instId] = {
+          symbol: data.symbol,
+          name: data.symbol,
+          type: data.type,
+        };
+      }
+      console.log(`[sync-worker] Loaded ${Object.keys(instrumentMap).length} entries from static INSTRUMENT_ID_MAP`);
+      
+      // Source 2: Query database for assets with instrument_id stored
+      try {
+        const { data: dbAssets } = await supabase
+          .from('assets')
+          .select('symbol, name, asset_type, instrument_id')
+          .not('instrument_id', 'is', null);
+        
+        if (dbAssets && dbAssets.length > 0) {
+          for (const asset of dbAssets) {
+            const instId = String(asset.instrument_id);
+            if (!instrumentMap[instId]) {
+              instrumentMap[instId] = {
+                symbol: asset.symbol,
+                name: asset.name || asset.symbol,
+                type: asset.asset_type || 'stock',
+              };
+            }
+          }
+          console.log(`[sync-worker] Added ${dbAssets.length} entries from database instrument_id mappings`);
+        }
+      } catch (err) {
+        console.log(`[sync-worker] Could not fetch instrument mappings from database:`, err);
+      }
+      
+      // Source 3: Build from portfolio holdings (which have symbol and sometimes instrumentId)
       if (holdingsArray.length > 0) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         for (const h of holdingsArray as any[]) {
           const instId = h.instrumentId || h.instrument_id;
           const symbol = h.symbol || h.ticker;
-          if (instId && symbol) {
+          if (instId && symbol && !instrumentMap[String(instId)]) {
             instrumentMap[String(instId)] = {
               symbol,
               name: h.name || h.instrumentName || symbol,
               type: (h.type || 'stock').toLowerCase(),
             };
+            
+            // Store this discovered mapping in the database for future use
+            try {
+              await supabase
+                .from('assets')
+                .update({ instrument_id: parseInt(instId) })
+                .eq('symbol', symbol)
+                .is('instrument_id', null);
+            } catch {
+              // Ignore errors - just a cache optimization
+            }
           }
         }
-        console.log(`[sync-worker] Built instrument map from holdings with ${Object.keys(instrumentMap).length} entries`);
+        console.log(`[sync-worker] Built instrument map from holdings, total entries: ${Object.keys(instrumentMap).length}`);
       }
       
-      // Source 2: Query existing assets in database that might have instrumentId mapping
-      // (For future: could add instrumentId column to assets table)
-      
-      // Source 3: Try Bullaware instruments API as backup (limited to ~10 entries)
+      // Source 4: Try Bullaware instruments API as final backup (limited to ~10 entries)
       try {
         const instrumentsRes = await fetch(
           `${ENDPOINTS.instruments}?limit=1000`,
@@ -693,7 +855,6 @@ async function syncTraderDetailsBatch(
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           for (const inst of instruments as any[]) {
             const instId = String(inst.instrumentId || inst.id);
-            // Only add if not already in map from holdings
             if (!instrumentMap[instId]) {
               instrumentMap[instId] = {
                 symbol: inst.symbol || inst.ticker || instId,
@@ -702,10 +863,10 @@ async function syncTraderDetailsBatch(
               };
             }
           }
-          console.log(`[sync-worker] Total instrument map entries after API: ${Object.keys(instrumentMap).length}`);
+          console.log(`[sync-worker] Total instrument map entries after all sources: ${Object.keys(instrumentMap).length}`);
         }
       } catch (err) {
-        console.log(`[sync-worker] Could not fetch instruments for mapping:`, err);
+        console.log(`[sync-worker] Could not fetch instruments from API:`, err);
       }
 
       await delay(RATE_LIMIT_DELAY_MS);

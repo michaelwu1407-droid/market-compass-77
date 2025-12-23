@@ -28,6 +28,7 @@ export type Database = {
           high_52w: number | null
           id: string
           industry: string | null
+          instrument_id: number | null
           logo_url: string | null
           low_52w: number | null
           market_cap: number | null
@@ -52,6 +53,7 @@ export type Database = {
           high_52w?: number | null
           id?: string
           industry?: string | null
+          instrument_id?: number | null
           logo_url?: string | null
           low_52w?: number | null
           market_cap?: number | null
@@ -76,6 +78,7 @@ export type Database = {
           high_52w?: number | null
           id?: string
           industry?: string | null
+          instrument_id?: number | null
           logo_url?: string | null
           low_52w?: number | null
           market_cap?: number | null
