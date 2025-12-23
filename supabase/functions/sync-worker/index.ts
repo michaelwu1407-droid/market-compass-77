@@ -197,27 +197,27 @@ async function syncTradersBatch(
 
   console.log(`[sync-worker] Got ${traders.length} traders from page ${currentPage}, total: ${total}`);
 
-  // Map and upsert traders
+  // Map and upsert traders - use same field names as working sync-traders function
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tradersToUpsert = traders.map((t: any) => ({
     etoro_username: t.username || t.userName || t.etoro_username,
-    display_name: t.displayName || t.display_name || t.username || t.userName,
-    avatar_url: t.avatarUrl || t.avatar_url || t.avatar || t.image,
-    bio: t.bio || t.about || t.description,
+    display_name: t.displayName || t.fullName || t.fullname || t.username || t.userName,
+    avatar_url: t.avatarUrl || t.avatar || t.avatar_url || t.image,
+    bio: t.aboutMe || t.bio || t.about || t.description,
     country: t.country,
     verified: t.verified ?? t.isVerified ?? false,
-    risk_score: t.riskScore ?? t.risk_score ?? t.risk,
-    gain_12m: t.gain12m ?? t.gain_12m ?? t.yearlyGain ?? t.returnYear,
-    gain_24m: t.gain24m ?? t.gain_24m ?? t.return2Years,
-    max_drawdown: t.maxDrawdown ?? t.max_drawdown ?? t.drawdown,
-    copiers: t.copiers ?? t.copiersCount ?? t.copiersNum ?? 0,
-    aum: parseAum(t.aum ?? t.assetsUnderManagement ?? t.assets_under_management),
-    profitable_weeks_pct: t.profitableWeeksPct ?? t.profitable_weeks_pct ?? t.profitableWeeks,
-    profitable_months_pct: t.profitableMonthsPct ?? t.profitable_months_pct ?? t.profitableMonths,
-    avg_trades_per_week: t.avgTradesPerWeek ?? t.avg_trades_per_week ?? t.tradesPerWeek,
-    avg_holding_time_days: t.avgHoldingTimeDays ?? t.avg_holding_time_days ?? t.holdingTime,
-    active_since: t.activeSince ?? t.active_since ?? t.memberSince,
-    tags: t.tags || [],
+    risk_score: t.riskScore ?? t.risk ?? t.risk_score,
+    gain_12m: t.gain12Months ?? t.return1Year ?? t.yearlyReturn ?? t.gain12m ?? t.gain_12m,
+    gain_24m: t.gain24Months ?? t.return2Years ?? t.gain24m ?? t.gain_24m,
+    max_drawdown: t.maxDrawdown ?? t.maxDailyDrawdown ?? t.dailyDD ?? t.max_drawdown,
+    copiers: t.copiers ?? t.copiersCount ?? 0,
+    aum: parseAum(t.aum ?? t.assetsUnderManagement),
+    profitable_weeks_pct: t.profitableWeeksPct ?? t.winRatio ?? t.profitable_weeks_pct,
+    profitable_months_pct: t.profitableMonthsPct ?? t.profitable_months_pct,
+    avg_trades_per_week: t.tradesPerWeek ?? t.avgTradesPerWeek ?? t.avg_trades_per_week,
+    avg_holding_time_days: t.avgHoldingTime ?? t.avgPositionDays ?? t.avg_holding_time_days,
+    active_since: t.activeSince ?? t.firstActivity ?? t.active_since,
+    tags: t.tags || t.investsIn || [],
     updated_at: new Date().toISOString(),
   }));
 
