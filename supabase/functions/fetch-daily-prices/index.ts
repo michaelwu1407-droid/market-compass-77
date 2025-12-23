@@ -17,38 +17,47 @@ interface YahooQuote {
 async function fetchYahooQuotes(symbols: string[]): Promise<Map<string, YahooQuote>> {
   const results = new Map<string, YahooQuote>();
   
-  // Yahoo Finance allows batch quotes
-  const symbolsParam = symbols.join(',');
-  const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbolsParam)}`;
-  
-  try {
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+  // Use Yahoo Finance v8 chart API which doesn't require authentication
+  // Fetch each symbol individually as v8 doesn't support batch
+  for (const symbol of symbols) {
+    try {
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=2d`;
+      
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        console.log(`[fetch-daily-prices] Yahoo API error for ${symbol}: ${response.status}`);
+        continue;
       }
-    });
-    
-    if (!response.ok) {
-      console.error(`[fetch-daily-prices] Yahoo API error: ${response.status}`);
-      return results;
-    }
-    
-    const data = await response.json();
-    const quotes = data?.quoteResponse?.result || [];
-    
-    for (const quote of quotes) {
-      if (quote.symbol) {
-        results.set(quote.symbol.toUpperCase(), {
-          symbol: quote.symbol,
-          regularMarketPrice: quote.regularMarketPrice,
-          regularMarketChange: quote.regularMarketChange,
-          regularMarketChangePercent: quote.regularMarketChangePercent,
-          regularMarketPreviousClose: quote.regularMarketPreviousClose,
-        });
+      
+      const data = await response.json();
+      const meta = data?.chart?.result?.[0]?.meta;
+      
+      if (meta && meta.regularMarketPrice !== undefined) {
+        const currentPrice = meta.regularMarketPrice;
+        const previousClose = meta.chartPreviousClose || meta.previousClose;
+        
+        if (previousClose && previousClose > 0) {
+          const priceChange = currentPrice - previousClose;
+          const priceChangePercent = (priceChange / previousClose) * 100;
+          
+          results.set(symbol.toUpperCase(), {
+            symbol: symbol,
+            regularMarketPrice: currentPrice,
+            regularMarketChange: priceChange,
+            regularMarketChangePercent: priceChangePercent,
+            regularMarketPreviousClose: previousClose,
+          });
+        }
       }
+    } catch (error) {
+      console.log(`[fetch-daily-prices] Error fetching ${symbol}:`, error);
     }
-  } catch (error) {
-    console.error('[fetch-daily-prices] Error fetching Yahoo quotes:', error);
   }
   
   return results;
@@ -88,8 +97,8 @@ serve(async (req) => {
 
     console.log(`[fetch-daily-prices] Found ${assets.length} assets to update`);
 
-    // Process in batches of 20 (Yahoo Finance limit)
-    const batchSize = 20;
+    // Process in smaller batches with rate limiting
+    const batchSize = 10;
     let totalUpdated = 0;
     let totalFailed = 0;
 
@@ -97,7 +106,7 @@ serve(async (req) => {
       const batch = assets.slice(i, i + batchSize);
       const symbols = batch.map(a => a.symbol);
       
-      console.log(`[fetch-daily-prices] Processing batch ${Math.floor(i / batchSize) + 1}: ${symbols.join(', ')}`);
+      console.log(`[fetch-daily-prices] Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(assets.length / batchSize)}: ${symbols.join(', ')}`);
       
       const quotes = await fetchYahooQuotes(symbols);
       
