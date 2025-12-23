@@ -9,33 +9,59 @@ interface MarkdownContentProps {
 function cleanContent(raw: string): string {
   let text = raw;
   
-  // Remove common boilerplate patterns
+  // Remove entire sections that are profile/navigation boilerplate
+  const sectionPatterns = [
+    /Similar Traders[\s\S]*?(?=\n\n[A-Z]|\n\n#|$)/gi,
+    /Performance \(Since[\s\S]*?(?=\n\n[A-Z]|\n\n#|$)/gi,
+    /^\s*\d{4}\s*$[\s\S]*?(?=\n\n[A-Z]|\n\n#|$)/gm, // Year-only lines followed by performance data
+    /\|\s*\d{4}\s*\|[\s\S]*?\|[\s\S]*?\|/gm, // Performance tables with years
+    /\+?\d+\.?\d*%\s*[-–]\s*\+?\d+\.?\d*%/g, // Range percentages like "+5.2% - +12.3%"
+  ];
+  
+  for (const pattern of sectionPatterns) {
+    text = text.replace(pattern, '');
+  }
+  
+  // Remove specific boilerplate phrases and navigation elements
   const removePatterns = [
-    /Similar Traders[\s\S]*?(?=\n\n|\z)/gi,
-    /Performance \(Since.*?\)[\s\S]*?(?=\n\n|\z)/gi,
     /Risk Score:?\s*\d+/gi,
     /Copiers:?\s*[\d,]+/gi,
     /^\s*\|.*\|.*$/gm, // markdown tables
-    /^[-|]+$/gm, // table separators
+    /^[-|:]+$/gm, // table separators
     /Follow\s+Copy/gi,
-    /^Stats$/gm,
-    /^About$/gm,
-    /^Portfolio$/gm,
-    /^Feed$/gm,
+    /^(Stats|About|Portfolio|Feed|Overview|Copy|Follow)$/gim,
     /Log in.*?Register/gi,
     /^\s*#+\s*$/gm, // empty headers
+    /!\[.*?\]\(https?:\/\/.*?\)/g, // Image links (we'll handle images separately)
+    /\[!\[.*?\]\(.*?\)\]\(.*?\)/g, // Nested image links
+    /^\s*\[\s*\]\s*$/gm, // Empty link brackets
+    /Popular Investor/gi,
+    /Copy this trader/gi,
+    /See performance/gi,
+    /View (portfolio|stats|feed)/gi,
+    /\d+\s*(copiers|followers)/gi,
+    /AUM:?\s*\$?[\d.]+[KMB]?/gi,
+    /^\s*[@#]\w+\s*$/gm, // Lone hashtags or mentions on their own line
   ];
   
   for (const pattern of removePatterns) {
     text = text.replace(pattern, '');
   }
   
-  // Clean up excessive whitespace
-  text = text.replace(/\n{3,}/g, '\n\n').trim();
+  // Clean up excessive whitespace and empty lines
+  text = text
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/^\s+$/gm, '')
+    .trim();
+  
+  // Skip mostly empty content
+  if (text.length < 20) {
+    return '';
+  }
   
   // Limit length for feed display
-  if (text.length > 500) {
-    text = text.substring(0, 500) + '...';
+  if (text.length > 600) {
+    text = text.substring(0, 600) + '...';
   }
   
   return text;

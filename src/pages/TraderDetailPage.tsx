@@ -83,6 +83,7 @@ export default function TraderDetailPage() {
   }));
 
   // Transform holdings for allocation pie chart
+  // Use current_value as allocation if allocation_pct is null (API stores it there)
   const holdingsForChart = (holdings || []).map(h => ({
     asset: {
       id: h.asset_id || '',
@@ -90,7 +91,7 @@ export default function TraderDetailPage() {
       ticker: h.assets?.symbol || 'N/A',
       sector: h.assets?.sector || 'Other',
     },
-    weight_pct: h.allocation_pct || 0,
+    weight_pct: h.allocation_pct ?? h.current_value ?? 0,
     pnl_pct: h.profit_loss_pct || 0,
   }));
 
@@ -303,7 +304,7 @@ export default function TraderDetailPage() {
                             </div>
                           </TableCell>
                           <TableCell className="text-muted-foreground">{holding.assets?.sector || '-'}</TableCell>
-                          <TableCell className="text-right font-medium">{holding.allocation_pct?.toFixed(1) || 0}%</TableCell>
+                          <TableCell className="text-right font-medium">{(holding.allocation_pct ?? holding.current_value)?.toFixed(1) || 0}%</TableCell>
                           <TableCell className={cn("text-right font-medium", (holding.profit_loss_pct || 0) >= 0 ? "text-gain" : "text-loss")}>
                             {(holding.profit_loss_pct || 0) >= 0 ? '+' : ''}{holding.profit_loss_pct?.toFixed(1) || 0}%
                           </TableCell>

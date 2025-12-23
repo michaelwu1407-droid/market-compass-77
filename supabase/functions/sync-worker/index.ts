@@ -337,14 +337,19 @@ async function syncTraderDetailsBatch(
           }
 
           if (asset) {
+            // Parse allocation - API returns it in different fields
+            const allocationValue = h.allocationPct ?? h.allocation_pct ?? h.allocation ?? h.weight ?? h.percentage ?? h.invested;
+            // Ensure it's a valid number
+            const allocation = typeof allocationValue === 'number' ? allocationValue : parseFloat(allocationValue) || 0;
+            
             await supabase
               .from('trader_holdings')
               .upsert({
                 trader_id: trader.id,
                 asset_id: asset.id,
-                allocation_pct: h.allocationPct ?? h.allocation_pct ?? h.allocation ?? h.weight,
+                allocation_pct: allocation,
                 avg_open_price: h.avgOpenPrice ?? h.avg_open_price ?? h.openPrice,
-                current_value: h.currentValue ?? h.current_value ?? h.value ?? h.invested,
+                current_value: allocation, // Also store in current_value as backup
                 profit_loss_pct: h.profitLossPct ?? h.profit_loss_pct ?? h.pnl ?? h.gain,
                 updated_at: new Date().toISOString(),
               }, { onConflict: 'trader_id,asset_id' });
