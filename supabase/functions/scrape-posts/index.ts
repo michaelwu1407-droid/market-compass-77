@@ -72,11 +72,26 @@ async function scrapeEtoroFeed(firecrawlApiKey: string, traderUsernames: string[
       const data = await response.json();
       const markdown = data.data?.markdown || data.markdown || '';
 
-      const postBlocks = markdown.split(/---|\n\n\n/).filter((block: string) => block.trim().length > 50);
+      // Filter out non-post content (navigation, stats, similar traders)
+      const cleanedMarkdown = markdown
+        .replace(/Similar Traders[\s\S]*?(?=\n\n\n|\z)/gi, '')
+        .replace(/Performance \(Since.*?\)[\s\S]*?(?=\n\n\n|\z)/gi, '')
+        .replace(/^\s*\|.*\|.*$/gm, '') // tables
+        .replace(/^[-|]+$/gm, '') // table separators
+        .replace(/Follow\s+Copy/gi, '')
+        .replace(/Risk Score:?\s*\d+/gi, '')
+        .replace(/Copiers:?\s*[\d,]+/gi, '');
+      
+      const postBlocks = cleanedMarkdown.split(/---|\n\n\n/).filter((block: string) => {
+        const trimmed = block.trim();
+        // Filter out short blocks and navigation-like content
+        return trimmed.length > 50 && 
+               !trimmed.match(/^(Stats|About|Portfolio|Feed|Log in|Register)$/i);
+      });
 
       for (const block of postBlocks.slice(0, 10)) {
         const content = block.trim();
-        if (content.length < 20) continue;
+        if (content.length < 30) continue;
 
         const timeMatch = content.match(/(\d+)\s*(hour|minute|day|week|month)s?\s*ago/i);
         let postedAt = new Date();

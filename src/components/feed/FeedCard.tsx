@@ -4,6 +4,7 @@ import { Heart, MessageCircle, TrendingUp, Eye, Sparkles, Star } from 'lucide-re
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { MarkdownContent } from './MarkdownContent';
 import type { FeedItem, Post, Trade, DailyMover } from '@/types';
 import { cn } from '@/lib/utils';
 
@@ -58,20 +59,8 @@ export function FeedCard({ item, onAnalyse, onStarForIC }: FeedCardProps) {
           </div>
         </div>
 
-        {/* Content */}
-        <p className="text-sm leading-relaxed mb-3">
-          {post.text.split(/(\$[A-Z]+)/g).map((part, i) => 
-            part.startsWith('$') ? (
-              <span 
-                key={i} 
-                className="chip-ticker"
-                onClick={() => post.asset && handleViewAsset(post.asset.id)}
-              >
-                {part}
-              </span>
-            ) : part
-          )}
-        </p>
+        {/* Content - render markdown with images */}
+        <MarkdownContent content={post.text} className="mb-3" />
 
         {/* Meta */}
         <div className="flex items-center gap-4 text-xs text-muted-foreground mb-3">
