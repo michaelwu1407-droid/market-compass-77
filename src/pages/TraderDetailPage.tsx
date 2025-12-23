@@ -12,6 +12,9 @@ import { PerformanceBarChart } from '@/components/charts/PerformanceBarChart';
 import { PerformanceMetrics } from '@/components/trader/PerformanceMetrics';
 import { HoldingsTable } from '@/components/trader/HoldingsTable';
 import { DiversificationSection } from '@/components/trader/DiversificationSection';
+import { AdvancedMetricsCard } from '@/components/trader/AdvancedMetricsCard';
+import { DrawdownsTable } from '@/components/trader/DrawdownsTable';
+import { DividendsSection } from '@/components/trader/DividendsSection';
 import { MarkdownContent } from '@/components/feed/MarkdownContent';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useTrader } from '@/hooks/useTraders';
@@ -326,8 +329,20 @@ export default function TraderDetailPage() {
             gain24m={trader.gain_24m}
           />
 
+          {/* Advanced Metrics */}
+          <div className="grid md:grid-cols-2 gap-6">
+            <AdvancedMetricsCard />
+            <DrawdownsTable drawdowns={[]} maxDrawdown={trader.max_drawdown} />
+          </div>
+
           {/* Diversification Section */}
           <DiversificationSection holdings={holdings || []} />
+
+          {/* Dividends */}
+          <DividendsSection
+            portfolioDividendYield={null}
+            totalHoldings={holdings?.length}
+          />
 
           {/* Performance Chart */}
           {performance && performance.length > 0 && (

@@ -9,6 +9,7 @@ import { usePosts } from '@/hooks/usePosts';
 import { useTraders } from '@/hooks/useTraders';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useFollowedTraders } from '@/hooks/useFollowedTraders';
+import { useSavedPosts, useSavePost, useUnsavePost } from '@/hooks/useSavedPosts';
 import { isValidPostContent } from '@/components/feed/MarkdownContent';
 import type { FeedItem, Post as FeedPost, Trader as FeedTrader } from '@/types';
 
@@ -22,6 +23,12 @@ export default function FeedPage() {
   const { data: posts, isLoading: postsLoading } = usePosts();
   const { data: traders, isLoading: tradersLoading } = useTraders();
   const { followedTraderIds, isLoading: followsLoading, toggleFollow, isFollowing } = useFollowedTraders();
+  const { data: savedPostsData, isLoading: savedLoading } = useSavedPosts();
+  const savePost = useSavePost();
+  const unsavePost = useUnsavePost();
+
+  // Create a Set of saved post IDs for quick lookup
+  const savedPostIds = new Set((savedPostsData || []).map(sp => sp.post_id));
 
   // Transform database posts to FeedItem format, filtering out garbage content
   const feedItems: FeedItem[] = (posts || [])
@@ -142,12 +149,25 @@ export default function FeedPage() {
           return false;
         });
       case 'saved':
-        // TODO: Implement saved posts functionality with a saved_posts table
-        return [];
+        // Filter by saved posts
+        return deduplicatedFeedItems.filter(item => {
+          if (item.type === 'post') {
+            return savedPostIds.has(item.id);
+          }
+          return false;
+        });
       default:
         return deduplicatedFeedItems;
     }
   })();
+
+  const handleSavePost = (postId: string) => {
+    savePost.mutate(postId);
+  };
+
+  const handleUnsavePost = (postId: string) => {
+    unsavePost.mutate(postId);
+  };
 
   const handleViewTrader = (traderId: string) => {
     navigate(`/traders/${traderId}`);
@@ -161,7 +181,7 @@ export default function FeedPage() {
     navigate('/ic');
   };
 
-  const isLoading = postsLoading || tradersLoading || followsLoading;
+  const isLoading = postsLoading || tradersLoading || followsLoading || savedLoading;
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -244,6 +264,9 @@ export default function FeedPage() {
                   item={item}
                   onAnalyse={handleAnalyse}
                   onStarForIC={handleStarForIC}
+                  onSave={handleSavePost}
+                  onUnsave={handleUnsavePost}
+                  isSaved={item.type === 'post' && savedPostIds.has(item.id)}
                 />
               ))}
             </div>
