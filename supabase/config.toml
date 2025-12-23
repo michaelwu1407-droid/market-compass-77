@@ -11,3 +11,9 @@ verify_jwt = false
 
 [functions.analyse]
 verify_jwt = false
+
+[functions.scrape-posts]
+verify_jwt = false
+
+[functions.scrape-daily-movers]
+verify_jwt = false

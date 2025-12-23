@@ -6,7 +6,8 @@ import {
   Sparkles, 
   ClipboardCheck,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  AlertTriangle
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -17,6 +18,7 @@ const navItems = [
   { path: '/traders', icon: Users, label: 'Copy Traders' },
   { path: '/analysis', icon: Sparkles, label: 'Analysis' },
   { path: '/ic', icon: ClipboardCheck, label: 'IC' },
+  { path: '/discrepancies', icon: AlertTriangle, label: 'Discrepancies' },
 ];
 
 interface SidebarProps {
