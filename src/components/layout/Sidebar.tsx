@@ -13,8 +13,9 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { useAuth } from '@/contexts/AuthContext';
 
-const navItems = [
+const baseNavItems = [
   { path: '/', icon: MessageSquare, label: 'Feed' },
   { path: '/daily', icon: Calendar, label: 'Daily' },
   { path: '/traders', icon: Users, label: 'Copy Traders' },
@@ -22,8 +23,9 @@ const navItems = [
   { path: '/templates', icon: FileText, label: 'Templates' },
   { path: '/ic', icon: ClipboardCheck, label: 'IC' },
   { path: '/discrepancies', icon: AlertTriangle, label: 'Discrepancies' },
-  { path: '/admin', icon: Settings, label: 'Admin Sync' },
 ];
+
+const adminNavItem = { path: '/admin', icon: Settings, label: 'Admin Sync' };
 
 interface SidebarProps {
   collapsed: boolean;
@@ -31,6 +33,9 @@ interface SidebarProps {
 }
 
 export function Sidebar({ collapsed, onToggle }: SidebarProps) {
+  const { isAdmin } = useAuth();
+  const navItems = isAdmin ? [...baseNavItems, adminNavItem] : baseNavItems;
+
   return (
     <aside className={cn(
       "fixed left-0 top-16 h-[calc(100vh-64px)] bg-card border-r border-border transition-all duration-300 z-40",
