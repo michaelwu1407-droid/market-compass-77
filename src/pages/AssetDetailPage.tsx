@@ -13,6 +13,7 @@ import { useAssetPriceHistory } from '@/hooks/useAssetPriceHistory';
 import { useRefreshAsset } from '@/hooks/useRefreshAsset';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
+import { StockNews } from '@/components/asset/StockNews';
 
 export default function AssetDetailPage() {
   const { assetId } = useParams();
@@ -209,252 +210,260 @@ export default function AssetDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Price Chart */}
-      <Card className="mb-6">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-lg">Price History</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {priceHistoryLoading ? (
-            <Skeleton className="h-[300px] w-full" />
-          ) : priceHistory && priceHistory.length > 0 ? (
-            <PriceChart 
-              data={priceHistory} 
-              height={300}
-              showRangeSelector={true}
-              currency={(asset as any).currency || 'USD'}
-            />
-          ) : (
-            <div className="h-[200px] flex flex-col items-center justify-center text-muted-foreground">
-              <AlertCircle className="h-8 w-8 mb-2 opacity-50" />
-              <p className="mb-3">No price history available</p>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={handleRefresh}
-                disabled={refreshAsset.isPending}
-              >
-                <RefreshCw className={cn("h-4 w-4 mr-2", refreshAsset.isPending && "animate-spin")} />
-                {refreshAsset.isPending ? 'Fetching...' : 'Fetch Price History'}
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        <Card className="p-3 md:p-4">
-          <div className="text-xs text-muted-foreground mb-1">Market Cap</div>
-          <div className="font-semibold text-sm md:text-base">{formatLargeNumber(Number(asset.market_cap))}</div>
-        </Card>
-        <Card className="p-3 md:p-4">
-          <div className="text-xs text-muted-foreground mb-1">P/E Ratio</div>
-          <div className="font-semibold text-sm md:text-base">{asset.pe_ratio ? Number(asset.pe_ratio).toFixed(1) : '-'}</div>
-        </Card>
-        <Card className="p-3 md:p-4">
-          <div className="text-xs text-muted-foreground mb-1">EPS</div>
-          <div className="font-semibold text-sm md:text-base">${asset.eps ? Number(asset.eps).toFixed(2) : '-'}</div>
-        </Card>
-        <Card className="p-3 md:p-4">
-          <div className="text-xs text-muted-foreground mb-1">Div Yield</div>
-          <div className="font-semibold text-sm md:text-base">{asset.dividend_yield ? `${Number(asset.dividend_yield).toFixed(2)}%` : '-'}</div>
-        </Card>
-        <Card className="p-3 md:p-4">
-          <div className="text-xs text-muted-foreground mb-1">Avg Volume</div>
-          <div className="font-semibold text-sm md:text-base">{formatVolume(Number(asset.avg_volume))}</div>
-        </Card>
-        <Card className="p-3 md:p-4">
-          <div className="text-xs text-muted-foreground mb-1">Beta</div>
-          <div className="font-semibold text-sm md:text-base">{asset.beta ? Number(asset.beta).toFixed(2) : '-'}</div>
-        </Card>
-        <Card className="p-3 md:p-4">
-          <div className="text-xs text-muted-foreground mb-1">52W High</div>
-          <div className="font-semibold text-sm md:text-base">{asset.high_52w ? `$${Number(asset.high_52w).toFixed(2)}` : '-'}</div>
-        </Card>
-        <Card className="p-3 md:p-4">
-          <div className="text-xs text-muted-foreground mb-1">52W Low</div>
-          <div className="font-semibold text-sm md:text-base">{asset.low_52w ? `$${Number(asset.low_52w).toFixed(2)}` : '-'}</div>
-        </Card>
-      </div>
-
-      {/* 52 Week Range */}
-      {asset.low_52w && asset.high_52w && (
-        <Card className="p-4 mb-6">
-          <div className="flex justify-between text-xs text-muted-foreground mb-2">
-            <span>52 Week Range</span>
-            <span>${Number(asset.low_52w).toFixed(2)} - ${Number(asset.high_52w).toFixed(2)}</span>
-          </div>
-          <div className="relative h-2 bg-secondary rounded-full">
-            <div 
-              className="absolute top-0 h-full bg-primary rounded-full"
-              style={{ width: `${yearRangePercentage}%` }}
-            />
-            <div 
-              className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-primary rounded-full border-2 border-background"
-              style={{ left: `calc(${yearRangePercentage}% - 6px)` }}
-            />
-          </div>
-        </Card>
-      )}
-
-      {/* Content Tabs */}
-      <Tabs defaultValue="stats">
-        <TabsList className="mb-4 w-full justify-start overflow-x-auto">
-          <TabsTrigger value="stats">Stats</TabsTrigger>
-          <TabsTrigger value="feed">Feed ({assetPosts?.length || 0})</TabsTrigger>
-          <TabsTrigger value="holders">Holders ({holders?.length || 0})</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="stats">
-          <Card>
-            <CardHeader>
-              <CardTitle>Key Statistics</CardTitle>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+        <div className="md:col-span-2">
+          {/* Price Chart */}
+          <Card className="mb-6">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Price History</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid md:grid-cols-2 gap-6">
-                <div className="space-y-3">
-                  <div className="flex justify-between py-2 border-b border-border">
-                    <span className="text-muted-foreground">Market Cap</span>
-                    <span className="font-medium">{formatLargeNumber(Number(asset.market_cap))}</span>
-                  </div>
-                  <div className="flex justify-between py-2 border-b border-border">
-                    <span className="text-muted-foreground">P/E Ratio (TTM)</span>
-                    <span className="font-medium">{asset.pe_ratio ? Number(asset.pe_ratio).toFixed(2) : '-'}</span>
-                  </div>
-                  <div className="flex justify-between py-2 border-b border-border">
-                    <span className="text-muted-foreground">EPS (TTM)</span>
-                    <span className="font-medium">${asset.eps ? Number(asset.eps).toFixed(2) : '-'}</span>
-                  </div>
-                  <div className="flex justify-between py-2 border-b border-border">
-                    <span className="text-muted-foreground">Dividend Yield</span>
-                    <span className="font-medium">{asset.dividend_yield ? `${Number(asset.dividend_yield).toFixed(2)}%` : '-'}</span>
-                  </div>
+              {priceHistoryLoading ? (
+                <Skeleton className="h-[300px] w-full" />
+              ) : priceHistory && priceHistory.length > 0 ? (
+                <PriceChart 
+                  data={priceHistory} 
+                  height={300}
+                  showRangeSelector={true}
+                  currency={(asset as any).currency || 'USD'}
+                />
+              ) : (
+                <div className="h-[200px] flex flex-col items-center justify-center text-muted-foreground">
+                  <AlertCircle className="h-8 w-8 mb-2 opacity-50" />
+                  <p className="mb-3">No price history available</p>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={handleRefresh}
+                    disabled={refreshAsset.isPending}
+                  >
+                    <RefreshCw className={cn("h-4 w-4 mr-2", refreshAsset.isPending && "animate-spin")} />
+                    {refreshAsset.isPending ? 'Fetching...' : 'Fetch Price History'}
+                  </Button>
                 </div>
-                <div className="space-y-3">
-                  <div className="flex justify-between py-2 border-b border-border">
-                    <span className="text-muted-foreground">52 Week High</span>
-                    <span className="font-medium">{asset.high_52w ? `$${Number(asset.high_52w).toFixed(2)}` : '-'}</span>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Content Tabs */}
+          <Tabs defaultValue="stats">
+            <TabsList className="mb-4 w-full justify-start overflow-x-auto">
+              <TabsTrigger value="stats">Stats</TabsTrigger>
+              <TabsTrigger value="feed">Feed ({assetPosts?.length || 0})</TabsTrigger>
+              <TabsTrigger value="holders">Holders ({holders?.length || 0})</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="stats">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Key Statistics</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid md:grid-cols-2 gap-6">
+                    <div className="space-y-3">
+                      <div className="flex justify-between py-2 border-b border-border">
+                        <span className="text-muted-foreground">Market Cap</span>
+                        <span className="font-medium">{formatLargeNumber(Number(asset.market_cap))}</span>
+                      </div>
+                      <div className="flex justify-between py-2 border-b border-border">
+                        <span className="text-muted-foreground">P/E Ratio (TTM)</span>
+                        <span className="font-medium">{asset.pe_ratio ? Number(asset.pe_ratio).toFixed(2) : '-'}</span>
+                      </div>
+                      <div className="flex justify-between py-2 border-b border-border">
+                        <span className="text-muted-foreground">EPS (TTM)</span>
+                        <span className="font-medium">${asset.eps ? Number(asset.eps).toFixed(2) : '-'}</span>
+                      </div>
+                      <div className="flex justify-between py-2 border-b border-border">
+                        <span className="text-muted-foreground">Dividend Yield</span>
+                        <span className="font-medium">{asset.dividend_yield ? `${Number(asset.dividend_yield).toFixed(2)}%` : '-'}</span>
+                      </div>
+                    </div>
+                    <div className="space-y-3">
+                      <div className="flex justify-between py-2 border-b border-border">
+                        <span className="text-muted-foreground">52 Week High</span>
+                        <span className="font-medium">{asset.high_52w ? `$${Number(asset.high_52w).toFixed(2)}` : '-'}</span>
+                      </div>
+                      <div className="flex justify-between py-2 border-b border-border">
+                        <span className="text-muted-foreground">52 Week Low</span>
+                        <span className="font-medium">{asset.low_52w ? `$${Number(asset.low_52w).toFixed(2)}` : '-'}</span>
+                      </div>
+                      <div className="flex justify-between py-2 border-b border-border">
+                        <span className="text-muted-foreground">Avg Volume</span>
+                        <span className="font-medium">{formatVolume(Number(asset.avg_volume))}</span>
+                      </div>
+                      <div className="flex justify-between py-2 border-b border-border">
+                        <span className="text-muted-foreground">Beta</span>
+                        <span className="font-medium">{asset.beta ? Number(asset.beta).toFixed(2) : '-'}</span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex justify-between py-2 border-b border-border">
-                    <span className="text-muted-foreground">52 Week Low</span>
-                    <span className="font-medium">{asset.low_52w ? `$${Number(asset.low_52w).toFixed(2)}` : '-'}</span>
-                  </div>
-                  <div className="flex justify-between py-2 border-b border-border">
-                    <span className="text-muted-foreground">Avg Volume</span>
-                    <span className="font-medium">{formatVolume(Number(asset.avg_volume))}</span>
-                  </div>
-                  <div className="flex justify-between py-2 border-b border-border">
-                    <span className="text-muted-foreground">Beta</span>
-                    <span className="font-medium">{asset.beta ? Number(asset.beta).toFixed(2) : '-'}</span>
-                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="feed">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Posts about {asset.symbol}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {postsLoading ? (
+                    <div className="space-y-4">
+                      {[1, 2, 3].map((i) => (
+                        <Skeleton key={i} className="h-24 w-full" />
+                      ))}
+                    </div>
+                  ) : (assetPosts?.length || 0) > 0 ? (
+                    <div className="space-y-4">
+                      {assetPosts?.map((post) => (
+                        <div key={post.id} className="p-4 bg-secondary/30 rounded-lg">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="font-medium text-sm">{post.traders?.display_name || 'Unknown'}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {post.posted_at && formatDistanceToNow(new Date(post.posted_at), { addSuffix: true })}
+                            </span>
+                          </div>
+                          <p className="text-sm mb-2 line-clamp-3">{post.content}</p>
+                          <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                            <span>{post.likes || 0} likes</span>
+                            <span>{post.comments || 0} comments</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-center text-muted-foreground py-8">No posts about this asset yet</p>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="holders">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Traders Holding {asset.symbol}</CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  {holdersLoading ? (
+                    <div className="p-4 space-y-4">
+                      {[1, 2, 3].map((i) => (
+                        <Skeleton key={i} className="h-16 w-full" />
+                      ))}
+                    </div>
+                  ) : (holders?.length || 0) > 0 ? (
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Trader</TableHead>
+                            <TableHead className="text-right">Weight</TableHead>
+                            <TableHead className="text-right">P&L</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {holders?.map((holding) => (
+                            <TableRow 
+                              key={holding.id} 
+                              className="cursor-pointer hover:bg-secondary/50"
+                              onClick={() => navigate(`/traders/${holding.trader_id}`)}
+                            >
+                              <TableCell>
+                                <div className="flex items-center gap-2">
+                                  {holding.traders?.avatar_url ? (
+                                    <img 
+                                      src={holding.traders.avatar_url} 
+                                      alt={holding.traders.display_name}
+                                      className="w-8 h-8 rounded-full"
+                                    />
+                                  ) : (
+                                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                                      <span className="text-xs font-bold">{holding.traders?.display_name?.[0] || '?'}</span>
+                                    </div>
+                                  )}
+                                  <div>
+                                    <div className="font-medium">{holding.traders?.display_name || 'Unknown'}</div>
+                                    <div className="text-xs text-muted-foreground">@{holding.traders?.etoro_username}</div>
+                                  </div>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right">{Number(holding.allocation_pct || 0).toFixed(1)}%</TableCell>
+                              <TableCell className={cn("text-right font-medium", (Number(holding.profit_loss_pct) || 0) >= 0 ? "text-gain" : "text-loss")}>
+                                {(Number(holding.profit_loss_pct) || 0) >= 0 ? '+' : ''}{Number(holding.profit_loss_pct || 0).toFixed(1)}%
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  ) : (
+                    <p className="text-center text-muted-foreground py-8">No traders are holding this asset</p>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
+        </div>
+
+        <div className="space-y-6">
+          {/* Stats Grid */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Highlights</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 md:p-4 bg-secondary/30 rounded-lg">
+                  <div className="text-xs text-muted-foreground mb-1">Market Cap</div>
+                  <div className="font-semibold text-sm md:text-base">{formatLargeNumber(Number(asset.market_cap))}</div>
+                </div>
+                <div className="p-3 md:p-4 bg-secondary/30 rounded-lg">
+                  <div className="text-xs text-muted-foreground mb-1">P/E Ratio</div>
+                  <div className="font-semibold text-sm md:text-base">{asset.pe_ratio ? Number(asset.pe_ratio).toFixed(1) : '-'}</div>
+                </div>
+                <div className="p-3 md:p-4 bg-secondary/30 rounded-lg">
+                  <div className="text-xs text-muted-foreground mb-1">EPS</div>
+                  <div className="font-semibold text-sm md:text-base">${asset.eps ? Number(asset.eps).toFixed(2) : '-'}</div>
+                </div>
+                <div className="p-3 md:p-4 bg-secondary/30 rounded-lg">
+                  <div className="text-xs text-muted-foreground mb-1">Div Yield</div>
+                  <div className="font-semibold text-sm md:text-base">{asset.dividend_yield ? `${Number(asset.dividend_yield).toFixed(2)}%` : '-'}</div>
+                </div>
+                <div className="p-3 md:p-4 bg-secondary/30 rounded-lg">
+                  <div className="text-xs text-muted-foreground mb-1">Avg Volume</div>
+                  <div className="font-semibold text-sm md:text-base">{formatVolume(Number(asset.avg_volume))}</div>
+                </div>
+                <div className="p-3 md:p-4 bg-secondary/30 rounded-lg">
+                  <div className="text-xs text-muted-foreground mb-1">Beta</div>
+                  <div className="font-semibold text-sm md:text-base">{asset.beta ? Number(asset.beta).toFixed(2) : '-'}</div>
                 </div>
               </div>
             </CardContent>
           </Card>
-        </TabsContent>
 
-        <TabsContent value="feed">
-          <Card>
-            <CardHeader>
-              <CardTitle>Posts about {asset.symbol}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {postsLoading ? (
-                <div className="space-y-4">
-                  {[1, 2, 3].map((i) => (
-                    <Skeleton key={i} className="h-24 w-full" />
-                  ))}
-                </div>
-              ) : (assetPosts?.length || 0) > 0 ? (
-                <div className="space-y-4">
-                  {assetPosts?.map((post) => (
-                    <div key={post.id} className="p-4 bg-secondary/30 rounded-lg">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="font-medium text-sm">{post.traders?.display_name || 'Unknown'}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {post.posted_at && formatDistanceToNow(new Date(post.posted_at), { addSuffix: true })}
-                        </span>
-                      </div>
-                      <p className="text-sm mb-2 line-clamp-3">{post.content}</p>
-                      <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                        <span>{post.likes || 0} likes</span>
-                        <span>{post.comments || 0} comments</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-center text-muted-foreground py-8">No posts about this asset yet</p>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+          {/* 52 Week Range */}
+          {asset.low_52w && asset.high_52w && (
+            <Card className="p-4">
+              <div className="flex justify-between text-xs text-muted-foreground mb-2">
+                <span>52 Week Range</span>
+                <span>${Number(asset.low_52w).toFixed(2)} - ${Number(asset.high_52w).toFixed(2)}</span>
+              </div>
+              <div className="relative h-2 bg-secondary rounded-full">
+                <div 
+                  className="absolute top-0 h-full bg-primary rounded-full"
+                  style={{ width: `${yearRangePercentage}%` }}
+                />
+                <div 
+                  className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-primary rounded-full border-2 border-background"
+                  style={{ left: `calc(${yearRangePercentage}% - 6px)` }}
+                />
+              </div>
+            </Card>
+          )}
 
-        <TabsContent value="holders">
-          <Card>
-            <CardHeader>
-              <CardTitle>Traders Holding {asset.symbol}</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              {holdersLoading ? (
-                <div className="p-4 space-y-4">
-                  {[1, 2, 3].map((i) => (
-                    <Skeleton key={i} className="h-16 w-full" />
-                  ))}
-                </div>
-              ) : (holders?.length || 0) > 0 ? (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Trader</TableHead>
-                        <TableHead className="text-right">Weight</TableHead>
-                        <TableHead className="text-right">P&L</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {holders?.map((holding) => (
-                        <TableRow 
-                          key={holding.id} 
-                          className="cursor-pointer hover:bg-secondary/50"
-                          onClick={() => navigate(`/traders/${holding.trader_id}`)}
-                        >
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              {holding.traders?.avatar_url ? (
-                                <img 
-                                  src={holding.traders.avatar_url} 
-                                  alt={holding.traders.display_name}
-                                  className="w-8 h-8 rounded-full"
-                                />
-                              ) : (
-                                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-                                  <span className="text-xs font-bold">{holding.traders?.display_name?.[0] || '?'}</span>
-                                </div>
-                              )}
-                              <div>
-                                <div className="font-medium">{holding.traders?.display_name || 'Unknown'}</div>
-                                <div className="text-xs text-muted-foreground">@{holding.traders?.etoro_username}</div>
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right">{Number(holding.allocation_pct || 0).toFixed(1)}%</TableCell>
-                          <TableCell className={cn("text-right font-medium", (Number(holding.profit_loss_pct) || 0) >= 0 ? "text-gain" : "text-loss")}>
-                            {(Number(holding.profit_loss_pct) || 0) >= 0 ? '+' : ''}{Number(holding.profit_loss_pct || 0).toFixed(1)}%
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              ) : (
-                <p className="text-center text-muted-foreground py-8">No traders are holding this asset</p>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+          {/* News */}
+          <StockNews symbol={asset.symbol} />
+        </div>
+      </div>
     </div>
   );
 }
