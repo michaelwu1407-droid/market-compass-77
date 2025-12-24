@@ -7,7 +7,7 @@ import { componentTagger } from "lovable-tagger";
 export default defineConfig(({ mode }) => ({
   server: {
     host: true,
-    port: 8080,
+    port: 8081,
     proxy: {
       // Proxy /functions/* to the Supabase Edge Functions host to avoid CORS during local development
       '/functions': {
