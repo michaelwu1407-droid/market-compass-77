@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RefreshCw, Clock } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 import { FeedCard } from '@/components/feed/FeedCard';
 import { TraderMiniCard } from '@/components/feed/TraderMiniCard';
 import { Button } from '@/components/ui/button';
@@ -19,9 +20,10 @@ type FilterType = 'all' | 'following' | 'assets' | 'traders' | 'saved';
 
 export default function FeedPage() {
   const [filter, setFilter] = useState<FilterType>('all');
-  const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const navigate = useNavigate();
   const isMobile = useIsMobile();
+  const [isRefreshingLocal, setIsRefreshingLocal] = useState(false);
   
   const { data: posts, isLoading: postsLoading, refetch: refetchPosts, isFetching } = usePosts();
   const { data: traders, isLoading: tradersLoading, refetch: refetchTraders } = useTraders();
@@ -31,8 +33,50 @@ export default function FeedPage() {
   const unsavePost = useUnsavePost();
 
   const handleRefresh = async () => {
-    await Promise.all([refetchPosts(), refetchTraders()]);
-    setLastRefreshed(new Date());
+    console.log('REFRESH CLICKED');
+    setIsRefreshingLocal(true);
+    try {
+      // Use a proxied relative fetch in development to avoid CORS (vite proxy configured)
+      let resultData: any = null;
+      if (import.meta.env.DEV) {
+        const res = await fetch('/functions/v1/scrape-posts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        if (!res.ok) {
+          const body = await res.text();
+          throw new Error(`Function error: ${res.status} ${body}`);
+        }
+        resultData = await res.json();
+      } else {
+        const { data, error } = await supabase.functions.invoke('scrape-posts', { body: {} });
+        if (error || (data && data.success === false)) throw error || new Error('Function returned error');
+        resultData = data;
+      }
+
+      console.log('REFRESH SUCCESS', resultData);
+
+      const [postsRes] = await Promise.all([refetchPosts(), refetchTraders()]) as any;
+      const refreshedPosts = postsRes?.data || posts || [];
+      const timestamps = (refreshedPosts || [])
+        .map((p: any) => p.posted_at || p.created_at)
+        .filter(Boolean) as string[];
+
+      if (timestamps.length > 0) {
+        timestamps.sort();
+        const candidate = new Date(timestamps[timestamps.length - 1]);
+        if (!isNaN(candidate.getTime())) {
+          setLastRefreshed(candidate);
+        } else {
+          console.warn('Invalid timestamp from server, not setting lastRefreshed', timestamps[timestamps.length - 1]);
+        }
+      }
+    } catch (err) {
+      console.error('Refresh failed', err);
+    } finally {
+      setIsRefreshingLocal(false);
+    }
   };
 
   // Create a Set of saved post IDs for quick lookup
@@ -203,16 +247,16 @@ export default function FeedPage() {
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
               <Clock className="h-3 w-3" />
               <span className="hidden sm:inline">Last refreshed:</span>
-              <span>{formatDistanceToNow(lastRefreshed, { addSuffix: true })}</span>
+              <span>{lastRefreshed ? formatDistanceToNow(lastRefreshed, { addSuffix: true }) : 'Never'}</span>
             </div>
             <Button 
               variant="outline" 
               size="sm" 
               onClick={handleRefresh}
-              disabled={isFetching}
+              disabled={isFetching || isRefreshingLocal}
             >
-              <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
-              Refresh
+              <RefreshCw className={`h-4 w-4 mr-2 ${(isFetching || isRefreshingLocal) ? 'animate-spin' : ''}`} />
+              {isRefreshingLocal ? 'Refreshing...' : 'Refresh'}
             </Button>
           </div>
         </div>
