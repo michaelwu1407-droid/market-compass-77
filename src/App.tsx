@@ -19,6 +19,7 @@ import TemplatesPage from "./pages/TemplatesPage";
 import NotFound from "./pages/NotFound";
 import { Loader2 } from "lucide-react";
 
+// Force rebuild
 const queryClient = new QueryClient();
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
