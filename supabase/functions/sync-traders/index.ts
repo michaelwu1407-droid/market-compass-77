@@ -50,8 +50,13 @@ function checkDiscrepancy(
     }
   } else {
     if (bValue === 0 && fValue === 0) return null;
-    const diffPct = bValue !== 0 ? Math.abs((bValue - fValue) / bValue * 100) : Math.abs(fValue) * 100;
-    
+
+    // If bValue is 0, any non-zero fValue is a 100% discrepancy.
+    // The original `Math.abs(fValue) * 100` was producing huge invalid percentages.
+    const diffPct = bValue !== 0
+      ? Math.abs((bValue - fValue) / bValue * 100)
+      : (fValue !== 0 ? 100.0 : 0);
+
     if (diffPct > DISCREPANCY_THRESHOLD_PCT) {
       return {
         entity_type: 'trader',
@@ -104,6 +109,9 @@ async function scrapeTraderFromEtoro(username: string, firecrawlApiKey: string):
 
     const return12mMatch = markdown.match(/(?:12\s*(?:mo?n?th?s?|M))[:\s]*([-+]?\d+(?:\.\d+)?)\s*%/i);
     if (return12mMatch) parsed.gain_12m = parseFloat(return12mMatch[1]);
+
+    const return24mMatch = markdown.match(/(?:24\s*(?:mo?n?th?s?|M))[:\s]*([-+]?\d+(?:\.\d+)?)\s*%/i);
+    if (return24mMatch) parsed.gain_24m = parseFloat(return24mMatch[1]);
 
     const drawdownMatch = markdown.match(/(?:max\s*)?draw\s*down[:\s]*([-+]?\d+(?:\.\d+)?)\s*%?/i);
     if (drawdownMatch) parsed.max_drawdown = parseFloat(drawdownMatch[1]);
