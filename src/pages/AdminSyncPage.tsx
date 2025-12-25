@@ -69,6 +69,9 @@ export default function AdminSyncPage() {
       // Log errors if present
       if (result.summary?.errors && result.summary.errors.length > 0) {
         console.error(`[AdminSyncPage] Errors in result:`, result.summary.errors);
+        result.summary.errors.forEach((err: any, idx: number) => {
+          console.error(`[AdminSyncPage] Error ${idx + 1}:`, JSON.stringify(err, null, 2));
+        });
       }
       return result;
   };
