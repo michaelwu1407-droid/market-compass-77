@@ -139,7 +139,7 @@ serve(async (req) => {
     }
 
     // Check existing pending jobs to avoid duplicates (unless force mode)
-    let jobsToInsert;
+    let jobsToInsert: any[] = [];
     if (force) {
       // In force mode, create jobs for all traders
       // First, mark any existing pending/in_progress jobs as completed if they're old

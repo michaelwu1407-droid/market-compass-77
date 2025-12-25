@@ -88,7 +88,7 @@ serve(async (req) => {
                     console.error(`Bullaware API Error on page ${page + 1}: Status ${status}, Response: ${errorText.substring(0, 500)}`);
                     
                     if (status === 429) {
-                        console.error(`Rate limit hit on page ${page + 1}. Will use mock data for remaining.`);
+                        console.error(`Rate limit hit on page ${page + 1}. Stopping pagination.`);
                         apiWorks = false;
                         break;
                     }
