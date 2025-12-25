@@ -97,7 +97,7 @@ serve(async (req) => {
       const dispatched = dispatchResult?.dispatched_jobs || 0;
       const attempted = dispatchResult?.attempted || 0;
       const errors = dispatchResult?.errors || [];
-      const dispatchError = dispatchResult?.error;
+      const dispatchResultError = dispatchResult?.error;
 
       stats.total_dispatched += dispatched;
       stats.total_processed += attempted;
@@ -107,12 +107,12 @@ serve(async (req) => {
         console.error(`Iteration ${i + 1} errors:`, errors);
       }
       
-      if (dispatchError) {
-        stats.errors.push({ iteration: i + 1, error: dispatchError });
-        console.error(`Iteration ${i + 1} dispatch error:`, dispatchError);
+      if (dispatchResultError) {
+        stats.errors.push({ iteration: i + 1, error: dispatchResultError });
+        console.error(`Iteration ${i + 1} dispatch error:`, dispatchResultError);
       }
 
-      console.log(`Iteration ${i + 1}: Dispatched ${dispatched} jobs (attempted ${attempted})${errors.length > 0 ? `, ${errors.length} errors` : ''}${dispatchError ? `, dispatch error: ${dispatchError}` : ''}`);
+      console.log(`Iteration ${i + 1}: Dispatched ${dispatched} jobs (attempted ${attempted})${errors.length > 0 ? `, ${errors.length} errors` : ''}${dispatchResultError ? `, dispatch error: ${dispatchResultError}` : ''}`);
       
       // Debug: Check why no jobs were dispatched
       if (dispatched === 0 && attempted === 0) {
