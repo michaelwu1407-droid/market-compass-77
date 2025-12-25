@@ -27,7 +27,6 @@ serve(async (req) => {
         // So we'll fetch one page per call and spread discovery over time
         console.log(`Attempting to fetch traders from Bullaware API...`);
         console.log(`[DEBUG] BULLAWARE_API_KEY present: ${BULLAWARE_API_KEY ? 'Yes' : 'No'} (length: ${BULLAWARE_API_KEY?.length || 0})`);
-        console.log(`[DEBUG] BULLAWARE_API_KEY present: ${BULLAWARE_API_KEY ? 'Yes' : 'No'} (length: ${BULLAWARE_API_KEY?.length || 0})`);
         const maxPages = 3; // Fetch up to 3,000 traders per call (to respect rate limits)
         let page = 0;
         
@@ -190,11 +189,8 @@ serve(async (req) => {
             .select('*', { count: 'exact', head: true });
         console.log(`Total traders in database after sync: ${newCount}`);
         
-        console.log('Invoking enqueue-sync-jobs with force: true');
-        const { error: enqueueError } = await supabase.functions.invoke('enqueue-sync-jobs', {
-            body: { force: true }
-        });
-        if (enqueueError) console.error("Error invoking enqueue-sync-jobs:", enqueueError);
+        // Note: enqueue-sync-jobs is called by the caller (enqueue-sync-jobs when sync_traders=true)
+        // No need to call it here to avoid redundant calls
 
     } else {
         console.log("No traders to upsert.");

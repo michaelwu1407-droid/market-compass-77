@@ -126,9 +126,18 @@ serve(async (req) => {
 
         // Save holdings
         if (bullwareHoldings.length > 0) {
-            await supabase.from('trader_holdings').delete().eq('trader_id', trader.id);
-            await supabase.from('trader_holdings').insert(bullwareHoldings);
-            syncedCount++;
+            const { error: deleteError } = await supabase.from('trader_holdings').delete().eq('trader_id', trader.id);
+            if (deleteError) {
+                console.error(`Error deleting old holdings for ${trader.etoro_username}:`, deleteError);
+            }
+            
+            const { error: insertError } = await supabase.from('trader_holdings').insert(bullwareHoldings);
+            if (insertError) {
+                console.error(`Error inserting holdings for ${trader.etoro_username}:`, insertError);
+                // Continue to next trader even if this one fails
+            } else {
+                syncedCount++;
+            }
         }
         
         // Mark as updated so we don't sync again immediately

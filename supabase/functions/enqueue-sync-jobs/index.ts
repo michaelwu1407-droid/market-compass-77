@@ -186,8 +186,9 @@ serve(async (req) => {
         let inserted = 0;
         for (let i = 0; i < jobsToInsert.length; i += batchSize) {
             const batch = jobsToInsert.slice(i, i + batchSize);
+            // Use insert with conflict handling - update if trader_id already exists with pending status
             const { error: insertError } = await supabase.from("sync_jobs").upsert(batch, { 
-                onConflict: 'trader_id,status',
+                onConflict: 'trader_id',
                 ignoreDuplicates: false 
             });
             if (insertError) {
@@ -206,9 +207,13 @@ serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 200,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error enqueuing sync jobs:", error);
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ 
+        success: false,
+        error: error?.message || error?.toString() || 'Unknown error',
+        enqueued_count: 0
+    }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 500,
     });

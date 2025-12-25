@@ -24,7 +24,17 @@ serve(async (req) => {
         
         if (dispatchError) {
              console.error("Error invoking dispatch-sync-jobs:", dispatchError);
-             return new Response(JSON.stringify({ error: dispatchError }), { status: 500, headers: corsHeaders });
+             // Return 200 with error details so caller can see what went wrong
+             return new Response(JSON.stringify({ 
+                 success: false,
+                 error: typeof dispatchError === 'string' ? dispatchError : (dispatchError.message || JSON.stringify(dispatchError)),
+                 dispatch_result: null,
+                 pending_jobs: 0,
+                 trader_count: 0
+             }), { 
+                 status: 200, 
+                 headers: { ...corsHeaders, "Content-Type": "application/json" } 
+             });
         }
 
         console.log("Dispatch result:", dispatchData);
