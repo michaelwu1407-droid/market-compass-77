@@ -36,24 +36,28 @@ export default function FeedPage() {
     console.log('REFRESH CLICKED');
     setIsRefreshingLocal(true);
     try {
-      // Use a proxied relative fetch in development to avoid CORS (vite proxy configured)
       let resultData: any = null;
-      if (import.meta.env.DEV) {
-        const res = await fetch('/functions/v1/scrape-posts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({}),
-        });
-        if (!res.ok) {
-          const body = await res.text();
-          throw new Error(`Function error: ${res.status} ${body}`);
-        }
-        resultData = await res.json();
-      } else {
-        const { data, error } = await supabase.functions.invoke('scrape-posts', { body: {} });
-        if (error || (data && data.success === false)) throw error || new Error('Function returned error');
-        resultData = data;
+      // ALWAYS use direct fetch with hardcoded URL to ensure we hit the correct project
+      // This bypasses local environment variable issues in IDX/Preview
+      const PROJECT_URL = 'https://xgvaibxxiwfraklfbwey.supabase.co';
+      const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      
+      console.log(`[FeedPage] Invoking scrape-posts at ${PROJECT_URL}...`);
+      
+      const res = await fetch(`${PROJECT_URL}/functions/v1/scrape-posts`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${ANON_KEY}` 
+        },
+        body: JSON.stringify({}),
+      });
+      
+      if (!res.ok) {
+        const body = await res.text();
+        throw new Error(`Function error: ${res.status} ${body}`);
       }
+      resultData = await res.json();
 
       console.log('REFRESH SUCCESS', resultData);
 

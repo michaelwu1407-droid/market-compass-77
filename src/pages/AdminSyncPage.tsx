@@ -1,503 +1,359 @@
 import { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { toast } from '@/hooks/use-toast';
-import { Loader2, RefreshCw, Users, FileText, TrendingUp, CheckCircle, XCircle, Zap, Shield, Clock, Play, BarChart3, Package } from 'lucide-react';
-import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
-import { Slider } from '@/components/ui/slider';
-import { Badge } from '@/components/ui/badge';
+import { Loader2, Play, RotateCcw, CheckCircle2, XCircle, Clock, AlertCircle, Zap, FileText, TrendingUp, Package, Users } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import DataHealthCard from '@/components/admin/DataHealthCard';
-import KnownIssuesAlert, { KnownIssue } from '@/components/admin/KnownIssuesAlert';
-import PipelineStatus from '@/components/admin/PipelineStatus';
-import SyncActivityLog, { SyncActivity } from '@/components/admin/SyncActivityLog';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { formatDistanceToNow } from 'date-fns';
 
-interface SyncStatus {
-  isLoading: boolean;
-  success: boolean | null;
-  message: string | null;
-}
-
-interface SyncOptions {
-  enableCrossCheck: boolean;
-  force: boolean;
-  postLimit: number;
+interface QueueItem {
+  id: string;
+  trader_id: string;
+  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+  last_attempted_at: string;
+  error_message: string;
+  retry_count: number;
 }
 
 interface SyncState {
   id: string;
-  last_run: string | null;
-  last_page: number;
-  total_pages: number | null;
+  last_run: string;
   status: string;
   updated_at: string;
 }
 
-interface DetailedCounts {
-  // Traders
-  total_traders: number;
-  synced_traders: number;
-  traders_with_risk_score: number;
-  traders_with_sharpe: number;
-  traders_with_sortino: number;
-  traders_with_alpha: number;
-  traders_with_beta: number;
-  traders_with_volatility: number;
-  traders_with_max_drawdown: number;
-  traders_with_gain_12m: number;
-  traders_with_copiers: number;
-  traders_with_trades: number;
-  traders_with_holdings: number;
-  traders_with_performance: number;
-  // Assets
-  total_assets: number;
-  assets_with_price: number;
-  assets_with_sector: number;
-  assets_with_market_cap: number;
-  // Totals
-  total_holdings: number;
-  total_trades: number;
-  total_performance: number;
-  total_posts: number;
-}
-
 export default function AdminSyncPage() {
-  const [syncStatus, setSyncStatus] = useState<Record<string, SyncStatus>>({
-    worker: { isLoading: false, success: null, message: null },
-    posts: { isLoading: false, success: null, message: null },
-    dailyMovers: { isLoading: false, success: null, message: null },
-  });
+  const [isDiscovering, setIsDiscovering] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isSyncingAssets, setIsSyncingAssets] = useState(false);
+  const [isSyncingMovers, setIsSyncingMovers] = useState(false);
+  const [isSyncingPosts, setIsSyncingPosts] = useState(false);
 
-  const [options, setOptions] = useState<SyncOptions>({
-    enableCrossCheck: false,
-    force: false,
-    postLimit: 5,
-  });
+  // Hardcoded project URL
+  const PROJECT_URL = 'https://xgvaibxxiwfraklfbwey.supabase.co';
+  // Fallback for missing env var to prevent crash on page load
+  const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
-  const [activities, setActivities] = useState<SyncActivity[]>([]);
+  const invokeFunction = async (functionName: string, body = {}) => {
+    if (!ANON_KEY) {
+        throw new Error("Missing VITE_SUPABASE_ANON_KEY in environment variables");
+    }
+    const res = await fetch(`${PROJECT_URL}/functions/v1/${functionName}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ANON_KEY}` },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return await res.json();
+  };
 
-  // Fetch sync states from database
-  const { data: syncStates, refetch: refetchSyncStates } = useQuery({
+  // 1. Fetch Sync States (Last Run times)
+  const { data: syncStates } = useQuery({
     queryKey: ['sync-states'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('sync_state')
-        .select('*')
-        .order('id');
-      if (error) throw error;
+      const { data } = await supabase.from('sync_state').select('*');
       return data as SyncState[];
     },
-    refetchInterval: 10000,
+    refetchInterval: 5000,
   });
 
-  // Fetch detailed data counts
-  const { data: dataCounts, refetch: refetchCounts } = useQuery({
-    queryKey: ['detailed-data-counts'],
+  // 2. Fetch Queue Stats
+  const { data: stats, refetch: refetchStats } = useQuery({
+    queryKey: ['queue-stats'],
     queryFn: async () => {
-      const [
-        traders, syncedTraders, riskScoreTraders, sharpeTraders, sortinoTraders,
-        alphaTraders, betaTraders, volatilityTraders, maxDrawdownTraders, gain12mTraders,
-        copiersTraders, assets, assetsWithPrice, assetsWithSector, assetsWithMarketCap,
-        holdings, trades, performance, posts
-      ] = await Promise.all([
-        supabase.from('traders').select('id', { count: 'exact', head: true }),
-        supabase.from('traders').select('id', { count: 'exact', head: true }).not('details_synced_at', 'is', null),
-        supabase.from('traders').select('id', { count: 'exact', head: true }).not('risk_score', 'is', null),
-        supabase.from('traders').select('id', { count: 'exact', head: true }).not('sharpe_ratio', 'is', null),
-        supabase.from('traders').select('id', { count: 'exact', head: true }).not('sortino_ratio', 'is', null),
-        supabase.from('traders').select('id', { count: 'exact', head: true }).not('alpha', 'is', null),
-        supabase.from('traders').select('id', { count: 'exact', head: true }).not('beta', 'is', null),
-        supabase.from('traders').select('id', { count: 'exact', head: true }).not('volatility', 'is', null),
-        supabase.from('traders').select('id', { count: 'exact', head: true }).not('max_drawdown', 'is', null),
-        supabase.from('traders').select('id', { count: 'exact', head: true }).not('gain_12m', 'is', null),
-        supabase.from('traders').select('id', { count: 'exact', head: true }).gt('copiers', 0),
-        supabase.from('assets').select('id', { count: 'exact', head: true }),
-        supabase.from('assets').select('id', { count: 'exact', head: true }).not('current_price', 'is', null),
-        supabase.from('assets').select('id', { count: 'exact', head: true }).not('sector', 'is', null),
-        supabase.from('assets').select('id', { count: 'exact', head: true }).not('market_cap', 'is', null),
-        supabase.from('trader_holdings').select('id', { count: 'exact', head: true }),
-        supabase.from('trades').select('id', { count: 'exact', head: true }),
-        supabase.from('trader_performance').select('id', { count: 'exact', head: true }),
-        supabase.from('posts').select('id', { count: 'exact', head: true }),
-      ]);
-
-      // Count unique traders with holdings/trades/performance
-      const [tradersWithHoldings, tradersWithTrades, tradersWithPerformance] = await Promise.all([
-        supabase.from('trader_holdings').select('trader_id').limit(1000),
-        supabase.from('trades').select('trader_id').limit(1000),
-        supabase.from('trader_performance').select('trader_id').limit(1000),
-      ]);
-
-      const uniqueHoldingTraders = new Set(tradersWithHoldings.data?.map(h => h.trader_id) || []).size;
-      const uniqueTradeTraders = new Set(tradersWithTrades.data?.map(t => t.trader_id) || []).size;
-      const uniquePerfTraders = new Set(tradersWithPerformance.data?.map(p => p.trader_id) || []).size;
-
-      return {
-        total_traders: traders.count || 0,
-        synced_traders: syncedTraders.count || 0,
-        traders_with_risk_score: riskScoreTraders.count || 0,
-        traders_with_sharpe: sharpeTraders.count || 0,
-        traders_with_sortino: sortinoTraders.count || 0,
-        traders_with_alpha: alphaTraders.count || 0,
-        traders_with_beta: betaTraders.count || 0,
-        traders_with_volatility: volatilityTraders.count || 0,
-        traders_with_max_drawdown: maxDrawdownTraders.count || 0,
-        traders_with_gain_12m: gain12mTraders.count || 0,
-        traders_with_copiers: copiersTraders.count || 0,
-        traders_with_trades: uniqueTradeTraders,
-        traders_with_holdings: uniqueHoldingTraders,
-        traders_with_performance: uniquePerfTraders,
-        total_assets: assets.count || 0,
-        assets_with_price: assetsWithPrice.count || 0,
-        assets_with_sector: assetsWithSector.count || 0,
-        assets_with_market_cap: assetsWithMarketCap.count || 0,
-        total_holdings: holdings.count || 0,
-        total_trades: trades.count || 0,
-        total_performance: performance.count || 0,
-        total_posts: posts.count || 0,
-      } as DetailedCounts;
-    },
-    refetchInterval: 10000,
-  });
-
-  const addActivity = (message: string, success: boolean) => {
-    setActivities(prev => [
-      { timestamp: new Date(), message, success },
-      ...prev.slice(0, 19) // Keep last 20
-    ]);
-  };
-
-  const updateStatus = (key: string, status: Partial<SyncStatus>) => {
-    setSyncStatus(prev => ({
-      ...prev,
-      [key]: { ...prev[key], ...status },
-    }));
-  };
-
-  const syncFunction = async (name: string, functionName: string, body?: object) => {
-    updateStatus(name, { isLoading: true, success: null, message: null });
-    
-    try {
-      const { data, error } = await supabase.functions.invoke(functionName, { body });
-      
+      const { data, error } = await supabase.from('sync_queue').select('status');
       if (error) throw error;
       
-      const message = data?.action === 'skip' 
-        ? 'All data is fresh, nothing to sync'
-        : data?.message || `Synced: ${JSON.stringify(data)}`;
-      
-      updateStatus(name, { 
-        isLoading: false, 
-        success: true, 
-        message
+      const counts = { pending: 0, processing: 0, completed: 0, failed: 0, total: 0 };
+      data.forEach(item => {
+        if (item.status === 'PENDING') counts.pending++;
+        else if (item.status === 'PROCESSING') counts.processing++;
+        else if (item.status === 'COMPLETED') counts.completed++;
+        else if (item.status === 'FAILED') counts.failed++;
       });
-      addActivity(`${functionName}: ${message}`, true);
-      toast({ title: 'Success', description: `${functionName} completed` });
-      refetchSyncStates();
-      refetchCounts();
+      counts.total = data.length;
+      return counts;
+    },
+    refetchInterval: 5000,
+  });
+
+  // 3. Fetch Queue List
+  const { data: queueItems, refetch: refetchQueue } = useQuery({
+    queryKey: ['queue-items'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('sync_queue')
+        .select('*')
+        .order('last_attempted_at', { ascending: false, nullsFirst: true })
+        .limit(20);
+      return data as QueueItem[];
+    },
+    refetchInterval: 5000,
+  });
+
+  // Calculations for Estimates
+  const ITEMS_PER_HOUR = 60; // Estimated based on 10 req/min limit (approx 1 min per trader incl delays)
+  const estimatedHoursLeft = stats ? (stats.pending / ITEMS_PER_HOUR).toFixed(1) : 0;
+  const progressPct = stats && stats.total > 0 ? ((stats.completed / stats.total) * 100) : 0;
+
+  const getState = (id: string) => syncStates?.find(s => s.id === id);
+
+  // Handlers (kept simple)
+  const runDiscovery = async () => {
+    setIsDiscovering(true);
+    try { await invokeFunction('discover-traders'); toast({ title: 'Discovery Started' }); refetchStats(); } 
+    catch (e) { toast({ title: 'Error', description: String(e), variant: 'destructive' }); }
+    finally { setIsDiscovering(false); }
+  };
+
+  const runProcessing = async () => {
+    setIsProcessing(true);
+    try { await invokeFunction('process-queue'); toast({ title: 'Processing Batch Started' }); refetchStats(); }
+    catch (e) { toast({ title: 'Error', description: String(e), variant: 'destructive' }); }
+    finally { setIsProcessing(false); }
+  };
+
+  const syncAssets = async () => { setIsSyncingAssets(true); try { await invokeFunction('sync-assets'); toast({ title: 'Assets Sync Started' }); } catch(e) { toast({ title: 'Error', description: String(e), variant: 'destructive' }); } finally { setIsSyncingAssets(false); } };
+  const syncDailyMovers = async () => { setIsSyncingMovers(true); try { await invokeFunction('scrape-daily-movers'); toast({ title: 'Movers Sync Started' }); } catch(e) { toast({ title: 'Error', description: String(e), variant: 'destructive' }); } finally { setIsSyncingMovers(false); } };
+  const syncPosts = async () => { setIsSyncingPosts(true); try { await invokeFunction('scrape-posts'); toast({ title: 'Feed Sync Started' }); } catch(e) { toast({ title: 'Error', description: String(e), variant: 'destructive' }); } finally { setIsSyncingPosts(false); } };
+
+  // Action: Reset Failed
+  const resetFailed = async () => {
+    try {
+      const { error } = await supabase
+        .from('sync_queue')
+        .update({ status: 'PENDING', error_message: null })
+        .eq('status', 'FAILED');
+      
+      if (error) throw error;
+      toast({ title: 'Reset Successful', description: 'Failed items marked as PENDING' });
+      refetchStats();
+      refetchQueue();
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      updateStatus(name, { isLoading: false, success: false, message: errorMessage });
-      addActivity(`${functionName}: ${errorMessage}`, false);
-      toast({ title: 'Error', description: errorMessage, variant: 'destructive' });
+      toast({ title: 'Reset Failed', description: error instanceof Error ? error.message : 'Unknown error', variant: 'destructive' });
     }
-  };
-
-  const triggerSyncWorker = () => syncFunction('worker', 'sync-worker');
-  const syncPosts = () => syncFunction('posts', 'scrape-posts', { traderLimit: options.postLimit });
-  const syncDailyMovers = () => syncFunction('dailyMovers', 'scrape-daily-movers');
-
-  const syncAll = async () => {
-    for (let i = 0; i < 3; i++) {
-      await triggerSyncWorker();
-    }
-    if (options.postLimit > 0) {
-      await syncPosts();
-    }
-    await syncDailyMovers();
-  };
-
-  // Build pipeline stages from sync state
-  const tradersState = syncStates?.find(s => s.id === 'traders');
-  const estimatedTotalTraders = (tradersState?.total_pages || 1) * 10; // ~10 traders per page
-
-  const getStatusType = (status: string): 'idle' | 'paginating' | 'complete' => {
-    if (status === 'paginating') return 'paginating';
-    if (status === 'complete') return 'complete';
-    return 'idle';
-  };
-
-  const pipelineStages = [
-    {
-      id: 'discovery',
-      label: 'Traders Found',
-      current: dataCounts?.total_traders || 0,
-      total: estimatedTotalTraders,
-      status: getStatusType(tradersState?.status || 'idle'),
-      icon: <Users className="h-4 w-4" />,
-    },
-    {
-      id: 'details',
-      label: 'Details Synced',
-      current: dataCounts?.synced_traders || 0,
-      total: dataCounts?.total_traders || 0,
-      status: 'idle' as const,
-      icon: <BarChart3 className="h-4 w-4" />,
-    },
-    {
-      id: 'metrics',
-      label: 'With Metrics',
-      current: dataCounts?.traders_with_sharpe || 0,
-      total: dataCounts?.total_traders || 0,
-      status: 'idle' as const,
-      icon: <TrendingUp className="h-4 w-4" />,
-    },
-    {
-      id: 'assets',
-      label: 'Assets',
-      current: dataCounts?.total_assets || 0,
-      total: dataCounts?.total_assets || 0,
-      status: 'idle' as const,
-      icon: <Package className="h-4 w-4" />,
-    },
-  ];
-
-  // Build known issues
-  const knownIssues: KnownIssue[] = [];
-  
-  if (dataCounts?.total_performance === 0) {
-    knownIssues.push({
-      id: 'performance-404',
-      severity: 'critical',
-      message: 'Performance API returns 404 - monthly returns cannot be synced',
-    });
-  }
-  
-  if (dataCounts && dataCounts.traders_with_risk_score < dataCounts.total_traders * 0.5) {
-    knownIssues.push({
-      id: 'risk-score-low',
-      severity: 'warning',
-      message: `Only ${dataCounts.traders_with_risk_score}/${dataCounts.total_traders} traders have risk scores (${((dataCounts.traders_with_risk_score / dataCounts.total_traders) * 100).toFixed(0)}%)`,
-    });
-  }
-  
-  if (dataCounts && dataCounts.assets_with_sector < dataCounts.total_assets * 0.1) {
-    knownIssues.push({
-      id: 'sectors-low',
-      severity: 'warning',
-      message: `Asset sectors not enriched: ${dataCounts.assets_with_sector}/${dataCounts.total_assets} (${((dataCounts.assets_with_sector / dataCounts.total_assets) * 100).toFixed(1)}%)`,
-    });
-  }
-
-  // Trader fields for health card
-  const traderFields = dataCounts ? [
-    { label: 'Basic Info (synced)', current: dataCounts.synced_traders, total: dataCounts.total_traders },
-    { label: 'Holdings', current: dataCounts.traders_with_holdings, total: dataCounts.total_traders },
-    { label: 'Trades', current: dataCounts.traders_with_trades, total: dataCounts.total_traders },
-    { label: 'Gain 12m', current: dataCounts.traders_with_gain_12m, total: dataCounts.total_traders },
-    { label: 'Max Drawdown', current: dataCounts.traders_with_max_drawdown, total: dataCounts.total_traders },
-    { label: 'Risk Score', current: dataCounts.traders_with_risk_score, total: dataCounts.total_traders },
-    { label: 'Sharpe Ratio', current: dataCounts.traders_with_sharpe, total: dataCounts.total_traders },
-    { label: 'Sortino Ratio', current: dataCounts.traders_with_sortino, total: dataCounts.total_traders },
-    { label: 'Alpha', current: dataCounts.traders_with_alpha, total: dataCounts.total_traders },
-    { label: 'Beta', current: dataCounts.traders_with_beta, total: dataCounts.total_traders },
-    { label: 'Volatility', current: dataCounts.traders_with_volatility, total: dataCounts.total_traders },
-    { label: 'Monthly Returns', current: dataCounts.traders_with_performance, total: dataCounts.total_traders, hint: 'API returns 404' },
-  ] : [];
-
-  // Asset fields for health card
-  const assetFields = dataCounts ? [
-    { label: 'Symbol & Name', current: dataCounts.total_assets, total: dataCounts.total_assets },
-    { label: 'Current Price', current: dataCounts.assets_with_price, total: dataCounts.total_assets },
-    { label: 'Sector', current: dataCounts.assets_with_sector, total: dataCounts.total_assets },
-    { label: 'Market Cap', current: dataCounts.assets_with_market_cap, total: dataCounts.total_assets },
-  ] : [];
-
-  // Estimate time based on options
-  const estimateTime = () => {
-    let seconds = 5;
-    if (options.enableCrossCheck) seconds += 120;
-    if (options.force) seconds += 30;
-    if (options.postLimit > 0) seconds += options.postLimit * 10;
-    return seconds < 60 ? `~${seconds}s` : `~${Math.ceil(seconds / 60)}m`;
-  };
-
-  const estimateCredits = () => {
-    let credits = 0;
-    if (options.enableCrossCheck) credits += 20;
-    credits += options.postLimit;
-    return credits;
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold mb-2">Admin: Data Sync</h1>
-        <p className="text-muted-foreground">
-          Continuous sync runs every 2 minutes. Pagination: page {tradersState?.last_page || 0}/{tradersState?.total_pages || '?'}
-        </p>
-      </div>
-
-      {/* Known Issues Alert */}
-      <KnownIssuesAlert issues={knownIssues} />
-
-      {/* Pipeline Status */}
-      <PipelineStatus stages={pipelineStages} />
-
-      {/* Data Health Cards */}
-      <div className="grid gap-6 md:grid-cols-2">
-        <DataHealthCard
-          title={`Trader Fields (${dataCounts?.total_traders || 0} traders)`}
-          icon={<Users className="h-4 w-4" />}
-          fields={traderFields}
-        />
-        <DataHealthCard
-          title={`Asset Fields (${dataCounts?.total_assets || 0} assets)`}
-          icon={<Package className="h-4 w-4" />}
-          fields={assetFields}
-        />
-      </div>
-
-      {/* Summary Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <Card className="p-4 text-center">
-          <div className="text-3xl font-bold text-primary">{dataCounts?.total_holdings || 0}</div>
-          <div className="text-xs text-muted-foreground">Total Holdings</div>
-        </Card>
-        <Card className="p-4 text-center">
-          <div className="text-3xl font-bold text-primary">{dataCounts?.total_trades || 0}</div>
-          <div className="text-xs text-muted-foreground">Total Trades</div>
-        </Card>
-        <Card className="p-4 text-center">
-          <div className="text-3xl font-bold text-primary">{dataCounts?.total_posts || 0}</div>
-          <div className="text-xs text-muted-foreground">Posts Scraped</div>
-        </Card>
-        <Card className="p-4 text-center">
-          <div className="text-3xl font-bold text-primary">{dataCounts?.total_performance || 0}</div>
-          <div className="text-xs text-muted-foreground">Performance Records</div>
-        </Card>
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Manual Sync Actions */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Play className="h-4 w-4" />
-              Manual Sync
-            </CardTitle>
-            <CardDescription>Trigger the sync worker manually</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex gap-2">
-              <Button 
-                onClick={triggerSyncWorker} 
-                disabled={syncStatus.worker.isLoading}
-                className="flex-1"
-              >
-                {syncStatus.worker.isLoading ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                )}
-                Sync Once
-              </Button>
-              <Button onClick={syncAll} variant="outline" className="flex-1">
-                Sync All (3x)
-              </Button>
+    <div className="max-w-7xl mx-auto space-y-8 p-6">
+      
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">System Monitor</h1>
+          <p className="text-muted-foreground mt-1">Real-time status of data synchronization pipelines</p>
+        </div>
+        <div className="flex items-center gap-4">
+            <div className="text-right hidden sm:block">
+                <p className="text-sm font-medium">System Status</p>
+                <div className="flex items-center gap-2 text-xs text-green-500">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                    </span>
+                    Operational
+                </div>
             </div>
-            
-            <div className="flex gap-2">
-              <Button
-                onClick={syncPosts}
-                disabled={syncStatus.posts.isLoading || options.postLimit === 0}
-                variant="outline"
-                size="sm"
-                className="flex-1"
-              >
-                {syncStatus.posts.isLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3 mr-1" />}
-                Posts
-              </Button>
-              <Button
-                onClick={syncDailyMovers}
-                disabled={syncStatus.dailyMovers.isLoading}
-                variant="outline"
-                size="sm"
-                className="flex-1"
-              >
-                {syncStatus.dailyMovers.isLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <TrendingUp className="h-3 w-3 mr-1" />}
-                Daily Movers
-              </Button>
-            </div>
-
-            {syncStatus.worker.message && (
-              <p className={`text-xs ${syncStatus.worker.success ? 'text-green-600' : 'text-destructive'}`}>
-                {syncStatus.worker.message}
-              </p>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Recent Activity */}
-        <SyncActivityLog activities={activities} />
+        </div>
       </div>
 
-      {/* Scraping Options */}
+      {/* Main Status Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        
+        {/* Traders Pipeline (The Heavy Lifter) */}
+        <Card className="border-t-4 border-t-blue-500 shadow-sm relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-4 opacity-10"><Users className="w-24 h-24" /></div>
+            <CardHeader>
+                <CardTitle className="flex justify-between items-center">
+                    <span>Trader Profiles</span>
+                    {isProcessing && <Loader2 className="animate-spin h-4 w-4 text-blue-500" />}
+                </CardTitle>
+                <CardDescription>Deep profile & portfolio sync</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Queue Progress</span>
+                        <span className="font-medium">{stats?.completed || 0} / {stats?.total || 0}</span>
+                    </div>
+                    <Progress value={progressPct} className="h-2" />
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4 pt-2">
+                    <div className="space-y-1">
+                        <p className="text-xs text-muted-foreground uppercase tracking-wider">Pending</p>
+                        <p className="text-2xl font-bold text-yellow-600">{stats?.pending || 0}</p>
+                    </div>
+                    <div className="space-y-1">
+                        <p className="text-xs text-muted-foreground uppercase tracking-wider">Est. Time</p>
+                        <p className="text-2xl font-bold text-gray-700">~{estimatedHoursLeft}h</p>
+                    </div>
+                </div>
+            </CardContent>
+            <CardFooter className="bg-muted/30 p-3 px-6 flex justify-between items-center">
+                <div className="text-xs text-muted-foreground">
+                    Last active: {getState('trader_details')?.last_run ? formatDistanceToNow(new Date(getState('trader_details')!.last_run), { addSuffix: true }) : 'Never'}
+                </div>
+                <div className="flex gap-2">
+                    <Button size="sm" variant="ghost" onClick={runDiscovery} disabled={isDiscovering}>
+                        {isDiscovering ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={runProcessing} disabled={isProcessing}>
+                        {isProcessing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
+                    </Button>
+                </div>
+            </CardFooter>
+        </Card>
+
+        {/* Market Data Pipeline */}
+        <Card className="border-t-4 border-t-green-500 shadow-sm relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-4 opacity-10"><TrendingUp className="w-24 h-24" /></div>
+            <CardHeader>
+                <CardTitle>Market Data</CardTitle>
+                <CardDescription>Assets, Prices & Movers</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-green-100 rounded-lg"><Package className="h-5 w-5 text-green-600" /></div>
+                        <div>
+                            <p className="font-medium">Assets</p>
+                            <p className="text-xs text-muted-foreground">
+                                Last: {getState('assets')?.last_run ? formatDistanceToNow(new Date(getState('assets')!.last_run), { addSuffix: true }) : 'Never'}
+                            </p>
+                        </div>
+                    </div>
+                    <Button size="sm" variant="outline" onClick={syncAssets} disabled={isSyncingAssets}>
+                        {isSyncingAssets ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Sync'}
+                    </Button>
+                </div>
+
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-purple-100 rounded-lg"><TrendingUp className="h-5 w-5 text-purple-600" /></div>
+                        <div>
+                            <p className="font-medium">Daily Movers</p>
+                            <p className="text-xs text-muted-foreground">
+                                Last: {getState('daily_movers')?.last_run ? formatDistanceToNow(new Date(getState('daily_movers')!.last_run), { addSuffix: true }) : 'Never'}
+                            </p>
+                        </div>
+                    </div>
+                    <Button size="sm" variant="outline" onClick={syncDailyMovers} disabled={isSyncingMovers}>
+                        {isSyncingMovers ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Sync'}
+                    </Button>
+                </div>
+            </CardContent>
+        </Card>
+
+        {/* Social Pipeline */}
+        <Card className="border-t-4 border-t-pink-500 shadow-sm relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-4 opacity-10"><FileText className="w-24 h-24" /></div>
+            <CardHeader>
+                <CardTitle>Social Feed</CardTitle>
+                <CardDescription>Discussions & Sentiment</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                <div className="flex flex-col gap-4">
+                    <div className="flex items-center justify-between">
+                        <div className="space-y-1">
+                            <p className="text-sm font-medium">Sync Status</p>
+                            <div className="flex items-center gap-2">
+                                <div className={`h-2.5 w-2.5 rounded-full ${isSyncingPosts ? 'bg-yellow-400 animate-pulse' : 'bg-green-500'}`}></div>
+                                <span className="text-xs text-muted-foreground">{isSyncingPosts ? 'Syncing...' : 'Idle'}</span>
+                            </div>
+                        </div>
+                        <Button size="sm" onClick={syncPosts} disabled={isSyncingPosts}>
+                            {isSyncingPosts ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RotateCcw className="h-4 w-4 mr-2" />}
+                            Sync Now
+                        </Button>
+                    </div>
+                    
+                    <div className="rounded-lg bg-muted p-3">
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+                            <Clock className="h-3 w-3" />
+                            <span>Schedule: Every 10 mins</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <CheckCircle2 className="h-3 w-3" />
+                            <span>Last run: {getState('posts')?.last_run ? formatDistanceToNow(new Date(getState('posts')!.last_run), { addSuffix: true }) : 'Unknown'}</span>
+                        </div>
+                    </div>
+                </div>
+            </CardContent>
+        </Card>
+      </div>
+
+      {/* Queue Details Table */}
       <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Zap className="h-4 w-4" />
-            Scraping Options
-          </CardTitle>
-          <CardDescription>Configure Firecrawl-based scraping (uses credits)</CardDescription>
+        <CardHeader>
+          <div className="flex justify-between items-center">
+            <div>
+                <CardTitle>Active Queue</CardTitle>
+                <CardDescription>Live view of the trader synchronization queue</CardDescription>
+            </div>
+            {stats?.failed > 0 && (
+                <Button variant="outline" size="sm" onClick={resetFailed} className="text-red-500 hover:text-red-600">
+                  <RotateCcw className="h-3 w-3 mr-2" /> Retry {stats.failed} Failed
+                </Button>
+            )}
+          </div>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label className="flex items-center gap-2">
-                <Shield className="h-4 w-4" />
-                Enable Cross-Checking
-              </Label>
-              <p className="text-xs text-muted-foreground">Uses ~20 Firecrawl credits</p>
-            </div>
-            <Switch
-              checked={options.enableCrossCheck}
-              onCheckedChange={(checked) => setOptions(prev => ({ ...prev, enableCrossCheck: checked }))}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label className="flex items-center gap-2">
-                <FileText className="h-4 w-4" />
-                Post Limit
-              </Label>
-              <span className="text-sm font-medium">
-                {options.postLimit === 0 ? 'Disabled' : `${options.postLimit} traders`}
-              </span>
-            </div>
-            <Slider
-              value={[options.postLimit]}
-              onValueChange={([value]) => setOptions(prev => ({ ...prev, postLimit: value }))}
-              min={0}
-              max={20}
-              step={1}
-            />
-          </div>
-
-          <div className="flex items-center gap-4 pt-2 border-t text-sm text-muted-foreground">
-            <div className="flex items-center gap-1">
-              <Clock className="h-3 w-3" />
-              Est: <strong>{estimateTime()}</strong>
-            </div>
-            <div className="flex items-center gap-1">
-              <Zap className="h-3 w-3" />
-              Credits: <strong>~{estimateCredits()}</strong>
-            </div>
-          </div>
-        </CardContent>
+        <div className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Trader ID</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Retries</TableHead>
+                  <TableHead>Last Attempted</TableHead>
+                  <TableHead>Error</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {queueItems && queueItems.length > 0 ? (
+                  queueItems.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell className="font-mono font-medium">{item.trader_id}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className={
+                            item.status === 'COMPLETED' ? 'bg-green-100 text-green-700 border-green-200' :
+                            item.status === 'PROCESSING' ? 'bg-blue-100 text-blue-700 border-blue-200' :
+                            item.status === 'FAILED' ? 'bg-red-100 text-red-700 border-red-200' :
+                            'bg-gray-100 text-gray-700'
+                        }>
+                          {item.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{item.retry_count}</TableCell>
+                      <TableCell className="text-muted-foreground text-xs">
+                        {item.last_attempted_at ? formatDistanceToNow(new Date(item.last_attempted_at), { addSuffix: true }) : '-'}
+                      </TableCell>
+                      <TableCell className="text-red-500 text-xs max-w-[300px] truncate" title={item.error_message}>
+                        {item.error_message || '-'}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
+                      Queue is empty.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+        </div>
       </Card>
     </div>
   );

@@ -1,4 +1,4 @@
-project_id = "vzqwhqgpurkylqfwiowa"
+project_id = "xgvaibxxiwfraklfbwey"
 
 [functions.sync-traders]
 verify_jwt = false
@@ -31,4 +31,13 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.refresh-asset]
+verify_jwt = false
+
+[functions.discover-traders]
+verify_jwt = false
+
+[functions.process-queue]
+verify_jwt = false
+
+[functions.run-migration]
 verify_jwt = false

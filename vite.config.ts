@@ -11,10 +11,9 @@ export default defineConfig(({ mode }) => ({
     proxy: {
       // Proxy /functions/* to the Supabase Edge Functions host to avoid CORS during local development
       '/functions': {
-        target: 'https://vzqwhqgpurkylqfwiowa.supabase.co',
+        target: 'https://xgvaibxxiwfraklfbwey.supabase.co',
         changeOrigin: true,
         secure: true,
-        rewrite: (path) => path.replace(/^\/functions/, '/functions')
       }
     },
   },
