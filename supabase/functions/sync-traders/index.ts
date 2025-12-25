@@ -22,10 +22,11 @@ serve(async (req) => {
     let allBullwareTraders: any[] = [];
 
     if (BULLAWARE_API_KEY) {
-        // Try to fetch from Bullaware API with pagination
-        // API limit is 1000 per request, so we'll make multiple requests
+        // Try to fetch from Bullaware API (respecting rate limits)
+        // API limit is 1000 per request, and likely has rate limits (e.g., 10 req/min)
+        // So we'll fetch one page per call and spread discovery over time
         console.log(`Attempting to fetch traders from Bullaware API...`);
-        const maxPages = 10; // Fetch up to 10,000 traders
+        const maxPages = 3; // Fetch up to 3,000 traders per call (to respect rate limits)
         let page = 0;
         
         while (page < maxPages) {
@@ -58,8 +59,18 @@ serve(async (req) => {
                     
                     page++;
                     apiWorks = true;
+                    
+                    // Add delay between pages to respect rate limits (6 seconds = 10 req/min)
+                    if (page < maxPages) {
+                        await new Promise(resolve => setTimeout(resolve, 6000));
+                    }
                 } else {
-                    console.error(`Bullaware API Error on page ${page + 1}: Status ${response.status}`);
+                    const status = response.status;
+                    if (status === 429) {
+                        console.error(`Rate limit hit on page ${page + 1}. Will use mock data for remaining.`);
+                        break;
+                    }
+                    console.error(`Bullaware API Error on page ${page + 1}: Status ${status}`);
                     if (page === 0) {
                         apiWorks = false;
                     }

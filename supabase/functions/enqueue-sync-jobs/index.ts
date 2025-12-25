@@ -22,32 +22,27 @@ serve(async (req) => {
     );
 
     if (sync_traders) {
-        console.log('sync_traders is true, invoking sync-traders function multiple times to create thousands of traders');
+        console.log('sync_traders is true, invoking sync-traders function (respecting API rate limits)');
         
-        // Call sync-traders multiple times to create thousands of traders
-        // Each call creates up to 1000 traders, so we need 5+ calls to reach 5000
-        const targetCalls = 6; // Create 6000 traders total
-        const results = [];
+        // Call sync-traders once - it will fetch up to 3000 traders from Bullaware API
+        // (with 6-second delays between pages to respect rate limits)
+        // If API fails or rate limited, it falls back to mock data (1000 traders per call)
+        const { data: syncResult, error: syncError } = await supabase.functions.invoke('sync-traders');
         
-        for (let i = 0; i < targetCalls; i++) {
-            console.log(`Calling sync-traders (${i + 1}/${targetCalls})...`);
-            const { data: syncResult, error: syncError } = await supabase.functions.invoke('sync-traders');
-            
-            if (syncError) {
-                console.error(`Error on call ${i + 1}:`, syncError);
-                results.push({ call: i + 1, error: syncError });
-            } else {
-                results.push({ call: i + 1, success: true, synced: syncResult?.synced || 0 });
-                console.log(`Call ${i + 1} completed: ${syncResult?.synced || 0} traders synced`);
-            }
-            
-            // Wait a bit between calls to avoid overwhelming the database
-            if (i < targetCalls - 1) {
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            }
+        if (syncError) {
+            console.error("Error invoking sync-traders:", syncError);
+            return new Response(JSON.stringify({ 
+                error: "Failed to invoke sync-traders", 
+                details: syncError 
+            }), {
+                headers: { ...corsHeaders, "Content-Type": "application/json" },
+                status: 500,
+            });
         }
         
-        // After all sync-traders calls complete, enqueue jobs for all traders
+        console.log("sync-traders completed:", syncResult);
+        
+        // After sync-traders completes, enqueue jobs for all traders (including new ones)
         await new Promise(resolve => setTimeout(resolve, 2000));
         
         console.log("Enqueuing jobs for all traders...");
@@ -59,12 +54,10 @@ serve(async (req) => {
             console.error("Error enqueuing jobs after sync:", enqueueError);
         }
         
-        const totalSynced = results.reduce((sum, r) => sum + (r.synced || 0), 0);
-        
         return new Response(JSON.stringify({ 
-            message: `Sync-traders completed: ${totalSynced} total traders synced across ${targetCalls} calls`, 
-            calls: results,
-            total_synced: totalSynced,
+            message: `Sync-traders completed: ${syncResult?.synced || 0} traders synced. Total in database: ${syncResult?.total_traders || 0}`, 
+            sync_result: syncResult,
+            total_traders: syncResult?.total_traders || 0,
             enqueue_result: enqueueResult
         }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },

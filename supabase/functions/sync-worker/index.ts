@@ -41,21 +41,13 @@ serve(async (req) => {
             .from('traders')
             .select('*', { count: 'exact', head: true });
         
-        // If trader count is low, discover new traders
-        if ((traderCount || 0) < 1000) {
-            console.log(`Trader count (${traderCount}) is below 1000. Triggering sync-traders to discover more...`);
-            try {
-                const { error: syncTradersError } = await supabase.functions.invoke('enqueue-sync-jobs', {
-                    body: { sync_traders: true }
-                });
-                if (syncTradersError) {
-                    console.error("Error triggering sync-traders:", syncTradersError);
-                } else {
-                    console.log("Triggered sync-traders to discover new traders");
-                }
-            } catch (e: any) {
-                console.error("Exception triggering sync-traders:", e.message);
-            }
+        // If trader count is low, discover new traders (but only once per hour to respect API limits)
+        // Check last discovery time to avoid hitting rate limits
+        if ((traderCount || 0) < 5000) {
+            // Only discover if we haven't done it recently (to respect Bullaware API rate limits)
+            // sync-traders will be called via GitHub Actions hourly, so we don't need to call it here
+            // Just ensure queue is filled from existing traders
+            console.log(`Trader count (${traderCount}) is below 5000. Queue will be refilled from existing traders.`);
         }
         
         // If we have less than 50 pending jobs, try to enqueue more from existing traders

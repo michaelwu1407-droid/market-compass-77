@@ -19,8 +19,8 @@ jobs:
             -H "Content-Type: application/json" \
             https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/sync-worker
 
-      - name: Call discover-traders (every hour)
-        if: github.event.schedule == '0 * * * *' || github.event_name == 'workflow_dispatch'
+      - name: Discover new traders (every 6 hours to respect API limits)
+        if: github.event.schedule == '0 */6 * * *' || github.event_name == 'workflow_dispatch'
         run: |
           curl -X POST \
             -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhndmFpYnh4aXdmcmFrbGZid2V5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYzODYwMjcsImV4cCI6MjA4MTk2MjAyN30.6WpGcdGeuFngazeTP5tiwVL--htj7AUqsLsTqW5Iz7M" \
