@@ -53,3 +53,6 @@ verify_jwt = false
 
 [functions.sync-diagnostics]
 verify_jwt = false
+
+[functions.run-cron-migration]
+verify_jwt = false
