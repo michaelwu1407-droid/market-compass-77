@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch:
+  workflow_dispatch: # Can be manually triggered from GitHub Actions tab
 
 jobs:
   deploy:
