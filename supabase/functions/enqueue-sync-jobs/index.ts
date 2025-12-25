@@ -107,14 +107,47 @@ serve(async (req) => {
       const activeThreshold = new Date(Date.now() - hours_active * 3600000).toISOString();
 
       // Get stale traders - NO LIMIT, fetch all that need syncing
+      // Query for traders with updated_at < threshold OR updated_at IS NULL
       const { data: staleTraders, error: staleError } = await supabase
         .from('traders')
         .select('id')
         .or(`updated_at.lt.${staleThreshold},updated_at.is.null`);
 
-      if (staleError) throw staleError;
-      staleTraders.forEach(t => traderIdsToEnqueue.add(t.id));
-      console.log(`Found ${staleTraders.length} stale traders (older than ${hours_stale}h).`);
+      if (staleError) {
+        console.error("Error fetching stale traders:", staleError);
+        // Try alternative query format if the first fails
+        const { data: staleTradersAlt, error: staleErrorAlt } = await supabase
+          .from('traders')
+          .select('id')
+          .lt('updated_at', staleThreshold);
+        
+        if (staleErrorAlt) {
+          console.error("Alternative query also failed:", staleErrorAlt);
+          throw staleError;
+        }
+        
+        // Also get traders with null updated_at
+        const { data: nullTraders, error: nullError } = await supabase
+          .from('traders')
+          .select('id')
+          .is('updated_at', null);
+        
+        if (nullError) {
+          console.error("Error fetching null updated_at traders:", nullError);
+        } else if (nullTraders) {
+          nullTraders.forEach(t => traderIdsToEnqueue.add(t.id));
+        }
+        
+        if (staleTradersAlt) {
+          staleTradersAlt.forEach(t => traderIdsToEnqueue.add(t.id));
+        }
+        console.log(`Found ${(staleTradersAlt?.length || 0) + (nullTraders?.length || 0)} stale traders (older than ${hours_stale}h).`);
+      } else {
+        if (staleTraders) {
+          staleTraders.forEach(t => traderIdsToEnqueue.add(t.id));
+          console.log(`Found ${staleTraders.length} stale traders (older than ${hours_stale}h).`);
+        }
+      }
 
       // Get active traders - NO LIMIT
       const { data: recentPosters, error: postersError } = await supabase
