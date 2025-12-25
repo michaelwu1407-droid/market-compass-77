@@ -22,21 +22,23 @@ jobs:
             https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/sync-worker || echo "Error calling sync-worker"
 
       - name: Discover new traders (every 6 hours to respect API limits)
-        if: github.event.schedule == '0 */6 * * *' || github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' || (github.event.schedule && github.event.schedule.cron == '0 */6 * * *')
         run: |
+          echo "Discovering new traders at $(date)"
           curl -X POST \
             -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhndmFpYnh4aXdmcmFrbGZid2V5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYzODYwMjcsImV4cCI6MjA4MTk2MjAyN30.6WpGcdGeuFngazeTP5tiwVL--htj7AUqsLsTqW5Iz7M" \
             -H "Content-Type: application/json" \
             -d '{"sync_traders": true}' \
-            https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/enqueue-sync-jobs || true
+            -w "\nHTTP Status: %{http_code}\n" \
+            https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/enqueue-sync-jobs || echo "Error discovering traders"
       
-      - name: Enqueue jobs if queue is low (every run)
-        if: github.event.schedule != '0 */6 * * *'  # Don't enqueue if we just discovered traders
+      - name: Enqueue jobs for stale traders (every run)
         run: |
           echo "Enqueuing jobs for stale traders at $(date)"
           curl -X POST \
             -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhndmFpYnh4aXdmcmFrbGZid2V5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYzODYwMjcsImV4cCI6MjA4MTk2MjAyN30.6WpGcdGeuFngazeTP5tiwVL--htj7AUqsLsTqW5Iz7M" \
             -H "Content-Type: application/json" \
             -d '{"hours_stale": 6, "hours_active": 7 * 24}' \
-            https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/enqueue-sync-jobs || true
+            -w "\nHTTP Status: %{http_code}\n" \
+            https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/enqueue-sync-jobs || echo "Error enqueuing jobs"
 
