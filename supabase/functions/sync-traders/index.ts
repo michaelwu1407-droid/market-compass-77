@@ -22,32 +22,61 @@ serve(async (req) => {
     let allBullwareTraders: any[] = [];
 
     if (BULLAWARE_API_KEY) {
-        const bullwareUrl = `https://api.bullaware.com/v1/investors?limit=1000`;
-        console.log(`Attempting to fetch traders from Bullaware: ${bullwareUrl}`);
+        // Try to fetch from Bullaware API with pagination
+        // API limit is 1000 per request, so we'll make multiple requests
+        console.log(`Attempting to fetch traders from Bullaware API...`);
+        const maxPages = 10; // Fetch up to 10,000 traders
+        let page = 0;
         
-        try {
-            const response = await fetch(bullwareUrl, {
-                headers: {
-                    'Authorization': `Bearer ${BULLAWARE_API_KEY}`,
-                    'Content-Type': 'application/json',
-                },
-                signal: AbortSignal.timeout(15000) // 15 second timeout
-            });
+        while (page < maxPages) {
+            try {
+                const bullwareUrl = `https://api.bullware.com/v1/investors?limit=1000&offset=${page * 1000}`;
+                const response = await fetch(bullwareUrl, {
+                    headers: {
+                        'Authorization': `Bearer ${BULLAWARE_API_KEY}`,
+                        'Content-Type': 'application/json',
+                    },
+                    signal: AbortSignal.timeout(15000)
+                });
 
-            if (response.ok) {
-                console.log("Successfully fetched from Bullaware API.");
-                const data = await response.json();
-                allBullwareTraders = data.items || data.data || data.investors || (Array.isArray(data) ? data : []);
-                apiWorks = true;
-            } else {
-                const responseBody = await response.text();
-                console.error(`Bullaware API Error: Status ${response.status}`);
-                console.error(`Response Body Snippet: ${responseBody.slice(0, 500)}`);
-                apiWorks = false;
+                if (response.ok) {
+                    const data = await response.json();
+                    const pageTraders = data.items || data.data || data.investors || (Array.isArray(data) ? data : []);
+                    
+                    if (pageTraders.length === 0) {
+                        console.log(`Page ${page + 1}: No more traders, stopping pagination.`);
+                        break;
+                    }
+                    
+                    allBullwareTraders = allBullwareTraders.concat(pageTraders);
+                    console.log(`Page ${page + 1}: Fetched ${pageTraders.length} traders (total: ${allBullwareTraders.length})`);
+                    
+                    if (pageTraders.length < 1000) {
+                        // Last page
+                        break;
+                    }
+                    
+                    page++;
+                    apiWorks = true;
+                } else {
+                    console.error(`Bullaware API Error on page ${page + 1}: Status ${response.status}`);
+                    if (page === 0) {
+                        apiWorks = false;
+                    }
+                    break;
+                }
+            } catch (error) {
+                console.error(`Fetch to Bullaware failed on page ${page + 1}:`, error.message);
+                if (page === 0) {
+                    apiWorks = false;
+                }
+                break;
             }
-        } catch (error) {
-             console.error("Fetch to Bullaware failed:", error.message);
-             apiWorks = false;
+        }
+        
+        if (allBullwareTraders.length > 0) {
+            console.log(`Successfully fetched ${allBullwareTraders.length} traders from Bullaware API.`);
+            apiWorks = true;
         }
     } else {
         console.log("BULLAWARE_API_KEY not found.");

@@ -298,26 +298,14 @@ export default function AdminSyncPage() {
       
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">System Monitor</h1>
-          <p className="text-muted-foreground mt-1">Real-time status of data synchronization pipelines</p>
+          <h1 className="text-3xl font-bold tracking-tight">Sync Status</h1>
+          <p className="text-muted-foreground mt-1">Continuous trader discovery and profile synchronization</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={runVerification} disabled={isVerifying}>
-            {isVerifying ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CheckCircle2 className="h-4 w-4 mr-2" />}
-            Verify Deployment
-          </Button>
-          <Button variant="outline" size="sm" onClick={runCronMigration} disabled={isVerifying}>
-            {isVerifying ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Clock className="h-4 w-4 mr-2" />}
-            Fix Cron Jobs
-          </Button>
-          <Button variant="outline" size="sm" onClick={inspectJobs}>
-            <FileText className="h-4 w-4 mr-2" />
-            Inspect Jobs
-          </Button>
-          {(stats?.pending ?? 0) > 0 && (
+          {(stats?.pending ?? 0) > 100 && (
             <Button variant="default" size="sm" onClick={runForceProcessing} disabled={isForceProcessing}>
               {isForceProcessing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Zap className="h-4 w-4 mr-2" />}
-              Force Process Queue
+              Clear Backlog
             </Button>
           )}
         </div>
@@ -369,23 +357,17 @@ export default function AdminSyncPage() {
                   </div>
                 )}
             </CardContent>
-            <CardFooter className="bg-muted/30 p-3 px-6 flex justify-between items-center">
-                <div className="text-xs text-muted-foreground">
-                    Last active: {getState('trader_details')?.last_run ? formatDistanceToNow(new Date(getState('trader_details')!.last_run), { addSuffix: true }) : 'Never'}
-                </div>
-                <div className="flex gap-2">
-                    <Button title="Discover New Traders & Create Jobs" size="sm" variant="default" onClick={runDiscovery} disabled={isDiscovering}>
-                        {isDiscovering ? <Loader2 className="h-3 w-3 animate-spin mr-2" /> : <Users className="h-3 w-3 mr-2" />}
-                        {isDiscovering ? 'Discovering...' : 'Discover New Traders'}
-                    </Button>
-                    <Button title="Dispatch Batch" size="sm" variant="ghost" onClick={runProcessing} disabled={isProcessing}>
-                        {isProcessing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
-                    </Button>
-                    {(stats?.pending ?? 0) > 10 && (
-                      <Button title="Force Process All" size="sm" variant="ghost" onClick={runForceProcessing} disabled={isForceProcessing}>
-                        {isForceProcessing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Package className="h-3 w-3" />}
-                      </Button>
-                    )}
+            <CardFooter className="bg-muted/30 p-3 px-6">
+                <div className="text-xs text-muted-foreground w-full">
+                    <div className="flex justify-between items-center">
+                        <span>Last sync: {getState('trader_details')?.last_run ? formatDistanceToNow(new Date(getState('trader_details')!.last_run), { addSuffix: true }) : 'Never'}</span>
+                        <span className={diagnostics?.worker_status?.appears_active ? 'text-green-600' : 'text-yellow-600'}>
+                            {diagnostics?.worker_status?.appears_active ? '● Active' : '○ Idle'}
+                        </span>
+                    </div>
+                    <div className="mt-1 text-xs">
+                        System automatically discovers new traders and syncs profiles every 2 minutes
+                    </div>
                 </div>
             </CardFooter>
         </Card>
