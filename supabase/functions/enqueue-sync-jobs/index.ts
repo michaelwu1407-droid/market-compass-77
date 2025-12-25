@@ -141,16 +141,21 @@ serve(async (req) => {
     // Check existing pending jobs to avoid duplicates (unless force mode)
     let jobsToInsert;
     if (force) {
-      // In force mode, create jobs for all traders (will update existing pending jobs)
+      // In force mode, create jobs for all traders
       // First, mark any existing pending/in_progress jobs as completed if they're old
       const oldThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(); // 24 hours ago
-      await supabase
+      const { count: markedCount } = await supabase
         .from('sync_jobs')
-        .update({ status: 'completed' })
+        .update({ status: 'completed', finished_at: new Date().toISOString() })
         .in('status', ['pending', 'in_progress'])
-        .lt('created_at', oldThreshold);
+        .lt('created_at', oldThreshold)
+        .select('id', { count: 'exact', head: true });
       
-      // Now create jobs for all traders (upsert will handle duplicates)
+      if (markedCount && markedCount > 0) {
+        console.log(`Force mode: Marked ${markedCount} old jobs as completed.`);
+      }
+      
+      // Now create jobs for all traders (INSERT allows multiple pending per trader)
       jobsToInsert = finalTraderIds.map(trader_id => ({
         trader_id,
         status: 'pending',
