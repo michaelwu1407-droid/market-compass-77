@@ -60,26 +60,26 @@ serve(async (req) => {
             console.log(`Trader count (${traderCount}) is below 5000. Queue will be refilled from existing traders.`);
         }
         
-        // If we have less than 100 pending jobs, try to enqueue more from existing traders
-        // Increased threshold to ensure queue stays full
-        if ((currentPending || 0) < 100) {
-            console.log(`Queue is low (${currentPending} pending). Enqueuing stale traders...`);
+        // NUCLEAR MODE: Always enqueue if pending < 200
+        if ((currentPending || 0) < 200) {
+            console.log(`Queue is low (${currentPending} pending). NUCLEAR MODE: Enqueuing ALL traders...`);
             try {
+                // Call with no parameters - will enqueue ALL traders
                 const { data: enqueueData, error: enqueueError } = await supabase.functions.invoke('enqueue-sync-jobs', {
-                    body: { hours_stale: 6, hours_active: 7 * 24 }
+                    body: {}
                 });
                 
                 if (enqueueError) {
-                    console.error("Error enqueuing jobs:", enqueueError);
+                    console.error("CRITICAL: Error enqueuing jobs:", enqueueError);
                     console.error("Enqueue error details:", JSON.stringify(enqueueError, null, 2));
                 } else {
-                    console.log("Enqueued new jobs:", JSON.stringify(enqueueData, null, 2));
-                    if (enqueueData && enqueueData.enqueued_count === 0) {
-                        console.warn("WARNING: enqueue-sync-jobs returned 0 jobs enqueued. This might indicate a problem.");
+                    console.log("NUCLEAR MODE enqueue result:", JSON.stringify(enqueueData, null, 2));
+                    if (enqueueData && enqueueData.jobs_created === 0) {
+                        console.error("CRITICAL: enqueue-sync-jobs returned 0 jobs created. This is a problem!");
                     }
                 }
             } catch (e: any) {
-                console.error("Exception enqueuing jobs:", e.message);
+                console.error("CRITICAL: Exception enqueuing jobs:", e.message);
                 console.error("Exception details:", e);
             }
         } else {

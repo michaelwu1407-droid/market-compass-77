@@ -21,17 +21,19 @@ jobs:
             -w "\nHTTP Status: %{http_code}\n" \
             https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/sync-worker || echo "Error calling sync-worker"
 
-      - name: Enqueue jobs for stale traders (every run)
+      - name: Enqueue ALL traders (NUCLEAR MODE - every run)
         run: |
-          echo "Enqueuing jobs for stale traders at $(date)"
+          echo "NUCLEAR MODE: Enqueuing ALL traders at $(date)"
           RESPONSE=$(curl -s -X POST \
             -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhndmFpYnh4aXdmcmFrbGZid2V5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYzODYwMjcsImV4cCI6MjA4MTk2MjAyN30.6WpGcdGeuFngazeTP5tiwVL--htj7AUqsLsTqW5Iz7M" \
             -H "Content-Type: application/json" \
-            -d '{"hours_stale": 6, "hours_active": 7 * 24}' \
+            -d '{}' \
             -w "\nHTTP Status: %{http_code}\n" \
             https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/enqueue-sync-jobs)
           echo "$RESPONSE"
-          if echo "$RESPONSE" | grep -q '"enqueued_count":0'; then
-            echo "WARNING: No jobs were enqueued. This might indicate a problem."
+          if echo "$RESPONSE" | grep -q '"jobs_created":0'; then
+            echo "CRITICAL ERROR: No jobs were created! This is a serious problem."
+          else
+            echo "SUCCESS: Jobs were created"
           fi
 
