@@ -1,0 +1,4 @@
+jobs:
+  sync-worker:
+    schedule: "* * * * *"
+    endpoint: "/sync-worker"
