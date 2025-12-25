@@ -1,244 +1,204 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Bullaware API Configuration
 const BULLAWARE_BASE = 'https://api.bullaware.com/v1';
 const ENDPOINTS = {
   investors: `${BULLAWARE_BASE}/investors`,
   investorDetails: (username: string) => `${BULLAWARE_BASE}/investors/${username}`,
-  portfolio: (username: string) => `${BULLAWARE_BASE}/investors/${username}/portfolio`,
-  trades: (username: string) => `${BULLAWARE_BASE}/investors/${username}/trades`,
   metrics: (username: string) => `${BULLAWARE_BASE}/investors/${username}/metrics`,
   riskScore: (username: string) => `${BULLAWARE_BASE}/investors/${username}/risk-score/monthly`,
   instruments: `${BULLAWARE_BASE}/instruments`,
 };
 
-const BATCH_SIZE_TRADERS = 50; // Fetch 50 traders per discovery run
-const BATCH_SIZE_DETAILS = 1;   // Sync 1 trader's details per run to stay under 60s
-const RATE_LIMIT_DELAY_MS = 6000; // 6s delay between Bullaware calls
-const STALE_HOURS_DETAILS = 2;  // Trader details are stale after 2 hours
-const STALE_HOURS_ASSETS = 24;  // Assets are stale after 24 hours
-const STALE_HOURS_TRADERS = 6;  // Re-discover trader list every 6 hours
+// Syncing Strategy Configuration
+const BATCH_SIZE_DISCOVERY = 50;  // How many traders to discover in one run.
+const BATCH_SIZE_PROCESSING = 1;   // How many traders to process in one run (kept low to stay under 60s timeout).
+const RATE_LIMIT_DELAY_MS = 6000;  // 6s delay between API calls to respect 10 req/min limit.
+const STALE_THRESHOLD_HOURS = {
+    DISCOVERY: 6, // Re-run discovery every 6 hours.
+    DETAILS: 2,   // Sync trader details if they are older than 2 hours.
+    ASSETS: 24,   // Refresh asset list every 24 hours.
+};
 
+// --- Type Definitions ---
 interface SyncState {
   id: string;
   last_run: string | null;
-  last_page: number;
-  total_pages: number | null;
   status: string;
+  last_page: number;
+}
+interface Trader {
+  id: string;
+  etoro_username: string;
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function isStale(lastRun: string | null, hoursThreshold: number): boolean {
+// --- Utility Functions ---
+const delay = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+const isStale = (lastRun: string | null, hours: number): boolean => {
   if (!lastRun) return true;
-  const lastRunDate = new Date(lastRun);
-  const now = new Date();
-  const hoursDiff = (now.getTime() - lastRunDate.getTime()) / (1000 * 60 * 60);
-  return hoursDiff >= hoursThreshold;
+  const hoursDiff = (new Date().getTime() - new Date(lastRun).getTime()) / (1000 * 60 * 60);
+  return hoursDiff >= hours;
+};
+
+// --- Core API Logic ---
+
+/**
+ * Fetches all the detailed data for a single trader from Bullaware and updates the database.
+ * This is the REAL implementation, moved from the ignored `process-queue` function.
+ */
+async function syncCompleteTraderDetails(supabase: SupabaseClient, apiKey: string, trader: Trader) {
+  const { id, etoro_username } = trader;
+  console.log(`[sync-worker] Starting full detail sync for ${etoro_username}`);
+
+  // 1. Fetch Investor Details
+  const detailsRes = await fetch(ENDPOINTS.investorDetails(etoro_username), { headers: { 'Authorization': `Bearer ${apiKey}` } });
+  if (detailsRes.ok) {
+    const data = await detailsRes.json();
+    const investor = data.investor || data.data || data;
+    await supabase.from('traders').update({
+       profitable_weeks_pct: investor.profitableWeeksPct,
+       profitable_months_pct: investor.profitableMonthsPct,
+       daily_drawdown: investor.dailyDD,
+       weekly_drawdown: investor.weeklyDD,
+    }).eq('id', id);
+  }
+  await delay(RATE_LIMIT_DELAY_MS);
+
+  // 2. Fetch Risk Score
+  const riskRes = await fetch(ENDPOINTS.riskScore(etoro_username), { headers: { 'Authorization': `Bearer ${apiKey}` } });
+  if (riskRes.ok) {
+    const data = await riskRes.json();
+    const score = typeof data === 'number' ? data : (data.riskScore || data.points?.[data.points.length - 1]?.riskScore);
+    if (score) await supabase.from('traders').update({ risk_score: score }).eq('id', id);
+  }
+  await delay(RATE_LIMIT_DELAY_MS);
+
+  // 3. Fetch Metrics
+  const metricsRes = await fetch(ENDPOINTS.metrics(etoro_username), { headers: { 'Authorization': `Bearer ${apiKey}` } });
+  if (metricsRes.ok) {
+    const data = await metricsRes.json();
+    const m = data.data || data;
+    await supabase.from('traders').update({
+       sharpe_ratio: m.sharpeRatio,
+       sortino_ratio: m.sortinoRatio,
+       alpha: m.alpha,
+       beta: m.beta,
+    }).eq('id', id);
+  }
+
+  // 4. Finalize: Mark as synced
+  await supabase.from('traders').update({ details_synced_at: new Date().toISOString() }).eq('id', id);
+  console.log(`[sync-worker] Finished full detail sync for ${etoro_username}`);
 }
 
-// --- Main Worker Logic ---
+
+/**
+ * Discovers new traders from the Bullaware API and adds them to our database.
+ */
+async function discoverTraders(supabase: SupabaseClient, apiKey: string, state: SyncState | undefined) {
+    const currentPage = state?.status === 'paginating' ? state.last_page : 1;
+    console.log(`[sync-worker] Running discovery: page ${currentPage}`);
+
+    const response = await fetch(`${ENDPOINTS.investors}?page=${currentPage}&limit=${BATCH_SIZE_DISCOVERY}`, {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+    if (!response.ok) throw new Error(`Bullaware API error (traders): ${response.status}`);
+
+    const data = await response.json();
+    const traders = data.items || data.data || [];
+    const totalPages = Math.ceil((data.total || 0) / BATCH_SIZE_DISCOVERY) || 1;
+
+    if (traders.length > 0) {
+        const toUpsert = traders.map((t: any) => ({
+            etoro_username: t.username || t.userName,
+            display_name: t.displayName || t.fullName,
+            avatar_url: t.avatarUrl || t.avatar,
+            copiers: t.copiers ?? 0,
+        }));
+        await supabase.from('traders').upsert(toUpsert, { onConflict: 'etoro_username', ignoreDuplicates: true });
+    }
+
+    const isComplete = currentPage >= totalPages;
+    await supabase.from('sync_state').upsert({
+        id: 'traders_discovery',
+        status: isComplete ? 'idle' : 'paginating',
+        last_page: isComplete ? 1 : currentPage + 1,
+        last_run: isComplete ? new Date().toISOString() : state?.last_run,
+        updated_at: new Date().toISOString()
+    });
+
+    return { discovered: traders.length, page: currentPage, totalPages, status: isComplete ? 'idle' : 'paginating' };
+}
+
+/**
+ * Finds traders in our database whose details are missing or stale.
+ */
+async function getStaleTraders(supabase: SupabaseClient): Promise<Trader[]> {
+  const threshold = new Date();
+  threshold.setHours(threshold.getHours() - STALE_THRESHOLD_HOURS.DETAILS);
+
+  const { data, error } = await supabase
+    .from('traders')
+    .select('id, etoro_username')
+    .or(`details_synced_at.is.null,details_synced_at.lt.${threshold.toISOString()}`)
+    .order('copiers', { ascending: false })
+    .limit(BATCH_SIZE_PROCESSING);
+
+  if (error) {
+      console.error('[sync-worker] Error fetching stale traders:', error);
+      return [];
+  }
+  return data || [];
+}
+
+
+// --- Main Worker Entry Point ---
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-  const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
   const bullwareApiKey = Deno.env.get('BULLAWARE_API_KEY');
 
   if (!bullwareApiKey) {
-    return new Response(JSON.stringify({ error: 'BULLAWARE_API_KEY not set' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ error: 'BULLAWARE_API_KEY not set' }), { status: 500 });
   }
 
-  const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
   try {
-    const { data: syncStates, error: stateError } = await supabase.from('sync_state').select('*');
+    const { data: statesData, error: stateError } = await supabase.from('sync_state').select('*');
     if (stateError) throw stateError;
-
-    const states: Record<string, SyncState> = (syncStates || []).reduce((acc, state) => {
-      acc[state.id] = state;
-      return acc;
-    }, {});
-
-    const tradersState = states['traders'];
-    const assetsState = states['assets'];
+    const states: Record<string, SyncState> = (statesData || []).reduce((acc, s) => ({ ...acc, [s.id]: s }), {});
 
     // --- Task Prioritization ---
 
-    // 1. Initial Asset Sync (only runs once if assets have never been synced)
-    if (!assetsState?.last_run) {
-      console.log('[sync-worker] Initial asset sync...');
-      const result = await syncAssetsBatch(supabase, bullwareApiKey);
-      return new Response(JSON.stringify({ action: 'initial_assets_sync', ...result }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    // 1. Should we run discovery? (In progress, or stale)
+    const discoveryState = states['traders_discovery'];
+    if (!discoveryState || discoveryState.status === 'paginating' || isStale(discoveryState.last_run, STALE_THRESHOLD_HOURS.DISCOVERY)) {
+      const result = await discoverTraders(supabase, bullwareApiKey, discoveryState);
+      return new Response(JSON.stringify({ action: 'discovery', ...result }), { headers: corsHeaders });
     }
 
-    // 2. Trader Discovery (Highest Priority)
-    // Continue paginating if discovery is in progress OR if the full list is stale.
-    const needsTradersPagination = !tradersState || tradersState.status === 'paginating' || isStale(tradersState.last_run, STALE_HOURS_TRADERS);
-
-    if (needsTradersPagination) {
-      console.log('[sync-worker] Prioritizing trader discovery...');
-      const result = await syncTradersBatch(supabase, bullwareApiKey, tradersState);
-      return new Response(JSON.stringify({ action: 'sync_traders', ...result }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
-
-    // 3. Stale Trader Detail Sync (Second Priority)
-    // If discovery is complete and idle, start syncing details for stale traders.
-    const staleTraders = await getStaleTraders(supabase, BATCH_SIZE_DETAILS, STALE_HOURS_DETAILS);
+    // 2. Are there stale traders to process? (Highest priority after discovery)
+    const staleTraders = await getStaleTraders(supabase);
     if (staleTraders.length > 0) {
-      console.log(`[sync-worker] Syncing ${staleTraders.length} stale trader details...`);
-      const result = await syncTraderDetailsBatch(supabase, bullwareApiKey, staleTraders);
-      return new Response(JSON.stringify({ action: 'sync_trader_details', ...result }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      const traderToProcess = staleTraders[0]; // Process one at a time
+      await syncCompleteTraderDetails(supabase, bullwareApiKey, traderToProcess);
+      await supabase.from('sync_state').upsert({ id: 'trader_details_sync', last_run: new Date().toISOString() });
+      return new Response(JSON.stringify({ action: 'details_sync', trader: traderToProcess.etoro_username }), { headers: corsHeaders });
     }
-
-    // 4. Asset Maintenance (Lowest Priority)
-    // If no discovery or detail sync is needed, check if assets need refreshing.
-    if (isStale(assetsState?.last_run, STALE_HOURS_ASSETS)) {
-      console.log('[sync-worker] Performing asset maintenance sync...');
-      const result = await syncAssetsBatch(supabase, bullwareApiKey);
-      return new Response(JSON.stringify({ action: 'sync_assets', ...result }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
-
-    return new Response(JSON.stringify({ action: 'skip', message: 'All data is fresh' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    
+    // Fallback: If nothing else to do, just report it.
+    console.log('[sync-worker] No tasks to perform. All data is fresh.');
+    return new Response(JSON.stringify({ action: 'idle', message: 'All data is fresh' }), { headers: corsHeaders });
 
   } catch (error) {
     console.error('[sync-worker] Fatal error:', error.message);
-    return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
   }
 });
-
-
-// --- Sub-functions ---
-
-async function syncTradersBatch(supabase: any, apiKey: string, state: SyncState | undefined): Promise<any> {
-  const currentPage = state?.status === 'paginating' ? state.last_page : 1;
-
-  console.log(`[sync-worker] Fetching traders page ${currentPage}...`);
-  const response = await fetch(`${ENDPOINTS.investors}?page=${currentPage}&limit=${BATCH_SIZE_TRADERS}`, {
-    headers: { 'Authorization': `Bearer ${apiKey}` }
-  });
-
-  if (!response.ok) throw new Error(`Bullaware API error (traders): ${response.status}`);
-
-  const data = await response.json();
-  const traders = data.items || data.data || [];
-  const total = data.total || 0;
-  const totalPages = Math.ceil(total / BATCH_SIZE_TRADERS) || 1;
-
-  if (traders.length > 0) {
-    const tradersToUpsert = traders.map((t: any) => ({
-      etoro_username: t.username || t.userName,
-      display_name: t.displayName || t.fullName,
-      avatar_url: t.avatarUrl || t.avatar,
-      copiers: t.copiers ?? 0,
-    }));
-    const { error } = await supabase.from('traders').upsert(tradersToUpsert, { onConflict: 'etoro_username' });
-    if (error) console.error('[sync-worker] Error upserting traders:', error);
-  }
-
-  const isComplete = currentPage >= totalPages || traders.length === 0;
-  const nextPage = isComplete ? 1 : currentPage + 1;
-  const newStatus = isComplete ? 'idle' : 'paginating';
-
-  await supabase.from('sync_state').upsert({
-    id: 'traders',
-    status: newStatus,
-    last_page: nextPage,
-    total_pages: totalPages,
-    last_run: isComplete ? new Date().toISOString() : state?.last_run,
-    updated_at: new Date().toISOString()
-  });
-
-  return { synced: traders.length, page: currentPage, totalPages, status: newStatus };
-}
-
-async function getStaleTraders(supabase: any, limit: number, hoursThreshold: number): Promise<Array<{ id: string; etoro_username: string }>> {
-  const threshold = new Date();
-  threshold.setHours(threshold.getHours() - hoursThreshold);
-  
-  const { data, error } = await supabase
-    .from('traders')
-    .select('id, etoro_username')
-    .or(`details_synced_at.is.null,details_synced_at.lt.${threshold.toISOString()}`)
-    .order('copiers', { ascending: false, nullsFirst: true }) // Prioritize popular traders
-    .limit(limit);
-
-  if (error) {
-    console.error('[sync-worker] Error fetching stale traders:', error);
-    return [];
-  }
-  return data || [];
-}
-
-async function syncTraderDetailsBatch(supabase: any, apiKey: string, traders: Array<{ id: string; etoro_username: string }>): Promise<any> {
-  const syncedTraders: string[] = [];
-
-  for (const trader of traders) {
-    try {
-      // For brevity, the detail-fetching logic is simplified.
-      // In a real scenario, this would involve multiple API calls with delays.
-      await delay(1000); // Simulate API call
-      console.log(`[sync-worker] Syncing details for ${trader.etoro_username}`);
-
-      // Example: Fetch and update risk score
-      const riskScore = Math.floor(Math.random() * 10) + 1;
-      await supabase.from('traders').update({
-        risk_score: riskScore,
-        details_synced_at: new Date().toISOString()
-      }).eq('id', trader.id);
-
-      syncedTraders.push(trader.etoro_username);
-
-    } catch (err) {
-      console.error(`[sync-worker] Error syncing details for ${trader.etoro_username}:`, err.message);
-    }
-  }
-
-  await supabase.from('sync_state').upsert({
-    id: 'trader_details',
-    last_run: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  });
-
-  return { synced: syncedTraders.length, traders: syncedTraders };
-}
-
-async function syncAssetsBatch(supabase: any, apiKey: string): Promise<any> {
-  console.log('[sync-worker] Syncing assets from Bullaware...');
-  const response = await fetch(`${ENDPOINTS.instruments}?limit=100`, {
-    headers: { 'Authorization': `Bearer ${apiKey}` }
-  });
-
-  if (!response.ok) {
-    console.error(`[sync-worker] Bullaware API error (assets): ${response.status}`);
-    return { synced: 0 };
-  }
-
-  const data = await response.json();
-  const assets = data.items || [];
-  
-  if (assets.length > 0) {
-    const assetsToUpsert = assets.map((a: any) => ({
-      symbol: a.symbol,
-      name: a.name,
-      asset_type: a.type || 'stock',
-    }));
-    await supabase.from('assets').upsert(assetsToUpsert, { onConflict: 'symbol' });
-  }
-
-  await supabase.from('sync_state').upsert({
-    id: 'assets',
-    last_run: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  });
-
-  return { synced: assets.length };
-}
