@@ -138,7 +138,7 @@ serve(async (req) => {
     if (diagnostics.worker_status.appears_active === false) {
       diagnostics.recommendations.push({
         severity: "high",
-        message: "Sync worker does not appear to be running. Check pg_cron configuration and sync-worker function."
+        message: "Sync worker does not appear to be running. GitHub Actions should be calling sync-worker every 2 minutes. Check: https://github.com/michaelwu1407-droid/market-compass-77/actions"
       });
     }
 

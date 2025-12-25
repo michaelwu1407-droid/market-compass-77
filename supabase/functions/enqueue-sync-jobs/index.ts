@@ -137,30 +137,62 @@ serve(async (req) => {
       });
     }
 
-    // Check existing pending jobs to avoid duplicates
-    const { data: pendingJobs, error: pendingError } = await supabase
+    // Check existing pending jobs to avoid duplicates (unless force mode)
+    let jobsToInsert;
+    if (force) {
+      // In force mode, create jobs for all traders (will update existing pending jobs)
+      // First, mark any existing pending/in_progress jobs as completed if they're old
+      const oldThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(); // 24 hours ago
+      await supabase
         .from('sync_jobs')
-        .select('trader_id')
-        .in('status', ['pending', 'in_progress']);
-
-    if (pendingError) throw pendingError;
-    const pendingTraderIds = new Set(pendingJobs.map(j => j.trader_id));
-    
-    const jobsToInsert = finalTraderIds
-      .filter(id => !pendingTraderIds.has(id))
-      .map(trader_id => ({
+        .update({ status: 'completed' })
+        .in('status', ['pending', 'in_progress'])
+        .lt('created_at', oldThreshold);
+      
+      // Now create jobs for all traders (upsert will handle duplicates)
+      jobsToInsert = finalTraderIds.map(trader_id => ({
         trader_id,
         status: 'pending',
         job_type: 'deep_sync'
       }));
+      console.log(`Force mode: Creating ${jobsToInsert.length} jobs for all traders.`);
+    } else {
+      // Normal mode: avoid duplicates
+      const { data: pendingJobs, error: pendingError } = await supabase
+          .from('sync_jobs')
+          .select('trader_id')
+          .in('status', ['pending', 'in_progress']);
 
-    console.log(`Filtered out ${pendingTraderIds.size} pending jobs. Inserting ${jobsToInsert.length} new jobs.`);
+      if (pendingError) throw pendingError;
+      const pendingTraderIds = new Set(pendingJobs.map(j => j.trader_id));
+      
+      jobsToInsert = finalTraderIds
+        .filter(id => !pendingTraderIds.has(id))
+        .map(trader_id => ({
+          trader_id,
+          status: 'pending',
+          job_type: 'deep_sync'
+        }));
+
+      console.log(`Filtered out ${pendingTraderIds.size} pending jobs. Inserting ${jobsToInsert.length} new jobs.`);
+    }
 
     if (jobsToInsert.length > 0) {
-        const { error: insertError } = await supabase.from("sync_jobs").insert(jobsToInsert).select();
-        if (insertError) {
-            console.error("Error inserting sync jobs:", insertError);
-            throw insertError;
+        // Insert in batches to avoid timeout
+        const batchSize = 500;
+        let inserted = 0;
+        for (let i = 0; i < jobsToInsert.length; i += batchSize) {
+            const batch = jobsToInsert.slice(i, i + batchSize);
+            const { error: insertError } = await supabase.from("sync_jobs").upsert(batch, { 
+                onConflict: 'trader_id,status',
+                ignoreDuplicates: false 
+            });
+            if (insertError) {
+                console.error(`Error inserting batch ${i / batchSize + 1}:`, insertError);
+                throw insertError;
+            }
+            inserted += batch.length;
+            console.log(`Inserted batch ${i / batchSize + 1}: ${batch.length} jobs (total: ${inserted}/${jobsToInsert.length})`);
         }
     }
 
