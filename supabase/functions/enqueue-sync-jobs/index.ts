@@ -229,6 +229,24 @@ serve(async (req) => {
     }
 
     let actualInserted = 0;
+    console.log(`[DEBUG] About to insert ${jobsToInsert?.length || 0} jobs. jobsToInsert type: ${typeof jobsToInsert}, is array: ${Array.isArray(jobsToInsert)}`);
+    
+    if (!jobsToInsert || jobsToInsert.length === 0) {
+      console.error(`[DEBUG] ERROR: jobsToInsert is empty or undefined! finalTraderIds.length: ${finalTraderIds.length}, force: ${force}`);
+      return new Response(JSON.stringify({
+        success: false,
+        error: "No jobs to insert - this should not happen if traders were found",
+        debug: {
+          final_trader_ids: finalTraderIds.length,
+          force_mode: force,
+          jobs_to_insert_length: jobsToInsert?.length || 0
+        }
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+    
     if (jobsToInsert.length > 0) {
         // Insert in batches to avoid timeout
         const batchSize = 500;
