@@ -185,6 +185,39 @@ export default function AdminSyncPage() {
     finally { setIsVerifying(false); }
   };
 
+  const runCronMigration = async () => {
+    setIsVerifying(true);
+    try {
+      const result = await invokeFunction('run-cron-migration');
+      if (result.success) {
+        toast({ 
+          title: 'Cron Migration Successful!', 
+          description: 'Sync-worker will now run every 2 minutes automatically',
+          duration: 10000
+        });
+      } else {
+        toast({ 
+          title: 'Migration Needs Manual Step', 
+          description: result.message || 'Please run the SQL manually in Supabase SQL Editor',
+          variant: 'default',
+          duration: 15000
+        });
+        console.log('Migration SQL:', result.sql || 'See migration file');
+      }
+      refetchDiagnostics();
+    }
+    catch (e) { 
+      toast({ 
+        title: 'Migration Failed', 
+        description: 'Please run the migration manually in Supabase SQL Editor. Check console for SQL.',
+        variant: 'destructive',
+        duration: 15000
+      });
+      console.error('Migration error:', e);
+    }
+    finally { setIsVerifying(false); }
+  };
+
   // These functions remain as they are, assuming they are correct
   const syncAssets = async () => { setIsSyncingAssets(true); try { await invokeFunction('sync-assets'); toast({ title: 'Assets Sync Started' }); } catch(e) { toast({ title: 'Error', description: String(e), variant: 'destructive' }); } finally { setIsSyncingAssets(false); } };
   const syncDailyMovers = async () => { setIsSyncingMovers(true); try { await invokeFunction('scrape-daily-movers'); toast({ title: 'Movers Sync Started' }); } catch(e) { toast({ title: 'Error', description: String(e), variant: 'destructive' }); } finally { setIsSyncingMovers(false); } };
@@ -218,6 +251,10 @@ export default function AdminSyncPage() {
           <Button variant="outline" size="sm" onClick={runVerification} disabled={isVerifying}>
             {isVerifying ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CheckCircle2 className="h-4 w-4 mr-2" />}
             Verify Deployment
+          </Button>
+          <Button variant="outline" size="sm" onClick={runCronMigration} disabled={isVerifying}>
+            {isVerifying ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Clock className="h-4 w-4 mr-2" />}
+            Fix Cron Jobs
           </Button>
           {(stats?.pending ?? 0) > 0 && (
             <Button variant="default" size="sm" onClick={runForceProcessing} disabled={isForceProcessing}>
