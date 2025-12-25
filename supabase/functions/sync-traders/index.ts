@@ -21,13 +21,26 @@ serve(async (req) => {
     let apiWorks = false;
     let allBullwareTraders: any[] = [];
 
-    if (BULLAWARE_API_KEY) {
-        // Try to fetch from Bullaware API (respecting rate limits)
-        // API limit is 1000 per request, and likely has rate limits (e.g., 10 req/min)
-        // So we'll fetch one page per call and spread discovery over time
-        console.log(`Attempting to fetch traders from Bullaware API...`);
-        console.log(`[DEBUG] BULLAWARE_API_KEY present: ${BULLAWARE_API_KEY ? 'Yes' : 'No'} (length: ${BULLAWARE_API_KEY?.length || 0})`);
-        const maxPages = 3; // Fetch up to 3,000 traders per call (to respect rate limits)
+    if (!BULLAWARE_API_KEY) {
+        console.error("BULLAWARE_API_KEY not found. Cannot fetch traders.");
+        return new Response(
+            JSON.stringify({
+                success: false,
+                error: "BULLAWARE_API_KEY not configured",
+                synced: 0,
+                total_traders: 0,
+                message: "API key missing - check environment variables"
+            }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+    }
+
+    // Try to fetch from Bullaware API (respecting rate limits)
+    // API limit is 1000 per request, and likely has rate limits (e.g., 10 req/min)
+    // So we'll fetch one page per call and spread discovery over time
+    console.log(`Attempting to fetch traders from Bullaware API...`);
+    console.log(`[DEBUG] BULLAWARE_API_KEY present: Yes (length: ${BULLAWARE_API_KEY.length})`);
+    const maxPages = 10; // Fetch up to 10,000 traders per call (to respect rate limits)
         let page = 0;
         
         while (page < maxPages) {
@@ -104,10 +117,10 @@ serve(async (req) => {
         if (allBullwareTraders.length > 0) {
             console.log(`Successfully fetched ${allBullwareTraders.length} traders from Bullaware API.`);
             apiWorks = true;
+        } else {
+            console.error("Bullaware API returned no traders.");
+            apiWorks = false;
         }
-    } else {
-        console.log("BULLAWARE_API_KEY not found.");
-    }
 
     if (!apiWorks || allBullwareTraders.length === 0) {
         console.error("Bullaware API failed or returned no data. Cannot proceed without real data.");

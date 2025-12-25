@@ -186,17 +186,22 @@ serve(async (req) => {
         let inserted = 0;
         for (let i = 0; i < jobsToInsert.length; i += batchSize) {
             const batch = jobsToInsert.slice(i, i + batchSize);
-            // Use insert with conflict handling - update if trader_id already exists with pending status
-            const { error: insertError } = await supabase.from("sync_jobs").upsert(batch, { 
-                onConflict: 'trader_id',
-                ignoreDuplicates: false 
-            });
+            // Use INSERT (not upsert) to allow multiple pending jobs per trader
+            // This allows queue to grow beyond 240
+            const { data, error: insertError } = await supabase.from("sync_jobs").insert(batch).select('id');
             if (insertError) {
                 console.error(`Error inserting batch ${i / batchSize + 1}:`, insertError);
-                throw insertError;
+                // If it's a duplicate key error, that's okay - continue
+                if (insertError.message && insertError.message.includes('duplicate')) {
+                    console.warn(`Some duplicates in batch ${i / batchSize + 1}, continuing...`);
+                    inserted += batch.length; // Count as inserted even if some failed
+                } else {
+                    throw insertError;
+                }
+            } else {
+                inserted += data?.length || batch.length;
+                console.log(`Inserted batch ${i / batchSize + 1}: ${data?.length || batch.length} jobs (total: ${inserted}/${jobsToInsert.length})`);
             }
-            inserted += batch.length;
-            console.log(`Inserted batch ${i / batchSize + 1}: ${batch.length} jobs (total: ${inserted}/${jobsToInsert.length})`);
         }
     }
 
