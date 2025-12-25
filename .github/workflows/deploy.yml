@@ -54,3 +54,6 @@ jobs:
 
       - name: Deploy run-cron-migration
         run: supabase functions deploy run-cron-migration --project-ref $PROJECT_ID
+
+      - name: Deploy inspect-sync-jobs
+        run: supabase functions deploy inspect-sync-jobs --project-ref $PROJECT_ID

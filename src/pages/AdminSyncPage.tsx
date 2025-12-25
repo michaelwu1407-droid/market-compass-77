@@ -205,6 +205,22 @@ export default function AdminSyncPage() {
     finally { setIsVerifying(false); }
   };
 
+  const inspectJobs = async () => {
+    try {
+      const result = await invokeFunction('inspect-sync-jobs');
+      console.log('Job inspection result:', result);
+      toast({ 
+        title: 'Job Inspection', 
+        description: `Found ${result.total_jobs} total jobs. Check console for details.`,
+        duration: 10000
+      }); 
+    }
+    catch (e) { 
+      console.error('Inspect jobs error:', e);
+      toast({ title: 'Error', description: String(e), variant: 'destructive' }); 
+    }
+  };
+
   const runCronMigration = async () => {
     setIsVerifying(true);
     try {
@@ -275,6 +291,10 @@ export default function AdminSyncPage() {
           <Button variant="outline" size="sm" onClick={runCronMigration} disabled={isVerifying}>
             {isVerifying ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Clock className="h-4 w-4 mr-2" />}
             Fix Cron Jobs
+          </Button>
+          <Button variant="outline" size="sm" onClick={inspectJobs}>
+            <FileText className="h-4 w-4 mr-2" />
+            Inspect Jobs
           </Button>
           {(stats?.pending ?? 0) > 0 && (
             <Button variant="default" size="sm" onClick={runForceProcessing} disabled={isForceProcessing}>
