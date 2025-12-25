@@ -1,0 +1,24 @@
+name: Discover New Traders
+
+on:
+  schedule:
+    # Runs every 6 hours to respect API limits
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # Allows manual runs
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - name: Discover new traders
+        run: |
+          echo "Discovering new traders at $(date)"
+          curl -X POST \
+            -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhndmFpYnh4aXdmcmFrbGZid2V5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYzODYwMjcsImV4cCI6MjA4MTk2MjAyN30.6WpGcdGeuFngazeTP5tiwVL--htj7AUqsLsTqW5Iz7M" \
+            -H "Content-Type: application/json" \
+            -d '{"sync_traders": true}' \
+            -w "\nHTTP Status: %{http_code}\n" \
+            https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/enqueue-sync-jobs || echo "Error discovering traders"
+
