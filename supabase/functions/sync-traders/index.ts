@@ -66,17 +66,14 @@ serve(async (req) => {
             console.error("Error counting traders:", countError);
         }
         
-        // Create enough traders to reach target of 5000+ traders
+        // Always create exactly 1000 new traders per call (regardless of existing count)
+        // This ensures we create thousands when called multiple times
         const currentCount = existingCount || 0;
-        const targetCount = 5000;
-        const tradersNeeded = Math.max(0, targetCount - currentCount);
-        
-        // Always create at least 1000 new traders per call (or whatever is needed)
-        const batchSize = Math.min(1000, Math.max(1000, tradersNeeded));
+        const batchSize = 1000; // Always create 1000 per call
         const startIndex = currentCount + 1;
         const endIndex = startIndex + batchSize;
         
-        console.log(`Existing traders: ${currentCount}, Target: ${targetCount}, Needed: ${tradersNeeded}, Creating ${batchSize} new mock traders (${startIndex} to ${endIndex})`);
+        console.log(`Existing traders: ${currentCount}, Creating ${batchSize} new mock traders (${startIndex} to ${endIndex})`);
         
         for (let i = startIndex; i < endIndex; i++) {
             allBullwareTraders.push({
