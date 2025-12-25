@@ -60,8 +60,9 @@ serve(async (req) => {
                     page++;
                     apiWorks = true;
                     
-                    // Add delay between pages to respect rate limits (6 seconds = 10 req/min)
+                    // Add delay between pages to respect rate limits (10 req/min = 6 seconds between requests)
                     if (page < maxPages) {
+                        console.log(`Waiting 6 seconds before next page to respect API rate limit...`);
                         await new Promise(resolve => setTimeout(resolve, 6000));
                     }
                 } else {

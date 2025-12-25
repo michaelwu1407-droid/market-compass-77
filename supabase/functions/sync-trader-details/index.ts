@@ -76,7 +76,8 @@ serve(async (req) => {
     }
 
     let syncedCount = 0;
-    for (const trader of tradersToSync) {
+    for (let i = 0; i < tradersToSync.length; i++) {
+        const trader = tradersToSync[i];
         let bullwareHoldings: any[] = [];
         let apiSuccess = false;
 
@@ -101,11 +102,19 @@ serve(async (req) => {
                          }));
                      }
                      apiSuccess = true;
+                 } else if (res.status === 429) {
+                     console.error(`Rate limit hit for ${trader.etoro_username}, using mock data`);
                  } else {
                      console.error(`API returned ${res.status} for ${trader.etoro_username}`);
                  }
              } catch (e: any) { 
                  console.error("API failed", e.message); 
+             }
+             
+             // Add delay between API calls to respect rate limit (10 req/min = 6 seconds)
+             // Only delay if processing multiple traders and not the last one
+             if (i < tradersToSync.length - 1) {
+                 await new Promise(resolve => setTimeout(resolve, 6000));
              }
         }
 

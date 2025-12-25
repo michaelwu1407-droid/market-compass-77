@@ -6,7 +6,10 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const MAX_CONCURRENT_INVOCATIONS = 10;
+// Process jobs sequentially to respect Bullaware API rate limit (10 req/min)
+// We'll process 1 job every 7 seconds = ~8.5 req/min (safe margin)
+const MAX_JOBS_TO_PROCESS = 10;
+const DELAY_BETWEEN_JOBS_MS = 7000; // 7 seconds = ~8.5 req/min
 
 serve(async (req) => {
     if (req.method === 'OPTIONS') {
@@ -38,7 +41,7 @@ serve(async (req) => {
             .select('id, status')
             .eq('status', 'pending')
             .order('created_at', { ascending: true }) // Process oldest first
-            .limit(MAX_CONCURRENT_INVOCATIONS);
+            .limit(MAX_JOBS_TO_PROCESS);
 
         if (fetchError) {
             console.error("Error fetching pending jobs:", fetchError);
@@ -81,18 +84,28 @@ serve(async (req) => {
         });
         }
 
-        const invocationPromises = pendingJobs.map(job => {
-            console.log(`Dispatching job ${job.id}`);
-            return supabase.functions.invoke('process-sync-job', {
-                body: { job_id: job.id },
-            }).catch(err => {
-                // Catch individual invocation errors so Promise.all doesn't fail
+        // Process jobs sequentially to respect Bullaware API rate limit (10 req/min)
+        const results = [];
+        for (let i = 0; i < pendingJobs.length; i++) {
+            const job = pendingJobs[i];
+            console.log(`Processing job ${i + 1}/${pendingJobs.length}: ${job.id}`);
+            
+            try {
+                const result = await supabase.functions.invoke('process-sync-job', {
+                    body: { job_id: job.id },
+                });
+                results.push(result);
+                
+                // Add delay between jobs to respect rate limit (except for last job)
+                if (i < pendingJobs.length - 1) {
+                    console.log(`Waiting ${DELAY_BETWEEN_JOBS_MS}ms before next job to respect API rate limit...`);
+                    await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_JOBS_MS));
+                }
+            } catch (err) {
                 console.error(`Error invoking process-sync-job for job ${job.id}:`, err);
-                return { error: err, data: null };
-            });
-        });
-
-        const results = await Promise.all(invocationPromises);
+                results.push({ error: err, data: null });
+            }
+        }
 
         let invokedCount = 0;
         const errors: any[] = []; // Collect errors
