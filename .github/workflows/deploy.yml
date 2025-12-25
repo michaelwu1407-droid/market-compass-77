@@ -1,0 +1,35 @@
+name: Deploy Supabase Functions
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      PROJECT_ID: xgvaibxxiwfraklfbwey
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Deploy sync-traders
+        run: supabase functions deploy sync-traders --project-ref $PROJECT_ID
+
+      - name: Deploy run-migration
+        run: supabase functions deploy run-migration --project-ref $PROJECT_ID
+        
+      - name: Deploy process-sync-job
+        run: supabase functions deploy process-sync-job --project-ref $PROJECT_ID
+        
+      - name: Deploy dispatch-sync-jobs
+        run: supabase functions deploy dispatch-sync-jobs --project-ref $PROJECT_ID

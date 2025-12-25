@@ -1,5 +1,6 @@
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
-import postgres from 'https://deno.land/x/postgresjs@v3.3.3/mod.js';
+
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -12,85 +13,42 @@ serve(async (req) => {
   }
 
   try {
-    const connectionString = 'postgresql://postgres:Bullrunnertothemoon@db.xgvaibxxiwfraklfbwey.supabase.co:5432/postgres';
-    const sql = postgres(connectionString);
+    const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
+    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
-    console.log('Connecting to database to setup Cron jobs...');
-    
-    const PROJECT_URL = 'https://xgvaibxxiwfraklfbwey.supabase.co';
-    
-    // We add a dummy Authorization header. Since verify_jwt=false is set in config.toml,
-    // the gateway should let this through as long as it looks like a token.
-    // Ideally this should be the real ANON_KEY but we don't have it.
-    // We use a dummy JWT-like string to pass basic regex checks if any.
-    const DUMMY_AUTH = 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.Et9HF98y7igfOSpG9Q9-8_3q-_5Z8d_6'; // {} signed
-    
-    const headers = JSON.stringify({
-        "Content-Type": "application/json",
-        "Authorization": DUMMY_AUTH
-    });
-
-    const unschedule = async (name) => {
-        try { await sql.unsafe(`SELECT cron.unschedule('${name}')`); } 
-        catch (e) { console.log(`Unschedule ${name} error:`, e.message); }
-    };
-
-    await unschedule('process-queue-job');
-    await unschedule('discover-traders-job');
-    await unschedule('scrape-posts-job');
-    await unschedule('sync-assets-job');
-
-    const jobs = [
-        {
-            name: 'process-queue-job',
-            schedule: '* * * * *', // Every minute
-            url: `${PROJECT_URL}/functions/v1/process-queue`
-        },
-        {
-            name: 'discover-traders-job',
-            schedule: '*/30 * * * *', // Every 30 mins (increased freq for testing)
-            url: `${PROJECT_URL}/functions/v1/discover-traders`
-        },
-        {
-            name: 'scrape-posts-job',
-            schedule: '*/10 * * * *', // Every 10 mins
-            url: `${PROJECT_URL}/functions/v1/scrape-posts`
-        },
-        {
-            name: 'sync-assets-job',
-            schedule: '0 2 * * *', // 2 AM Daily
-            url: `${PROJECT_URL}/functions/v1/sync-assets`
-        }
-    ];
-
-    for (const job of jobs) {
-        const query = `
-          SELECT cron.schedule(
-            '${job.name}',
-            '${job.schedule}',
-            $$
-            SELECT
-              net.http_post(
-                  url:='${job.url}',
-                  headers:='${headers}'::jsonb,
-                  body:='{}'::jsonb
-              ) as request_id;
-            $$
-          );
-        `;
-        await sql.unsafe(query);
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      throw new Error('Missing environment variables');
     }
 
-    console.log('Cron jobs scheduled successfully.');
-    await sql.end();
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    return new Response(JSON.stringify({ success: true, message: 'Cron jobs updated' }), {
+    // SQL to add missing columns to sync_jobs
+    const sql = `
+      ALTER TABLE sync_jobs ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
+      ALTER TABLE sync_jobs ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ;
+      ALTER TABLE sync_jobs ADD COLUMN IF NOT EXISTS error_message TEXT;
+      ALTER TABLE sync_jobs ADD COLUMN IF NOT EXISTS retry_count INT DEFAULT 0;
+    `;
+
+    console.log("Running schema migration...");
+    const { error } = await supabase.rpc('run_sql', { sql });
+    
+    if (error) {
+        console.error("Migration failed:", error);
+        // Fallback: Try running via raw SQL query if RPC fails (some setups support this differently)
+        // But for now, let's assume RPC is the way or we catch the error.
+        return new Response(JSON.stringify({ success: false, error: error }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    console.log("Schema migration successful.");
+
+    return new Response(JSON.stringify({ success: true, message: "Schema updated: Added missing columns to sync_jobs" }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 
   } catch (error) {
-    console.error('Cron setup failed:', error);
-    return new Response(JSON.stringify({ success: false, error: error.message }), {
+    console.error('Error in run-migration:', error);
+    return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

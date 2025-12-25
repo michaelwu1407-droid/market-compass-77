@@ -59,15 +59,38 @@ serve(async (req) => {
 
     console.log(`[process-sync-job] Processing ${job_type} for ${trader.etoro_username}`);
     
-    // Simulate work for now to verify the pipeline works
-    // We will uncomment the API call later
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // Invoke sync-trader-details
+    const { data: syncData, error: syncError } = await supabase.functions.invoke('sync-trader-details', {
+        body: { username: trader.etoro_username }
+    });
+
+    if (syncError) {
+        console.error(`[process-sync-job] Error syncing details for ${trader.etoro_username}:`, syncError);
+        await supabase.from('sync_jobs').update({ 
+            status: 'failed', 
+            finished_at: new Date().toISOString(), 
+            error_message: syncError.message || 'Error invoking sync-trader-details'
+        }).eq('id', job.id);
+        
+        return new Response(JSON.stringify({ error: 'Sync failed', details: syncError }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // Check if the sync function itself reported failure despite successful invocation
+    if (syncData && syncData.success === false) {
+         console.error(`[process-sync-job] Sync reported failure for ${trader.etoro_username}:`, syncData.error);
+         await supabase.from('sync_jobs').update({ 
+            status: 'failed', 
+            finished_at: new Date().toISOString(), 
+            error_message: syncData.error || 'Sync function reported failure'
+        }).eq('id', job.id);
+        return new Response(JSON.stringify({ error: 'Sync reported failure', details: syncData }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     // 3. Mark job as complete
     await supabase.from('sync_jobs').update({ status: 'completed', finished_at: new Date().toISOString() }).eq('id', job.id);
     console.log(`[process-sync-job] Successfully processed job ${job.id}`);
 
-    return new Response(JSON.stringify({ success: true, job_id: job.id, message: `Synced ${trader.etoro_username}` }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ success: true, job_id: job.id, message: `Synced ${trader.etoro_username}`, data: syncData }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (error) {
     console.error("[process-sync-job] Fatal error:", error);
