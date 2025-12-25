@@ -229,10 +229,16 @@ serve(async (req) => {
             const { data, error: insertError } = await supabase.from("sync_jobs").insert(batch).select('id');
             if (insertError) {
                 console.error(`Error inserting batch ${i / batchSize + 1}:`, insertError);
+                console.error(`Error details:`, JSON.stringify(insertError, null, 2));
+                console.error(`Batch that failed:`, JSON.stringify(batch.slice(0, 3), null, 2)); // Log first 3 items
                 // If it's a duplicate key error, that's okay - continue (though shouldn't happen with insert)
-                if (insertError.message && insertError.message.includes('duplicate')) {
+                if (insertError.message && (insertError.message.includes('duplicate') || insertError.message.includes('unique'))) {
                     console.warn(`Some duplicates in batch ${i / batchSize + 1}, continuing...`);
                     // Don't count duplicates as inserted
+                } else if (insertError.message && insertError.message.includes('permission') || insertError.message.includes('policy')) {
+                    // RLS/permission error - this is critical
+                    console.error(`CRITICAL: Permission/RLS error inserting batch ${i / batchSize + 1}. This should not happen with service role.`);
+                    throw insertError; // Throw to surface the issue
                 } else {
                     // For other errors, log but continue with next batch
                     console.error(`Batch ${i / batchSize + 1} failed, continuing with next batch...`);
@@ -240,7 +246,7 @@ serve(async (req) => {
             } else {
                 const batchInserted = data?.length || 0;
                 actualInserted += batchInserted;
-                console.log(`Inserted batch ${i / batchSize + 1}: ${batchInserted} jobs (total: ${actualInserted}/${jobsToInsert.length})`);
+                console.log(`✓ Inserted batch ${i / batchSize + 1}: ${batchInserted} jobs (total: ${actualInserted}/${jobsToInsert.length})`);
             }
         }
     }
