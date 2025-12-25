@@ -85,6 +85,10 @@ serve(async (req) => {
             console.log(`Dispatching job ${job.id}`);
             return supabase.functions.invoke('process-sync-job', {
                 body: { job_id: job.id },
+            }).catch(err => {
+                // Catch individual invocation errors so Promise.all doesn't fail
+                console.error(`Error invoking process-sync-job for job ${job.id}:`, err);
+                return { error: err, data: null };
             });
         });
 

@@ -70,15 +70,32 @@ serve(async (req) => {
       console.log(`Received ${traderIdsToEnqueue.size} specific trader IDs to enqueue.`);
 
     } else if (force) {
-      // Mode 2: Force enqueue all traders
+      // Mode 2: Force enqueue all traders - paginate to get all
       console.log('Force mode enabled: enqueuing all traders.');
-      const { data: allTraders, error: allError } = await supabase
-        .from('traders')
-        .select('id')
-        .limit(MAX_TRADERS_TO_ENQUEUE * 5); // A much larger limit for force mode
+      let allTraders: any[] = [];
+      let page = 0;
+      const pageSize = 1000;
+      let hasMore = true;
 
-      if (allError) throw allError;
-      allTraders.forEach(t => traderIdsToEnqueue.add(t.id));
+      while (hasMore) {
+        const { data: pageTraders, error: allError } = await supabase
+          .from('traders')
+          .select('id')
+          .range(page * pageSize, (page + 1) * pageSize - 1);
+
+        if (allError) throw allError;
+        
+        if (pageTraders && pageTraders.length > 0) {
+          allTraders = allTraders.concat(pageTraders);
+          pageTraders.forEach(t => traderIdsToEnqueue.add(t.id));
+          page++;
+          hasMore = pageTraders.length === pageSize;
+          console.log(`Fetched page ${page}: ${pageTraders.length} traders (total so far: ${allTraders.length})`);
+        } else {
+          hasMore = false;
+        }
+      }
+
       console.log(`Found ${allTraders.length} total traders to enqueue.`);
 
     } else {

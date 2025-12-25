@@ -26,5 +26,13 @@ jobs:
             -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhndmFpYnh4aXdmcmFrbGZid2V5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYzODYwMjcsImV4cCI6MjA4MTk2MjAyN30.6WpGcdGeuFngazeTP5tiwVL--htj7AUqsLsTqW5Iz7M" \
             -H "Content-Type: application/json" \
             -d '{"sync_traders": true}' \
-            https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/enqueue-sync-jobs
+            https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/enqueue-sync-jobs || true
+      
+      - name: Enqueue jobs if queue is low (every run)
+        run: |
+          curl -X POST \
+            -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhndmFpYnh4aXdmcmFrbGZid2V5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYzODYwMjcsImV4cCI6MjA4MTk2MjAyN30.6WpGcdGeuFngazeTP5tiwVL--htj7AUqsLsTqW5Iz7M" \
+            -H "Content-Type: application/json" \
+            -d '{"force": true}' \
+            https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/enqueue-sync-jobs || true
 
