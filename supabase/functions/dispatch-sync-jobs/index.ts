@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const MAX_CONCURRENT_INVOCATIONS = 10; // Adjust as needed
+const MAX_CONCURRENT_INVOCATIONS = 10;
 
 serve(async (req) => {
     if (req.method === 'OPTIONS') {
@@ -19,21 +19,28 @@ serve(async (req) => {
             Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
         );
 
-        // 1. Find pending jobs
+        console.log("Searching for pending jobs...");
+
         const { data: pendingJobs, error: fetchError } = await supabase
             .from('sync_jobs')
-            .select('id')
+            .select('id, status')
             .eq('status', 'pending')
             .limit(MAX_CONCURRENT_INVOCATIONS);
 
-        if (fetchError) throw fetchError;
-
-        if (!pendingJobs || pendingJobs.length === 0) {
-            return new Response(JSON.stringify({ message: "No pending jobs to dispatch." }), { headers: corsHeaders });
+        if (fetchError) {
+            console.error("Error fetching pending jobs:", fetchError);
+            throw fetchError;
         }
 
-        // 2. Dispatch each job by invoking the processing function
+        console.log(`Found ${pendingJobs?.length} pending jobs.`);
+
+        if (!pendingJobs || pendingJobs.length === 0) {
+            const { count } = await supabase.from('sync_jobs').select('*', { count: 'exact', head: true });
+            return new Response(JSON.stringify({ message: "No pending jobs to dispatch.", total_jobs: count }), { headers: corsHeaders });
+        }
+
         const invocationPromises = pendingJobs.map(job => {
+            console.log(`Dispatching job ${job.id}`);
             return supabase.functions.invoke('process-sync-job', {
                 body: { job_id: job.id },
             });
@@ -42,9 +49,12 @@ serve(async (req) => {
         const results = await Promise.all(invocationPromises);
 
         let invokedCount = 0;
+        const errors: any[] = []; // Collect errors
+
         results.forEach((res, i) => {
             if (res.error) {
                 console.error(`Failed to invoke process-sync-job for job ${pendingJobs[i].id}:`, res.error);
+                errors.push({ job_id: pendingJobs[i].id, error: res.error });
             } else {
                 invokedCount++;
             }
@@ -54,7 +64,9 @@ serve(async (req) => {
 
         return new Response(JSON.stringify({ 
             success: true, 
-            dispatched_jobs: invokedCount 
+            dispatched_jobs: invokedCount,
+            attempted: pendingJobs.length,
+            errors: errors // Return errors in response
         }), { headers: corsHeaders });
 
     } catch (error) {
