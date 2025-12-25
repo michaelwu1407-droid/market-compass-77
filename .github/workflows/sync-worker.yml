@@ -24,10 +24,14 @@ jobs:
       - name: Enqueue jobs for stale traders (every run)
         run: |
           echo "Enqueuing jobs for stale traders at $(date)"
-          curl -X POST \
+          RESPONSE=$(curl -s -X POST \
             -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhndmFpYnh4aXdmcmFrbGZid2V5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYzODYwMjcsImV4cCI6MjA4MTk2MjAyN30.6WpGcdGeuFngazeTP5tiwVL--htj7AUqsLsTqW5Iz7M" \
             -H "Content-Type: application/json" \
             -d '{"hours_stale": 6, "hours_active": 7 * 24}' \
             -w "\nHTTP Status: %{http_code}\n" \
-            https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/enqueue-sync-jobs || echo "Error enqueuing jobs"
+            https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/enqueue-sync-jobs)
+          echo "$RESPONSE"
+          if echo "$RESPONSE" | grep -q '"enqueued_count":0'; then
+            echo "WARNING: No jobs were enqueued. This might indicate a problem."
+          fi
 

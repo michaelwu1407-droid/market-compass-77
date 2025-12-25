@@ -60,8 +60,9 @@ serve(async (req) => {
             console.log(`Trader count (${traderCount}) is below 5000. Queue will be refilled from existing traders.`);
         }
         
-        // If we have less than 50 pending jobs, try to enqueue more from existing traders
-        if ((currentPending || 0) < 50) {
+        // If we have less than 100 pending jobs, try to enqueue more from existing traders
+        // Increased threshold to ensure queue stays full
+        if ((currentPending || 0) < 100) {
             console.log(`Queue is low (${currentPending} pending). Enqueuing stale traders...`);
             try {
                 const { data: enqueueData, error: enqueueError } = await supabase.functions.invoke('enqueue-sync-jobs', {
@@ -70,12 +71,19 @@ serve(async (req) => {
                 
                 if (enqueueError) {
                     console.error("Error enqueuing jobs:", enqueueError);
+                    console.error("Enqueue error details:", JSON.stringify(enqueueError, null, 2));
                 } else {
-                    console.log("Enqueued new jobs:", enqueueData);
+                    console.log("Enqueued new jobs:", JSON.stringify(enqueueData, null, 2));
+                    if (enqueueData && enqueueData.enqueued_count === 0) {
+                        console.warn("WARNING: enqueue-sync-jobs returned 0 jobs enqueued. This might indicate a problem.");
+                    }
                 }
             } catch (e: any) {
                 console.error("Exception enqueuing jobs:", e.message);
+                console.error("Exception details:", e);
             }
+        } else {
+            console.log(`Queue is healthy (${currentPending} pending jobs).`);
         }
         
         // Self-schedule: Invoke ourselves again in 2 minutes if there's work to do

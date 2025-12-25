@@ -213,19 +213,29 @@ serve(async (req) => {
           .select('trader_id')
           .eq('status', 'in_progress');
 
-      if (inProgressError) throw inProgressError;
-      const inProgressTraderIds = new Set(inProgressJobs.map(j => j.trader_id));
-      
-      // Only filter out in_progress, allow multiple pending jobs
-      jobsToInsert = finalTraderIds
-        .filter(id => !inProgressTraderIds.has(id))
-        .map(trader_id => ({
+      if (inProgressError) {
+        console.error("Error fetching in_progress jobs:", inProgressError);
+        // If we can't check in_progress, just create jobs for all traders (safer)
+        console.warn("Cannot check in_progress jobs, creating jobs for all traders");
+        jobsToInsert = finalTraderIds.map(trader_id => ({
           trader_id,
           status: 'pending',
           job_type: 'deep_sync'
         }));
+      } else {
+        const inProgressTraderIds = new Set((inProgressJobs || []).map(j => j.trader_id));
+        
+        // Only filter out in_progress, allow multiple pending jobs
+        jobsToInsert = finalTraderIds
+          .filter(id => !inProgressTraderIds.has(id))
+          .map(trader_id => ({
+            trader_id,
+            status: 'pending',
+            job_type: 'deep_sync'
+          }));
 
-      console.log(`Filtered out ${inProgressTraderIds.size} in_progress jobs. Inserting ${jobsToInsert.length} new pending jobs.`);
+        console.log(`Filtered out ${inProgressTraderIds.size} in_progress jobs. Inserting ${jobsToInsert.length} new pending jobs.`);
+      }
     }
 
     let actualInserted = 0;
