@@ -1,4 +1,6 @@
 jobs:
-  sync-worker:
-    schedule: "* * * * *"
-    endpoint: "/sync-worker"
+  syncWorker:
+    schedule: '* * * * *' # Every minute
+    command: curl -X POST \
+      --header "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhndmFpYnh4aXdmcmFrbGZid2V5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYzODYwMjcsImV4cCI6MjA4MTk2MjAyN30.6WpGcdGeuFngazeTP5tiwVL--htj7AUqsLsTqW5Iz7M" \
+      https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/sync-worker
