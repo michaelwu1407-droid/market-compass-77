@@ -6,7 +6,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Fields to cross-check between Bullaware and Firecrawl
 const CROSS_CHECK_FIELDS = ['risk_score', 'copiers', 'gain_12m', 'gain_24m', 'max_drawdown'];
 const DISCREPANCY_THRESHOLD_PCT = 5;
 
@@ -51,8 +50,6 @@ function checkDiscrepancy(
   } else {
     if (bValue === 0 && fValue === 0) return null;
 
-    // If bValue is 0, any non-zero fValue is a 100% discrepancy.
-    // The original `Math.abs(fValue) * 100` was producing huge invalid percentages.
     const diffPct = bValue !== 0
       ? Math.abs((bValue - fValue) / bValue * 100)
       : (fValue !== 0 ? 100.0 : 0);
@@ -125,12 +122,11 @@ async function scrapeTraderFromEtoro(username: string, firecrawlApiKey: string):
   }
 }
 
-// Helper to parse AUM strings like "$5M+" to numbers
 function parseAum(value: any): number | null {
   if (value === null || value === undefined) return null;
   if (typeof value === 'number') return value;
   const str = String(value).replace(/[$,+]/g, '').trim();
-  const match = str.match(/^([\d.]+)\s*([KMB])?$/i);
+  const match = str.match(/^[\d.]+([KMB])?$/i);
   if (!match) return null;
   let num = parseFloat(match[1]);
   if (isNaN(num)) return null;
@@ -156,9 +152,8 @@ serve(async (req) => {
       throw new Error('BULLAWARE_API_KEY is not configured');
     }
 
-    // Parse request options
     let usernames: string[] = [];
-    let enableCrossCheck = false; // Default: skip Firecrawl to save credits
+    let enableCrossCheck = false;
     let force = false;
     
     try {
@@ -175,13 +170,9 @@ serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
-    // Fetch ALL traders from Bullaware with pagination
     let allBullwareTraders: any[] = [];
-    let page = 1;
-    const pageSize = 100;
-    
+
     if (usernames.length > 0) {
-      // Specific usernames requested
       const bullwareUrl = `https://api.bullaware.com/v1/investors?usernames=${usernames.join(',')}`;
       console.log(`Fetching specific traders from Bullaware: ${bullwareUrl}`);
       
@@ -199,54 +190,23 @@ serve(async (req) => {
       const data = await response.json();
       allBullwareTraders = data.items || data.data || data.investors || (Array.isArray(data) ? data : []);
     } else {
-      // Fetch all with pagination (no limit param - let API decide page size)
-      let hasMore = true;
+      // Fetch the top 1000 traders (increased from 100)
+      const bullwareUrl = `https://api.bullaware.com/v1/investors?limit=1000`;
+      console.log(`Fetching top traders from Bullaware: ${bullwareUrl}`);
       
-      while (hasMore) {
-        // Rate limiting: wait 6 seconds between requests (10 req/min limit)
-        if (page > 1) {
-          console.log(`Waiting 6 seconds for rate limiting...`);
-          await new Promise(resolve => setTimeout(resolve, 6000));
-        }
-        
-        const bullwareUrl = `https://api.bullaware.com/v1/investors?page=${page}`;
-        console.log(`Fetching page ${page} from Bullaware...`);
-        
-        const response = await fetch(bullwareUrl, {
-          headers: {
-            'Authorization': `Bearer ${BULLAWARE_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-        });
-        
-        if (!response.ok) {
-          throw new Error(`Bullaware API error: ${response.status}`);
-        }
-        
-        const data = await response.json();
-        const items = data.items || data.data || data.investors || (Array.isArray(data) ? data : []);
-        
-        console.log(`API response: total=${data.total || 'unknown'}, items=${items.length}, page=${page}`);
-        
-        allBullwareTraders.push(...items);
-        console.log(`Page ${page}: received ${items.length} traders (cumulative: ${allBullwareTraders.length})`);
-        
-        // Check if more pages exist
-        const total = data.total || data.totalCount;
-        if (total && allBullwareTraders.length >= total) {
-          hasMore = false;
-        } else if (items.length === 0) {
-          // No more items returned
-          hasMore = false;
-        } else {
-          page++;
-          // Safety limit - increased to 100 pages for larger datasets
-          if (page > 100) {
-            console.log('Reached max page limit (100), stopping pagination');
-            hasMore = false;
-          }
-        }
+      const response = await fetch(bullwareUrl, {
+        headers: {
+          'Authorization': `Bearer ${BULLAWARE_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Bullaware API error: ${response.status}`);
       }
+      
+      const data = await response.json();
+      allBullwareTraders = data.items || data.data || data.investors || (Array.isArray(data) ? data : []);
     }
 
     console.log(`Total traders from Bullaware: ${allBullwareTraders.length}`);
@@ -279,7 +239,6 @@ serve(async (req) => {
         updated_at: new Date().toISOString(),
       };
 
-      // Cross-check with Firecrawl ONLY if explicitly enabled
       if (hasFirecrawl) {
         const firecrawlData = await scrapeTraderFromEtoro(username, FIRECRAWL_API_KEY!);
         
@@ -308,7 +267,6 @@ serve(async (req) => {
       tradersToUpsert.push(bullwareRecord);
     }
 
-    // Upsert traders
     console.log(`Upserting ${tradersToUpsert.length} traders...`);
     const { data: upsertedData, error: upsertError } = await supabase
       .from('traders')
@@ -323,7 +281,6 @@ serve(async (req) => {
       throw upsertError;
     }
 
-    // Log discrepancies to database
     if (discrepancies.length > 0) {
       for (const disc of discrepancies) {
         if (disc.entity_id === 'pending') {

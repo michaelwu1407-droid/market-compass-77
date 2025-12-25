@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RefreshCw, Clock } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
@@ -26,19 +26,20 @@ export default function FeedPage() {
   const [isRefreshingLocal, setIsRefreshingLocal] = useState(false);
   
   const { data: posts, isLoading: postsLoading, refetch: refetchPosts, isFetching } = usePosts();
-  const { data: traders, isLoading: tradersLoading, refetch: refetchTraders } = useTraders();
-  const { followedTraderIds, isLoading: followsLoading, toggleFollow, isFollowing } = useFollowedTraders();
+  const { data: tradersData, isLoading: tradersLoading, refetch: refetchTraders } = useTraders();
+  const { followedTraderIds, isLoading: followsLoading } = useFollowedTraders();
   const { data: savedPostsData, isLoading: savedLoading } = useSavedPosts();
   const savePost = useSavePost();
   const unsavePost = useUnsavePost();
+
+  const allTraders = useMemo(() => {
+    return tradersData?.pages.flatMap(page => page.data || []) || [];
+  }, [tradersData]);
 
   const handleRefresh = async () => {
     console.log('REFRESH CLICKED');
     setIsRefreshingLocal(true);
     try {
-      let resultData: any = null;
-      // ALWAYS use direct fetch with hardcoded URL to ensure we hit the correct project
-      // This bypasses local environment variable issues in IDX/Preview
       const PROJECT_URL = 'https://xgvaibxxiwfraklfbwey.supabase.co';
       const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
       
@@ -57,9 +58,7 @@ export default function FeedPage() {
         const body = await res.text();
         throw new Error(`Function error: ${res.status} ${body}`);
       }
-      resultData = await res.json();
-
-      console.log('REFRESH SUCCESS', resultData);
+      await res.json();
 
       const [postsRes] = await Promise.all([refetchPosts(), refetchTraders()]) as any;
       const refreshedPosts = postsRes?.data || posts || [];
@@ -83,14 +82,11 @@ export default function FeedPage() {
     }
   };
 
-  // Create a Set of saved post IDs for quick lookup
-  const savedPostIds = new Set((savedPostsData || []).map(sp => sp.post_id));
+  const savedPostIds = useMemo(() => new Set((savedPostsData || []).map(sp => sp.post_id)), [savedPostsData]);
 
-  // Transform database posts to FeedItem format, filtering out garbage content
-  const feedItems: FeedItem[] = (posts || [])
-    .filter(post => isValidPostContent(post.content)) // Filter out garbage posts
+  const feedItems: FeedItem[] = useMemo(() => (posts || [])
+    .filter(post => isValidPostContent(post.content))
     .map((post) => {
-      // Map database trader to FeedPost trader format
       const mappedTrader: FeedTrader | undefined = post.traders ? {
         id: post.traders.id,
         etoro_trader_id: post.traders.etoro_username,
@@ -144,98 +140,59 @@ export default function FeedPage() {
         data: feedPost,
         created_at: post.posted_at || post.created_at || '',
       };
-    });
+    }), [posts]);
 
-  // Get real followed traders from the database
-  const followedTraders = (traders || []).filter(t => followedTraderIds.includes(t.id));
+  const followedTraders = useMemo(() => {
+    return allTraders.filter(t => followedTraderIds.includes(t.id));
+  }, [allTraders, followedTraderIds]);
 
-  // Deduplicate feed items by etoro_post_id to prevent duplicates
-  const deduplicatedFeedItems = feedItems.reduce((acc, item) => {
-    // Only posts have source_post_id - use type guard
-    if (item.type === 'post') {
-      const postData = item.data as FeedPost;
-      const uniqueKey = postData.source_post_id || `${postData.trader_id}-${item.created_at}`;
-      if (!acc.some(existing => {
-        if (existing.type === 'post') {
-          const existingPost = existing.data as FeedPost;
-          return (existingPost.source_post_id || `${existingPost.trader_id}-${existing.created_at}`) === uniqueKey;
+  const deduplicatedFeedItems = useMemo(() => {
+    const uniqueKeys = new Set<string>();
+    return feedItems.filter(item => {
+      if (item.type === 'post') {
+        const postData = item.data as FeedPost;
+        const uniqueKey = postData.source_post_id || `${postData.trader_id}-${item.created_at}`;
+        if (uniqueKeys.has(uniqueKey)) {
+          return false;
         }
-        return false;
-      })) {
-        acc.push(item);
+        uniqueKeys.add(uniqueKey);
       }
-    } else {
-      acc.push(item);
-    }
-    return acc;
-  }, [] as typeof feedItems);
+      return true;
+    });
+  }, [feedItems]);
   
-  // Filter feed items based on selected filter
-  const filteredFeedItems = (() => {
+  const filteredFeedItems = useMemo(() => {
     switch (filter) {
       case 'following':
-        return deduplicatedFeedItems.filter(item => {
-          if (item.type === 'post') {
-            const postData = item.data as FeedPost;
-            return postData.trader_id && followedTraderIds.includes(postData.trader_id);
-          }
-          return false;
-        });
+        return deduplicatedFeedItems.filter(item => 
+          item.type === 'post' && item.data.trader_id && followedTraderIds.includes(item.data.trader_id)
+        );
       case 'assets':
-        // Show posts that mention specific assets/symbols (check post text for $SYMBOL patterns)
-        return deduplicatedFeedItems.filter(item => {
-          if (item.type === 'post') {
-            const postData = item.data as FeedPost;
-            const text = postData.text || '';
-            return /\$[A-Z]{1,5}\b/.test(text);
-          }
-          return false;
-        });
+        return deduplicatedFeedItems.filter(item =>
+          item.type === 'post' && /\$[A-Z]{1,5}\b/.test(item.data.text || '')
+        );
       case 'traders':
-        // Show posts from verified/top traders (by copiers)
-        const topTraderIds = (traders || [])
+        const topTraderIds = allTraders
           .sort((a, b) => (b.copiers || 0) - (a.copiers || 0))
           .slice(0, 20)
           .map(t => t.id);
-        return deduplicatedFeedItems.filter(item => {
-          if (item.type === 'post') {
-            const postData = item.data as FeedPost;
-            return postData.trader_id && topTraderIds.includes(postData.trader_id);
-          }
-          return false;
-        });
+        return deduplicatedFeedItems.filter(item =>
+          item.type === 'post' && item.data.trader_id && topTraderIds.includes(item.data.trader_id)
+        );
       case 'saved':
-        // Filter by saved posts
-        return deduplicatedFeedItems.filter(item => {
-          if (item.type === 'post') {
-            return savedPostIds.has(item.id);
-          }
-          return false;
-        });
+        return deduplicatedFeedItems.filter(item => 
+          item.type === 'post' && savedPostIds.has(item.id)
+        );
       default:
         return deduplicatedFeedItems;
     }
-  })();
+  }, [filter, deduplicatedFeedItems, allTraders, followedTraderIds, savedPostIds]);
 
-  const handleSavePost = (postId: string) => {
-    savePost.mutate(postId);
-  };
-
-  const handleUnsavePost = (postId: string) => {
-    unsavePost.mutate(postId);
-  };
-
-  const handleViewTrader = (traderId: string) => {
-    navigate(`/traders/${traderId}`);
-  };
-
-  const handleAnalyse = (item: FeedItem) => {
-    navigate('/analysis');
-  };
-
-  const handleStarForIC = (item: FeedItem) => {
-    navigate('/ic');
-  };
+  const handleSavePost = (postId: string) => savePost.mutate(postId);
+  const handleUnsavePost = (postId: string) => unsavePost.mutate(postId);
+  const handleViewTrader = (traderId: string) => navigate(`/traders/${traderId}`);
+  const handleAnalyse = () => navigate('/analysis');
+  const handleStarForIC = () => navigate('/ic');
 
   const isLoading = postsLoading || tradersLoading || followsLoading || savedLoading;
 
@@ -266,7 +223,6 @@ export default function FeedPage() {
         </div>
       </div>
 
-      {/* Filters */}
       <div className="mb-6 overflow-x-auto scrollbar-hide -mx-4 px-4">
         <Tabs value={filter} onValueChange={(v) => setFilter(v as FilterType)}>
           <TabsList>
@@ -280,18 +236,13 @@ export default function FeedPage() {
       </div>
 
       <div className="flex gap-6">
-        {/* Left Sidebar - Desktop only */}
         {!isMobile && (
           <aside className="w-64 flex-shrink-0 hidden lg:block">
             <div className="sticky top-24 space-y-4">
               <div className="bg-card rounded-xl border border-border p-4">
                 <h3 className="font-semibold mb-3 text-sm">Traders You Follow</h3>
                 {tradersLoading ? (
-                  <div className="space-y-2">
-                    {[1, 2, 3].map((i) => (
-                      <Skeleton key={i} className="h-10 w-full" />
-                    ))}
-                  </div>
+                  <div className="space-y-2">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
                 ) : (
                   <div className="space-y-1">
                     {followedTraders.length > 0 ? (
@@ -310,9 +261,7 @@ export default function FeedPage() {
                         />
                       ))
                     ) : (
-                      <p className="text-sm text-muted-foreground py-2">
-                        You're not following any traders yet.
-                      </p>
+                      <p className="text-sm text-muted-foreground py-2">You're not following any traders yet.</p>
                     )}
                   </div>
                 )}
@@ -324,14 +273,9 @@ export default function FeedPage() {
           </aside>
         )}
 
-        {/* Main Feed */}
         <div className="flex-1 min-w-0">
           {isLoading ? (
-            <div className="space-y-4">
-              {[1, 2, 3, 4].map((i) => (
-                <Skeleton key={i} className="h-48 w-full rounded-xl" />
-              ))}
-            </div>
+            <div className="space-y-4">{[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-48 w-full rounded-xl" />)}</div>
           ) : filteredFeedItems.length > 0 ? (
             <div className="space-y-4">
               {filteredFeedItems.map((item) => (
@@ -348,12 +292,11 @@ export default function FeedPage() {
             </div>
           ) : (
             <div className="text-center py-12 text-muted-foreground">
-              <p>No posts found. Run the scrape-posts edge function to fetch data.</p>
+              <p>No posts found for the current filter.</p>
             </div>
           )}
         </div>
 
-        {/* Right Context Panel - Desktop only */}
         {!isMobile && (
           <aside className="w-80 flex-shrink-0 hidden xl:block">
             <div className="sticky top-24">
@@ -361,8 +304,8 @@ export default function FeedPage() {
                 <h3 className="font-semibold mb-3 text-sm text-muted-foreground">Quick Stats</h3>
                 <div className="space-y-3">
                   <div className="flex justify-between">
-                    <span className="text-sm text-muted-foreground">Feed items today</span>
-                    <span className="font-medium">{feedItems.length}</span>
+                    <span className="text-sm text-muted-foreground">Feed items</span>
+                    <span className="font-medium">{deduplicatedFeedItems.length}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-sm text-muted-foreground">Traders followed</span>
@@ -370,7 +313,7 @@ export default function FeedPage() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-sm text-muted-foreground">Total traders</span>
-                    <span className="font-medium text-primary">{traders?.length || 0}</span>
+                    <span className="font-medium text-primary">{allTraders.length}</span>
                   </div>
                 </div>
               </div>
