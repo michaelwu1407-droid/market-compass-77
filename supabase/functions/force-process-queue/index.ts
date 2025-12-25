@@ -12,10 +12,7 @@ const DELAY_BETWEEN_BATCHES = 2000; // 2 seconds between batches
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response(null, { 
-      status: 200,
-      headers: corsHeaders 
-    });
+    return new Response(null, { headers: corsHeaders });
   }
 
   try {
