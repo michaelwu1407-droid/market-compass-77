@@ -53,27 +53,45 @@ export default function AdminSyncPage() {
         throw new Error("Missing VITE_SUPABASE_ANON_KEY in environment variables");
     }
     console.log(`[AdminSyncPage] Invoking ${functionName} with body:`, body);
-    const res = await fetch(`${PROJECT_URL}/functions/v1/${functionName}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ANON_KEY}` },
-      body: JSON.stringify(body),
-    });
-    console.log(`[AdminSyncPage] Response status: ${res.status} ${res.statusText}`);
-    if (!res.ok) {
-      const errorText = await res.text();
-      console.error(`[AdminSyncPage] Function error:`, errorText);
-      throw new Error(errorText);
-    }
-    const result = await res.json();
-      console.log(`[AdminSyncPage] Function result:`, result);
+    
+    // Use Supabase client's function invocation which handles CORS better
+    try {
+      const { data, error } = await supabase.functions.invoke(functionName, {
+        body: body
+      });
+      
+      if (error) {
+        console.error(`[AdminSyncPage] Function error:`, error);
+        throw error;
+      }
+      
+      console.log(`[AdminSyncPage] Function result:`, data);
       // Log errors if present
-      if (result.summary?.errors && result.summary.errors.length > 0) {
-        console.error(`[AdminSyncPage] Errors in result:`, result.summary.errors);
-        result.summary.errors.forEach((err: any, idx: number) => {
+      if (data?.summary?.errors && data.summary.errors.length > 0) {
+        console.error(`[AdminSyncPage] Errors in result:`, data.summary.errors);
+        data.summary.errors.forEach((err: any, idx: number) => {
           console.error(`[AdminSyncPage] Error ${idx + 1}:`, JSON.stringify(err, null, 2));
         });
       }
+      return data;
+    } catch (e: any) {
+      // Fallback to direct fetch if Supabase client fails
+      console.log(`[AdminSyncPage] Supabase client failed, trying direct fetch:`, e.message);
+      const res = await fetch(`${PROJECT_URL}/functions/v1/${functionName}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ANON_KEY}` },
+        body: JSON.stringify(body),
+      });
+      console.log(`[AdminSyncPage] Response status: ${res.status} ${res.statusText}`);
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error(`[AdminSyncPage] Function error:`, errorText);
+        throw new Error(errorText);
+      }
+      const result = await res.json();
+      console.log(`[AdminSyncPage] Function result:`, result);
       return result;
+    }
   };
 
   const { data: syncStates } = useQuery({
