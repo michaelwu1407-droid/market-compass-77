@@ -76,6 +76,17 @@ serve(async (req) => {
             }
         }
         
+        // Self-schedule: Invoke ourselves again in 2 minutes if there's work to do
+        // This is a workaround if pg_cron isn't working
+        const shouldReschedule = (currentPending || 0) > 0 || (traderCount || 0) < 1000;
+        
+        if (shouldReschedule) {
+            // Schedule next run in 2 minutes (120 seconds)
+            // We'll use setTimeout equivalent - but in Deno, we can't do this directly
+            // Instead, we'll return a note that the system should be called again
+            console.log("Work remaining - system should be called again in 2 minutes");
+        }
+        
         return new Response(JSON.stringify({ 
             message: "Worker ran successfully", 
             dispatch_result: dispatchData,
@@ -85,7 +96,8 @@ serve(async (req) => {
                 processed_jobs: dispatchData?.dispatched_jobs || 0,
                 triggered_discovery: (traderCount || 0) < 1000,
                 refilled_queue: (currentPending || 0) < 50
-            }
+            },
+            note: shouldReschedule ? "More work available - call again in 2 minutes" : "Queue is healthy"
         }), { 
             headers: { ...corsHeaders, "Content-Type": "application/json" } 
         });
