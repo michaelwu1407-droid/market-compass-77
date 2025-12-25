@@ -57,6 +57,29 @@ serve(async (req) => {
 
     console.log(`Found ${initialPending} pending, ${initialInProgress} in_progress, ${initialFailed} failed jobs initially.`);
     
+    // If no pending jobs, try to enqueue some first
+    if ((initialPending || 0) === 0 && (initialInProgress || 0) === 0) {
+      console.log("No pending or in-progress jobs found. Attempting to enqueue jobs...");
+      try {
+        const { data: enqueueResult, error: enqueueError } = await supabase.functions.invoke('enqueue-sync-jobs', {
+          body: { force: true }
+        });
+        if (enqueueError) {
+          console.error("Error enqueueing jobs:", enqueueError);
+        } else {
+          console.log("Enqueued jobs result:", enqueueResult);
+          // Re-check pending count after enqueueing
+          const { count: newPending } = await supabase
+            .from('sync_jobs')
+            .select('*', { count: 'exact', head: true })
+            .eq('status', 'pending');
+          console.log(`After enqueueing, found ${newPending} pending jobs.`);
+        }
+      } catch (e) {
+        console.error("Exception while enqueueing:", e);
+      }
+    }
+    
     // Reset stuck in_progress jobs (older than 10 minutes) back to pending
     const stuckThreshold = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     const { count: resetCount } = await supabase
@@ -133,6 +156,14 @@ serve(async (req) => {
           .select('*', { count: 'exact', head: true })
           .eq('status', 'pending');
         console.log(`[DEBUG] Iteration ${i + 1}: Found ${debugPending} pending jobs but dispatch returned 0. Dispatch result:`, JSON.stringify(dispatchResult));
+        
+        // If we have pending jobs but dispatch returned 0, try enqueueing more
+        if (debugPending && debugPending > 0 && i < 3) {
+          console.log(`[DEBUG] Attempting to enqueue more jobs since we have ${debugPending} pending but dispatch returned 0...`);
+          await supabase.functions.invoke('enqueue-sync-jobs', {
+            body: { force: true }
+          });
+        }
       }
 
       // Check if there are still pending jobs
