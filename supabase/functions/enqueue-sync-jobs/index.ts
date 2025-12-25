@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const MAX_TRADERS_TO_ENQUEUE = 1000;
+// No limit - fetch all traders that need syncing
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -26,7 +26,7 @@ serve(async (req) => {
         
         // Call sync-traders once - it will fetch up to 3000 traders from Bullaware API
         // (with 6-second delays between pages to respect rate limits)
-        // If API fails or rate limited, it falls back to mock data (1000 traders per call)
+        // NO MOCK DATA - will fail if API doesn't work
         const { data: syncResult, error: syncError } = await supabase.functions.invoke('sync-traders');
         
         if (syncError) {
@@ -106,24 +106,22 @@ serve(async (req) => {
       const staleThreshold = new Date(Date.now() - hours_stale * 3600000).toISOString();
       const activeThreshold = new Date(Date.now() - hours_active * 3600000).toISOString();
 
-      // Get stale traders
+      // Get stale traders - NO LIMIT, fetch all that need syncing
       const { data: staleTraders, error: staleError } = await supabase
         .from('traders')
         .select('id')
-        .or(`updated_at.lt.${staleThreshold},updated_at.is.null`)
-        .limit(MAX_TRADERS_TO_ENQUEUE);
+        .or(`updated_at.lt.${staleThreshold},updated_at.is.null`);
 
       if (staleError) throw staleError;
       staleTraders.forEach(t => traderIdsToEnqueue.add(t.id));
       console.log(`Found ${staleTraders.length} stale traders (older than ${hours_stale}h).`);
 
-      // Get active traders
+      // Get active traders - NO LIMIT
       const { data: recentPosters, error: postersError } = await supabase
         .from('posts')
         .select('trader_id')
         .not('trader_id', 'is', null)
-        .gt('created_at', activeThreshold)
-        .limit(MAX_TRADERS_TO_ENQUEUE);
+        .gt('created_at', activeThreshold);
       
       if (postersError) throw postersError;
       recentPosters.forEach(p => traderIdsToEnqueue.add(p.trader_id!));

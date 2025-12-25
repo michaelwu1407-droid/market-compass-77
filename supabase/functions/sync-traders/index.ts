@@ -110,38 +110,17 @@ serve(async (req) => {
     }
 
     if (!apiWorks || allBullwareTraders.length === 0) {
-        console.log("Using mock/fallback data to ensure system functionality.");
-        allBullwareTraders = []; // Clear any partial data
-        
-        // Check how many traders we already have
-        const { count: existingCount, error: countError } = await supabase
-            .from('traders')
-            .select('*', { count: 'exact', head: true });
-        
-        if (countError) {
-            console.error("Error counting traders:", countError);
-        }
-        
-        // Always create exactly 1000 new traders per call (regardless of existing count)
-        // This ensures we create thousands when called multiple times
-        const currentCount = existingCount || 0;
-        const batchSize = 1000; // Always create 1000 per call
-        const startIndex = currentCount + 1;
-        const endIndex = startIndex + batchSize;
-        
-        console.log(`Existing traders: ${currentCount}, Creating ${batchSize} new mock traders (${startIndex} to ${endIndex})`);
-        
-        for (let i = startIndex; i < endIndex; i++) {
-            allBullwareTraders.push({
-                username: `trader_${i}`,
-                displayName: `Trader ${i}`,
-                riskScore: Math.floor(Math.random() * 8) + 1,
-                copiers: Math.floor(Math.random() * 5000),
-                gain12Months: (Math.random() * 40 - 10).toFixed(2),
-            });
-        }
-        
-        console.log(`Generated ${allBullwareTraders.length} trader objects to upsert`);
+        console.error("Bullaware API failed or returned no data. Cannot proceed without real data.");
+        return new Response(
+            JSON.stringify({
+                success: false,
+                error: "Bullaware API failed or returned no data. No mock data will be generated.",
+                synced: 0,
+                total_traders: 0,
+                message: "API call failed - check BULLAWARE_API_KEY and API status"
+            }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
     }
 
     console.log(`Processing ${allBullwareTraders.length} traders for upsert.`);
@@ -207,7 +186,7 @@ serve(async (req) => {
         synced: tradersToUpsert.length,
         total_traders: finalCount || 0,
         message: `Synced ${tradersToUpsert.length} traders. Total in database: ${finalCount || 0}`,
-        using_mock_data: !apiWorks
+        api_used: apiWorks
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

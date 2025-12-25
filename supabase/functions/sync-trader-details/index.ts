@@ -43,27 +43,6 @@ serve(async (req) => {
       if (staleTraders) tradersToSync = staleTraders;
     }
 
-    // MOCK DATA GENERATOR for Details
-    // If the API key is missing or calls fail, we generate consistent mock data
-    const generateMockPortfolio = (traderId: string) => {
-        const assets = ['AAPL', 'TSLA', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'BTC', 'ETH', 'SPY'];
-        const count = Math.floor(Math.random() * 5) + 3; // 3 to 8 assets
-        const holdings = [];
-        let remaining = 100;
-        
-        for(let i=0; i<count; i++) {
-            const pct = i === count - 1 ? remaining : Math.floor(Math.random() * (remaining / 2));
-            remaining -= pct;
-            holdings.push({
-                trader_id: traderId,
-                symbol: assets[Math.floor(Math.random() * assets.length)],
-                allocation_pct: pct,
-                profit_loss_pct: (Math.random() * 20 - 5).toFixed(2),
-                updated_at: new Date().toISOString()
-            });
-        }
-        return holdings;
-    };
 
     if (tradersToSync.length === 0) {
       return new Response(JSON.stringify({ 
@@ -118,13 +97,15 @@ serve(async (req) => {
              }
         }
 
-        // FALLBACK: Use Mock Data if API failed or no key
+        // NO MOCK DATA - Only save if API succeeded
         if (!apiSuccess) {
-            console.log(`Using mock details for ${trader.etoro_username}`);
-            bullwareHoldings = generateMockPortfolio(trader.id);
+            console.error(`API failed for ${trader.etoro_username} - skipping (no mock data)`);
+            // Mark as updated anyway to prevent immediate retry
+            await supabase.from('traders').update({ updated_at: new Date().toISOString() }).eq('id', trader.id);
+            continue; // Skip to next trader
         }
 
-        // Save holdings
+        // Save holdings only if API succeeded
         if (bullwareHoldings.length > 0) {
             const { error: deleteError } = await supabase.from('trader_holdings').delete().eq('trader_id', trader.id);
             if (deleteError) {
@@ -149,9 +130,9 @@ serve(async (req) => {
     
     return new Response(JSON.stringify({ 
         success: true, 
-        message: `Synced details for ${syncedCount} traders (with mock fallback)`,
+        message: `Synced details for ${syncedCount} traders from Bullaware API`,
         synced: syncedCount,
-        using_mock: !BULLAWARE_API_KEY || syncedCount === 0
+        api_used: !!BULLAWARE_API_KEY
     }), { 
         headers: { ...corsHeaders, "Content-Type": "application/json" } 
     });
