@@ -85,39 +85,50 @@ serve(async (req) => {
         }
 
         // Process jobs sequentially to respect Bullaware API rate limit (10 req/min)
-        const results = [];
+        let invokedCount = 0;
+        const errors: any[] = []; // Collect errors
+
         for (let i = 0; i < pendingJobs.length; i++) {
             const job = pendingJobs[i];
             console.log(`Processing job ${i + 1}/${pendingJobs.length}: ${job.id}`);
             
             try {
-                const result = await supabase.functions.invoke('process-sync-job', {
+                const { data: result, error: invokeError } = await supabase.functions.invoke('process-sync-job', {
                     body: { job_id: job.id },
                 });
-                results.push(result);
+                
+                if (invokeError) {
+                    // Supabase function invocation error (network, auth, etc.)
+                    const errorMsg = typeof invokeError === 'string' ? invokeError : (invokeError.message || JSON.stringify(invokeError));
+                    console.error(`Failed to invoke process-sync-job for job ${job.id}:`, errorMsg);
+                    errors.push({ job_id: job.id, error: `Invocation error: ${errorMsg}` });
+                } else if (result && result.error) {
+                    // Function returned successfully but with an error in the response
+                    console.error(`process-sync-job returned error for job ${job.id}:`, result.error);
+                    errors.push({ job_id: job.id, error: result.error });
+                } else {
+                    // Success
+                    invokedCount++;
+                    console.log(`Successfully processed job ${job.id}`);
+                }
                 
                 // Add delay between jobs to respect rate limit (except for last job)
                 if (i < pendingJobs.length - 1) {
                     console.log(`Waiting ${DELAY_BETWEEN_JOBS_MS}ms before next job to respect API rate limit...`);
                     await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_JOBS_MS));
                 }
-            } catch (err) {
-                console.error(`Error invoking process-sync-job for job ${job.id}:`, err);
-                results.push({ error: err, data: null });
+            } catch (err: any) {
+                // Catch any unexpected errors
+                const errorMsg = err?.message || err?.toString() || JSON.stringify(err);
+                console.error(`Exception invoking process-sync-job for job ${job.id}:`, errorMsg);
+                errors.push({ job_id: job.id, error: `Exception: ${errorMsg}` });
+                
+                // Still add delay even on error to respect rate limits
+                if (i < pendingJobs.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_JOBS_MS));
+                }
             }
         }
-
-        let invokedCount = 0;
-        const errors: any[] = []; // Collect errors
-
-        results.forEach((res, i) => {
-            if (res.error) {
-                console.error(`Failed to invoke process-sync-job for job ${pendingJobs[i].id}:`, res.error);
-                errors.push({ job_id: pendingJobs[i].id, error: res.error });
-            } else {
-                invokedCount++;
-            }
-        });
 
         console.log(`Dispatched ${invokedCount} of ${pendingJobs.length} pending jobs.`);
 
@@ -131,11 +142,18 @@ serve(async (req) => {
             status: 200
         });
 
-    } catch (error) {
+    } catch (error: any) {
         console.error("Dispatch error:", error);
-        return new Response(JSON.stringify({ error: error.message }), {
+        // Always return 200 with error details instead of 500, so force-process-queue can continue
+        return new Response(JSON.stringify({ 
+            success: false,
+            error: error?.message || error?.toString() || 'Unknown error',
+            dispatched_jobs: 0,
+            attempted: 0,
+            errors: [{ error: error?.message || error?.toString() || 'Unknown error' }]
+        }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
-            status: 500,
+            status: 200, // Return 200 so caller can see the error details
         });
     }
 });
