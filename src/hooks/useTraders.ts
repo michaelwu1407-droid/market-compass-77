@@ -1,12 +1,32 @@
-import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import type { Tables } from '@/integrations/supabase/types';
+import { useEffect } from 'react';
 
 export type Trader = Tables<'traders'>;
 
 const TRADERS_PER_PAGE = 50;
 
 export function useTraders() {
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('traders-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'traders' },
+        (payload) => {
+          queryClient.invalidateQueries({ queryKey: ['traders'] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [queryClient]);
+
   return useInfiniteQuery({
     queryKey: ['traders'],
     queryFn: async ({ pageParam = 0 }) => {

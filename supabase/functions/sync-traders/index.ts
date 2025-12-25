@@ -301,6 +301,16 @@ serve(async (req) => {
 
     console.log(`Successfully synced ${upsertedData?.length || 0} traders, logged ${discrepancies.length} discrepancies`);
 
+    // After successful sync, invoke enqueue-sync-jobs
+    console.log('Invoking enqueue-sync-jobs with force: true');
+    const { error: enqueueError } = await supabase.functions.invoke('enqueue-sync-jobs', {
+        body: { force: true }
+    });
+    if (enqueueError) {
+        console.error('Error invoking enqueue-sync-jobs:', enqueueError);
+        // Decide if this should be a critical failure
+    }
+
     return new Response(
       JSON.stringify({
         success: true,

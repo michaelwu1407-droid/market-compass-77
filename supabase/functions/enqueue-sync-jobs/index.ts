@@ -22,12 +22,12 @@ serve(async (req) => {
     );
 
     if (sync_traders) {
-        console.log('sync_traders is true, invoking sync-traders function');
-        const { error: syncError } = await supabase.functions.invoke('sync-traders');
-        if (syncError) {
-            console.error('Error invoking sync-traders function:', syncError);
-            throw syncError;
-        }
+        console.log('sync_traders is true, invoking sync-traders function asynchronously');
+        supabase.functions.invoke('sync-traders');
+        return new Response(JSON.stringify({ message: "Asynchronously invoked sync-traders. The queue will be populated shortly." }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 202, // Accepted
+        });
     }
 
     let traderIdsToEnqueue = new Set<string>();
