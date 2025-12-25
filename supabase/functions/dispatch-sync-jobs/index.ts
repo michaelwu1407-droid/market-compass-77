@@ -102,14 +102,19 @@ serve(async (req) => {
                     const errorMsg = typeof invokeError === 'string' ? invokeError : (invokeError.message || JSON.stringify(invokeError));
                     console.error(`Failed to invoke process-sync-job for job ${job.id}:`, errorMsg);
                     errors.push({ job_id: job.id, error: `Invocation error: ${errorMsg}` });
-                } else if (result && result.error) {
+                } else if (result && (result.error || result.success === false)) {
                     // Function returned successfully but with an error in the response
-                    console.error(`process-sync-job returned error for job ${job.id}:`, result.error);
-                    errors.push({ job_id: job.id, error: result.error });
-                } else {
+                    const errorMsg = result.error || 'Process failed';
+                    console.error(`process-sync-job returned error for job ${job.id}:`, errorMsg);
+                    errors.push({ job_id: job.id, error: errorMsg, details: result.details });
+                } else if (result && result.success !== false) {
                     // Success
                     invokedCount++;
                     console.log(`Successfully processed job ${job.id}`);
+                } else {
+                    // Unknown response format
+                    console.warn(`process-sync-job returned unexpected response for job ${job.id}:`, result);
+                    invokedCount++; // Assume success if no error
                 }
                 
                 // Add delay between jobs to respect rate limit (except for last job)

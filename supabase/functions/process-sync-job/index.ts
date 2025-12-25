@@ -34,7 +34,15 @@ serve(async (req) => {
 
     if (checkError || !jobCheck) {
         console.error(`[process-sync-job] Job ${job_id} check failed:`, checkError);
-        return new Response(JSON.stringify({ error: `Job ${job_id} not found`, details: checkError }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        // Return 200 so dispatch-sync-jobs can continue processing other jobs
+        return new Response(JSON.stringify({ 
+            success: false,
+            error: `Job ${job_id} not found`, 
+            details: checkError 
+        }), { 
+            status: 200, 
+            headers: { ...corsHeaders, "Content-Type": "application/json" } 
+        });
     }
 
     // 2. Claim the job
@@ -47,14 +55,35 @@ serve(async (req) => {
 
     if (fetchError || !job) {
         console.error(`[process-sync-job] Failed to claim job ${job_id}:`, fetchError);
-        return new Response(JSON.stringify({ error: `Failed to claim job ${job_id}`, details: fetchError }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        // Return 200 so dispatch-sync-jobs can continue processing other jobs
+        return new Response(JSON.stringify({ 
+            success: false,
+            error: `Failed to claim job ${job_id}`, 
+            details: fetchError 
+        }), { 
+            status: 200, 
+            headers: { ...corsHeaders, "Content-Type": "application/json" } 
+        });
     }
 
     const { trader, job_type } = job;
     if (!trader || !trader.etoro_username) {
         console.error(`[process-sync-job] Trader missing for job ${job_id}`);
-        await supabase.from('sync_jobs').update({ status: 'failed', finished_at: new Date().toISOString(), error_message: 'Trader not found' }).eq('id', job.id);
-        return new Response(JSON.stringify({ error: 'Trader missing' }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        await supabase.from('sync_jobs').update({ 
+            status: 'failed', 
+            finished_at: new Date().toISOString(), 
+            error_message: 'Trader not found',
+            retry_count: (job.retry_count || 0) + 1
+        }).eq('id', job.id);
+        // Return 200 so dispatch-sync-jobs can continue processing other jobs
+        return new Response(JSON.stringify({ 
+            success: false,
+            error: 'Trader missing',
+            job_id: job.id
+        }), { 
+            status: 200, 
+            headers: { ...corsHeaders, "Content-Type": "application/json" } 
+        });
     }
 
     console.log(`[process-sync-job] Processing ${job_type} for ${trader.etoro_username}`);
@@ -66,13 +95,24 @@ serve(async (req) => {
 
     if (syncError) {
         console.error(`[process-sync-job] Error syncing details for ${trader.etoro_username}:`, syncError);
+        const errorMsg = typeof syncError === 'string' ? syncError : (syncError.message || JSON.stringify(syncError));
         await supabase.from('sync_jobs').update({ 
             status: 'failed', 
             finished_at: new Date().toISOString(), 
-            error_message: syncError.message || 'Error invoking sync-trader-details'
+            error_message: errorMsg || 'Error invoking sync-trader-details',
+            retry_count: (job.retry_count || 0) + 1
         }).eq('id', job.id);
         
-        return new Response(JSON.stringify({ error: 'Sync failed', details: syncError }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        // Return 200 with error details so dispatch-sync-jobs can continue processing other jobs
+        return new Response(JSON.stringify({ 
+            success: false,
+            error: 'Sync failed', 
+            details: errorMsg,
+            job_id: job.id
+        }), { 
+            status: 200, 
+            headers: { ...corsHeaders, "Content-Type": "application/json" } 
+        });
     }
 
     // Check if the sync function itself reported failure despite successful invocation
@@ -81,9 +121,19 @@ serve(async (req) => {
          await supabase.from('sync_jobs').update({ 
             status: 'failed', 
             finished_at: new Date().toISOString(), 
-            error_message: syncData.error || 'Sync function reported failure'
+            error_message: syncData.error || 'Sync function reported failure',
+            retry_count: (job.retry_count || 0) + 1
         }).eq('id', job.id);
-        return new Response(JSON.stringify({ error: 'Sync reported failure', details: syncData }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        // Return 200 with error details so dispatch-sync-jobs can continue processing other jobs
+        return new Response(JSON.stringify({ 
+            success: false,
+            error: 'Sync reported failure', 
+            details: syncData,
+            job_id: job.id
+        }), { 
+            status: 200, 
+            headers: { ...corsHeaders, "Content-Type": "application/json" } 
+        });
     }
 
     // 3. Mark job as complete
@@ -92,11 +142,16 @@ serve(async (req) => {
 
     return new Response(JSON.stringify({ success: true, job_id: job.id, message: `Synced ${trader.etoro_username}`, data: syncData }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("[process-sync-job] Fatal error:", error);
-    return new Response(JSON.stringify({ error: error.message, stack: error.stack }), {
+    // Return 200 so dispatch-sync-jobs can continue processing other jobs
+    return new Response(JSON.stringify({ 
+        success: false,
+        error: error?.message || error?.toString() || 'Unknown error', 
+        stack: error?.stack 
+    }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
-        status: 500,
+        status: 200, // Always return 200 so caller can see error details
     });
   }
 });
