@@ -96,15 +96,31 @@ serve(async (req) => {
       const dispatched = dispatchResult?.dispatched_jobs || 0;
       const attempted = dispatchResult?.attempted || 0;
       const errors = dispatchResult?.errors || [];
+      const dispatchError = dispatchResult?.error;
 
       stats.total_dispatched += dispatched;
       stats.total_processed += attempted;
       
       if (errors.length > 0) {
         stats.errors.push(...errors);
+        console.error(`Iteration ${i + 1} errors:`, errors);
+      }
+      
+      if (dispatchError) {
+        stats.errors.push({ iteration: i + 1, error: dispatchError });
+        console.error(`Iteration ${i + 1} dispatch error:`, dispatchError);
       }
 
-      console.log(`Iteration ${i + 1}: Dispatched ${dispatched} jobs (attempted ${attempted})${errors.length > 0 ? `, ${errors.length} errors` : ''}`);
+      console.log(`Iteration ${i + 1}: Dispatched ${dispatched} jobs (attempted ${attempted})${errors.length > 0 ? `, ${errors.length} errors` : ''}${dispatchError ? `, dispatch error: ${dispatchError}` : ''}`);
+      
+      // Debug: Check why no jobs were dispatched
+      if (dispatched === 0 && attempted === 0) {
+        const { count: debugPending } = await supabase
+          .from('sync_jobs')
+          .select('*', { count: 'exact', head: true })
+          .eq('status', 'pending');
+        console.log(`[DEBUG] Iteration ${i + 1}: Found ${debugPending} pending jobs but dispatch returned 0. Dispatch result:`, JSON.stringify(dispatchResult));
+      }
 
       // Check if there are still pending jobs
       const { count: currentPending } = await supabase

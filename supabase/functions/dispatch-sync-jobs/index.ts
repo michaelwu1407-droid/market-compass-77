@@ -44,8 +44,31 @@ serve(async (req) => {
         console.log(`Found ${pendingJobs?.length} pending jobs.`);
 
         if (!pendingJobs || pendingJobs.length === 0) {
-            const { count } = await supabase.from('sync_jobs').select('*', { count: 'exact', head: true });
-            return new Response(JSON.stringify({ message: "No pending jobs to dispatch.", total_jobs: count }), { headers: corsHeaders });
+            // Double-check with a count query
+            const { count, error: countError } = await supabase
+                .from('sync_jobs')
+                .select('*', { count: 'exact', head: true })
+                .eq('status', 'pending');
+            
+            console.log(`[DEBUG] Count query: ${count} pending jobs, error:`, countError);
+            
+            if (count && count > 0) {
+                // There are pending jobs but select returned none - might be a query issue
+                console.error(`[DEBUG] Mismatch: Count shows ${count} pending but select returned 0. Checking query...`);
+                // Try without limit
+                const { data: allPending, error: allPendingError } = await supabase
+                    .from('sync_jobs')
+                    .select('id, status, created_at')
+                    .eq('status', 'pending')
+                    .order('created_at', { ascending: true });
+                console.log(`[DEBUG] All pending jobs query:`, allPending?.length, 'error:', allPendingError);
+            }
+            
+            return new Response(JSON.stringify({ 
+                message: "No pending jobs to dispatch.", 
+                total_jobs: count,
+                debug: { count, countError }
+            }), { headers: corsHeaders });
         }
 
         const invocationPromises = pendingJobs.map(job => {

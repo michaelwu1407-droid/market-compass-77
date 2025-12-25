@@ -65,8 +65,12 @@ export default function AdminSyncPage() {
       throw new Error(errorText);
     }
     const result = await res.json();
-    console.log(`[AdminSyncPage] Function result:`, result);
-    return result;
+      console.log(`[AdminSyncPage] Function result:`, result);
+      // Log errors if present
+      if (result.summary?.errors && result.summary.errors.length > 0) {
+        console.error(`[AdminSyncPage] Errors in result:`, result.summary.errors);
+      }
+      return result;
   };
 
   const { data: syncStates } = useQuery({
