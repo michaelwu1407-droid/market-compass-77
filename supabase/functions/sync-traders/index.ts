@@ -212,10 +212,15 @@ serve(async (req) => {
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
-  } catch (error) {
-    console.error('Critical error in sync-traders:', error.message);
+  } catch (error: any) {
+    console.error('Critical error in sync-traders:', error);
     return new Response(
-      JSON.stringify({ success: false, error: error.message }),
+      JSON.stringify({ 
+        success: false, 
+        error: error?.message || error?.toString() || 'Unknown error',
+        synced: 0,
+        total_traders: 0
+      }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }

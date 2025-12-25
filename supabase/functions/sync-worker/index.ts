@@ -104,11 +104,17 @@ serve(async (req) => {
             headers: { ...corsHeaders, "Content-Type": "application/json" } 
         });
 
-    } catch (error) {
+    } catch (error: any) {
         console.error("Worker error:", error);
-        return new Response(JSON.stringify({ error: error.message }), {
+        return new Response(JSON.stringify({ 
+            success: false,
+            error: error?.message || error?.toString() || 'Unknown error',
+            dispatch_result: null,
+            pending_jobs: 0,
+            trader_count: 0
+        }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
-            status: 500,
+            status: 200, // Return 200 so caller can see error details
         });
     }
 });

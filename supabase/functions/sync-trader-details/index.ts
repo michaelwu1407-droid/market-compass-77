@@ -141,7 +141,10 @@ serve(async (req) => {
         }
         
         // Mark as updated so we don't sync again immediately
-        await supabase.from('traders').update({ updated_at: new Date().toISOString() }).eq('id', trader.id);
+        const { error: updateError } = await supabase.from('traders').update({ updated_at: new Date().toISOString() }).eq('id', trader.id);
+        if (updateError) {
+            console.error(`Error updating trader timestamp for ${trader.etoro_username}:`, updateError);
+        }
     }
     
     return new Response(JSON.stringify({ 
