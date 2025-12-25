@@ -35,13 +35,46 @@ serve(async (req) => {
 
     console.log("Starting force-process-queue...");
 
-    // Get initial pending count
+    // Get initial counts for all statuses
     const { count: initialPending } = await supabase
       .from('sync_jobs')
       .select('*', { count: 'exact', head: true })
       .eq('status', 'pending');
+    
+    const { count: initialInProgress } = await supabase
+      .from('sync_jobs')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'in_progress');
+    
+    const { count: initialFailed } = await supabase
+      .from('sync_jobs')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'failed');
 
-    console.log(`Found ${initialPending} pending jobs initially.`);
+    console.log(`Found ${initialPending} pending, ${initialInProgress} in_progress, ${initialFailed} failed jobs initially.`);
+    
+    // Reset stuck in_progress jobs (older than 10 minutes) back to pending
+    const stuckThreshold = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const { count: resetCount } = await supabase
+      .from('sync_jobs')
+      .update({ status: 'pending', started_at: null })
+      .eq('status', 'in_progress')
+      .lt('started_at', stuckThreshold);
+    
+    if (resetCount && resetCount > 0) {
+      console.log(`Reset ${resetCount} stuck in_progress jobs back to pending`);
+    }
+    
+    // Also reset failed jobs with low retry count
+    const { count: retryCount } = await supabase
+      .from('sync_jobs')
+      .update({ status: 'pending', error_message: null, retry_count: 0 })
+      .eq('status', 'failed')
+      .lte('retry_count', 3);
+    
+    if (retryCount && retryCount > 0) {
+      console.log(`Reset ${retryCount} failed jobs back to pending for retry`);
+    }
 
     // Process in batches until no more pending jobs
     for (let i = 0; i < maxIterations; i++) {
@@ -62,16 +95,33 @@ serve(async (req) => {
 
       const dispatched = dispatchResult?.dispatched_jobs || 0;
       const attempted = dispatchResult?.attempted || 0;
+      const errors = dispatchResult?.errors || [];
 
       stats.total_dispatched += dispatched;
       stats.total_processed += attempted;
+      
+      if (errors.length > 0) {
+        stats.errors.push(...errors);
+      }
 
-      console.log(`Iteration ${i + 1}: Dispatched ${dispatched} jobs (attempted ${attempted})`);
+      console.log(`Iteration ${i + 1}: Dispatched ${dispatched} jobs (attempted ${attempted})${errors.length > 0 ? `, ${errors.length} errors` : ''}`);
 
-      // If no jobs were dispatched, we're done
-      if (dispatched === 0 || attempted === 0) {
+      // Check if there are still pending jobs
+      const { count: currentPending } = await supabase
+        .from('sync_jobs')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'pending');
+      
+      // If no jobs were dispatched AND no pending jobs remain, we're done
+      if ((dispatched === 0 || attempted === 0) && (currentPending || 0) === 0) {
         console.log("No more pending jobs to process.");
         break;
+      }
+      
+      // If we got errors but still have pending jobs, continue trying
+      if (dispatched === 0 && (currentPending || 0) > 0) {
+        console.log(`Still have ${currentPending} pending jobs but dispatch returned 0. Continuing...`);
+        // Don't break - keep trying
       }
 
       // Wait before next batch (except on last iteration)

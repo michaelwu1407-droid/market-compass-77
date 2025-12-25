@@ -21,10 +21,19 @@ serve(async (req) => {
 
         console.log("Searching for pending jobs...");
 
+        // Also reset stuck in_progress jobs (older than 10 minutes) before fetching
+        const stuckThreshold = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+        await supabase
+            .from('sync_jobs')
+            .update({ status: 'pending', started_at: null })
+            .eq('status', 'in_progress')
+            .lt('started_at', stuckThreshold);
+
         const { data: pendingJobs, error: fetchError } = await supabase
             .from('sync_jobs')
             .select('id, status')
             .eq('status', 'pending')
+            .order('created_at', { ascending: true }) // Process oldest first
             .limit(MAX_CONCURRENT_INVOCATIONS);
 
         if (fetchError) {
