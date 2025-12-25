@@ -39,6 +39,8 @@ interface SyncState {
 export default function AdminSyncPage() {
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isForceProcessing, setIsForceProcessing] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
   const [isSyncingAssets, setIsSyncingAssets] = useState(false);
   const [isSyncingMovers, setIsSyncingMovers] = useState(false);
   const [isSyncingPosts, setIsSyncingPosts] = useState(false);
@@ -100,6 +102,28 @@ export default function AdminSyncPage() {
     refetchInterval: 5000,
   });
 
+  // Get actual trader count from database
+  const { data: traderCount } = useQuery({
+    queryKey: ['trader-count'],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from('traders')
+        .select('*', { count: 'exact', head: true });
+      if (error) throw error;
+      return count || 0;
+    },
+    refetchInterval: 10000,
+  });
+
+  // Get diagnostics
+  const { data: diagnostics, refetch: refetchDiagnostics } = useQuery({
+    queryKey: ['sync-diagnostics'],
+    queryFn: async () => {
+      return await invokeFunction('sync-diagnostics');
+    },
+    refetchInterval: 30000,
+  });
+
   const ITEMS_PER_HOUR = 60;
   const estimatedHoursLeft = stats ? (stats.pending / ITEMS_PER_HOUR).toFixed(1) : 0;
   const progressPct = stats && stats.total > 0 ? ((stats.completed / stats.total) * 100) : 0;
@@ -128,6 +152,37 @@ export default function AdminSyncPage() {
     }
     catch (e) { toast({ title: 'Error', description: String(e), variant: 'destructive' }); }
     finally { setIsProcessing(false); }
+  };
+
+  const runForceProcessing = async () => {
+    setIsForceProcessing(true);
+    try {
+      const result = await invokeFunction('force-process-queue', { max_iterations: 100 });
+      toast({ 
+        title: 'Force Processing Complete', 
+        description: `Processed ${result.summary?.jobs_cleared || 0} jobs in ${result.summary?.iterations || 0} iterations` 
+      }); 
+      refetchStats();
+      refetchQueue();
+      refetchDiagnostics();
+    }
+    catch (e) { toast({ title: 'Error', description: String(e), variant: 'destructive' }); }
+    finally { setIsForceProcessing(false); }
+  };
+
+  const runVerification = async () => {
+    setIsVerifying(true);
+    try {
+      const result = await invokeFunction('verify-deployment');
+      console.log('Verification result:', result);
+      toast({ 
+        title: 'Deployment Verification', 
+        description: 'Check console for detailed results',
+        duration: 10000
+      }); 
+    }
+    catch (e) { toast({ title: 'Error', description: String(e), variant: 'destructive' }); }
+    finally { setIsVerifying(false); }
   };
 
   // These functions remain as they are, assuming they are correct
@@ -159,6 +214,18 @@ export default function AdminSyncPage() {
           <h1 className="text-3xl font-bold tracking-tight">System Monitor</h1>
           <p className="text-muted-foreground mt-1">Real-time status of data synchronization pipelines</p>
         </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={runVerification} disabled={isVerifying}>
+            {isVerifying ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CheckCircle2 className="h-4 w-4 mr-2" />}
+            Verify Deployment
+          </Button>
+          {(stats?.pending ?? 0) > 0 && (
+            <Button variant="default" size="sm" onClick={runForceProcessing} disabled={isForceProcessing}>
+              {isForceProcessing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Zap className="h-4 w-4 mr-2" />}
+              Force Process Queue
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -187,10 +254,25 @@ export default function AdminSyncPage() {
                         <p className="text-2xl font-bold text-yellow-600">{stats?.pending || 0}</p>
                     </div>
                     <div className="space-y-1">
-                        <p className="text-xs text-muted-foreground uppercase tracking-wider">Est. Time</p>
-                        <p className="text-2xl font-bold text-gray-700">~{estimatedHoursLeft}h</p>
+                        <p className="text-xs text-muted-foreground uppercase tracking-wider">Total Traders</p>
+                        <p className="text-2xl font-bold text-blue-600">{traderCount || 0}</p>
                     </div>
                 </div>
+                
+                {diagnostics?.recommendations && diagnostics.recommendations.length > 0 && (
+                  <div className="pt-2 border-t">
+                    {diagnostics.recommendations.map((rec: any, idx: number) => (
+                      <div key={idx} className={`text-xs p-2 rounded mb-1 ${
+                        rec.severity === 'high' ? 'bg-red-50 text-red-700' :
+                        rec.severity === 'medium' ? 'bg-yellow-50 text-yellow-700' :
+                        'bg-blue-50 text-blue-700'
+                      }`}>
+                        <AlertCircle className="h-3 w-3 inline mr-1" />
+                        {rec.message}
+                      </div>
+                    ))}
+                  </div>
+                )}
             </CardContent>
             <CardFooter className="bg-muted/30 p-3 px-6 flex justify-between items-center">
                 <div className="text-xs text-muted-foreground">
@@ -203,6 +285,11 @@ export default function AdminSyncPage() {
                     <Button title="Dispatch Batch" size="sm" variant="ghost" onClick={runProcessing} disabled={isProcessing}>
                         {isProcessing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
                     </Button>
+                    {(stats?.pending ?? 0) > 10 && (
+                      <Button title="Force Process All" size="sm" variant="ghost" onClick={runForceProcessing} disabled={isForceProcessing}>
+                        {isForceProcessing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Package className="h-3 w-3" />}
+                      </Button>
+                    )}
                 </div>
             </CardFooter>
         </Card>
@@ -279,3 +366,4 @@ export default function AdminSyncPage() {
     </div>
   );
 }
+

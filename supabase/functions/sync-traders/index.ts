@@ -56,7 +56,19 @@ serve(async (req) => {
     if (!apiWorks || allBullwareTraders.length === 0) {
         console.log("Using mock/fallback data to ensure system functionality.");
         allBullwareTraders = []; // Clear any partial data
-        for (let i = 1; i <= 150; i++) {
+        
+        // Check how many traders we already have
+        const { count: existingCount } = await supabase
+            .from('traders')
+            .select('*', { count: 'exact', head: true });
+        
+        const targetCount = 200; // Target number of traders
+        const startIndex = (existingCount || 0) + 1;
+        const neededCount = Math.max(0, targetCount - (existingCount || 0));
+        
+        console.log(`Existing traders: ${existingCount}, Creating ${neededCount} new mock traders`);
+        
+        for (let i = startIndex; i < startIndex + neededCount; i++) {
             allBullwareTraders.push({
                 username: `trader_${i}`,
                 displayName: `Trader ${i}`,

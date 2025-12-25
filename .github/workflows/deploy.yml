@@ -25,11 +25,29 @@ jobs:
       - name: Deploy sync-traders
         run: supabase functions deploy sync-traders --project-ref $PROJECT_ID
 
-      - name: Deploy run-migration
-        run: supabase functions deploy run-migration --project-ref $PROJECT_ID
-        
+      - name: Deploy sync-trader-details
+        run: supabase functions deploy sync-trader-details --project-ref $PROJECT_ID
+
+      - name: Deploy sync-worker
+        run: supabase functions deploy sync-worker --project-ref $PROJECT_ID
+
+      - name: Deploy enqueue-sync-jobs
+        run: supabase functions deploy enqueue-sync-jobs --project-ref $PROJECT_ID
+
       - name: Deploy process-sync-job
         run: supabase functions deploy process-sync-job --project-ref $PROJECT_ID
         
       - name: Deploy dispatch-sync-jobs
         run: supabase functions deploy dispatch-sync-jobs --project-ref $PROJECT_ID
+
+      - name: Deploy verify-deployment
+        run: supabase functions deploy verify-deployment --project-ref $PROJECT_ID
+
+      - name: Deploy force-process-queue
+        run: supabase functions deploy force-process-queue --project-ref $PROJECT_ID
+
+      - name: Deploy sync-diagnostics
+        run: supabase functions deploy sync-diagnostics --project-ref $PROJECT_ID
+
+      - name: Deploy run-migration
+        run: supabase functions deploy run-migration --project-ref $PROJECT_ID

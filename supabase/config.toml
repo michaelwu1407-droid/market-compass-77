@@ -41,3 +41,15 @@ verify_jwt = false
 
 [functions.run-migration]
 verify_jwt = false
+
+[functions.enqueue-sync-jobs]
+verify_jwt = false
+
+[functions.verify-deployment]
+verify_jwt = false
+
+[functions.force-process-queue]
+verify_jwt = false
+
+[functions.sync-diagnostics]
+verify_jwt = false

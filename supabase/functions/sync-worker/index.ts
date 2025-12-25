@@ -30,13 +30,37 @@ serve(async (req) => {
         console.log("Dispatch result:", dispatchData);
 
         // 2. Check if queue is empty or low, and if so, refill it
-        // We can do this by checking if dispatchData.total_jobs (or pending count) is low
-        // Or we can blindly try to enqueue if we want to ensure constant flow
+        // If no pending jobs were found, try to enqueue more
+        const pendingCount = dispatchData?.dispatched_jobs === 0 && dispatchData?.attempted === 0;
         
-        // For now, let's just log what happened
+        if (pendingCount) {
+            console.log("No pending jobs found. Checking if we should enqueue more...");
+            
+            // Check current pending count
+            const { count: currentPending } = await supabase
+                .from('sync_jobs')
+                .select('*', { count: 'exact', head: true })
+                .eq('status', 'pending');
+            
+            // If we have less than 20 pending jobs, try to enqueue more
+            if ((currentPending || 0) < 20) {
+                console.log("Queue is low. Invoking enqueue-sync-jobs...");
+                const { data: enqueueData, error: enqueueError } = await supabase.functions.invoke('enqueue-sync-jobs', {
+                    body: { hours_stale: 6, hours_active: 7 * 24 }
+                });
+                
+                if (enqueueError) {
+                    console.error("Error enqueuing jobs:", enqueueError);
+                } else {
+                    console.log("Enqueued new jobs:", enqueueData);
+                }
+            }
+        }
+        
         return new Response(JSON.stringify({ 
             message: "Worker ran successfully", 
-            dispatch_result: dispatchData 
+            dispatch_result: dispatchData,
+            refilled_queue: pendingCount
         }), { 
             headers: { ...corsHeaders, "Content-Type": "application/json" } 
         });

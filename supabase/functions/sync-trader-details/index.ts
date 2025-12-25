@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -6,8 +5,6 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
-
-// ... existing helper functions ...
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -18,25 +15,32 @@ serve(async (req) => {
     const BULLAWARE_API_KEY = Deno.env.get('BULLAWARE_API_KEY');
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-
-    // ... setup client ...
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     
-    // ... setup request parsing ...
     let username: string | null = null;
     try {
       const body = await req.json();
       username = body.username || null;
-      // ...
     } catch { }
 
     let tradersToSync: any[] = [];
     if (username) {
-         // ... fetch specific trader ...
-         const { data: trader } = await supabase.from('traders').select('id, etoro_username').eq('etoro_username', username).maybeSingle();
-         if(trader) tradersToSync = [trader];
+      // Fetch specific trader by username
+      const { data: trader } = await supabase
+        .from('traders')
+        .select('id, etoro_username')
+        .eq('etoro_username', username)
+        .maybeSingle();
+      if (trader) tradersToSync = [trader];
     } else {
-        // ... fetch stale ...
+      // Fetch stale traders (not updated in last 6 hours)
+      const staleThreshold = new Date(Date.now() - 6 * 3600000).toISOString();
+      const { data: staleTraders } = await supabase
+        .from('traders')
+        .select('id, etoro_username')
+        .or(`updated_at.lt.${staleThreshold},updated_at.is.null`)
+        .limit(10);
+      if (staleTraders) tradersToSync = staleTraders;
     }
 
     // MOCK DATA GENERATOR for Details
@@ -61,7 +65,17 @@ serve(async (req) => {
         return holdings;
     };
 
-    // ... inside the processing loop ...
+    if (tradersToSync.length === 0) {
+      return new Response(JSON.stringify({ 
+        success: true, 
+        message: "No traders to sync",
+        synced: 0 
+      }), { 
+        headers: { ...corsHeaders, "Content-Type": "application/json" } 
+      });
+    }
+
+    let syncedCount = 0;
     for (const trader of tradersToSync) {
         let bullwareHoldings: any[] = [];
         let apiSuccess = false;
@@ -70,14 +84,29 @@ serve(async (req) => {
              // Try fetching real data
              try {
                  const res = await fetch(`https://api.bullaware.com/v1/investors/${trader.etoro_username}/portfolio`, {
-                     headers: { 'Authorization': `Bearer ${BULLAWARE_API_KEY}` }
+                     headers: { 'Authorization': `Bearer ${BULLAWARE_API_KEY}` },
+                     signal: AbortSignal.timeout(15000)
                  });
                  if (res.ok) {
                      const data = await res.json();
-                     // ... map data ...
+                     // Map the API response to our holdings format
+                     if (data.holdings || data.portfolio || Array.isArray(data)) {
+                         const holdings = data.holdings || data.portfolio || data;
+                         bullwareHoldings = holdings.map((h: any) => ({
+                             trader_id: trader.id,
+                             symbol: h.symbol || h.ticker || h.asset,
+                             allocation_pct: h.allocation || h.weight || 0,
+                             profit_loss_pct: h.profitLoss || h.pnl || 0,
+                             updated_at: new Date().toISOString()
+                         }));
+                     }
                      apiSuccess = true;
+                 } else {
+                     console.error(`API returned ${res.status} for ${trader.etoro_username}`);
                  }
-             } catch (e) { console.error("API failed", e); }
+             } catch (e: any) { 
+                 console.error("API failed", e.message); 
+             }
         }
 
         // FALLBACK: Use Mock Data if API failed or no key
@@ -90,17 +119,30 @@ serve(async (req) => {
         if (bullwareHoldings.length > 0) {
             await supabase.from('trader_holdings').delete().eq('trader_id', trader.id);
             await supabase.from('trader_holdings').insert(bullwareHoldings);
+            syncedCount++;
         }
         
         // Mark as updated so we don't sync again immediately
         await supabase.from('traders').update({ updated_at: new Date().toISOString() }).eq('id', trader.id);
     }
     
-    // ... return success ...
-    return new Response(JSON.stringify({ success: true, message: "Synced details (with mock fallback)" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ 
+        success: true, 
+        message: `Synced details for ${syncedCount} traders (with mock fallback)`,
+        synced: syncedCount,
+        using_mock: !BULLAWARE_API_KEY || syncedCount === 0
+    }), { 
+        headers: { ...corsHeaders, "Content-Type": "application/json" } 
+    });
 
-  } catch (error) {
-      // ... error handling ...
-      return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: corsHeaders });
+  } catch (error: any) {
+      console.error("Error in sync-trader-details:", error);
+      return new Response(JSON.stringify({ 
+          success: false,
+          error: error.message 
+      }), { 
+          status: 500, 
+          headers: { ...corsHeaders, "Content-Type": "application/json" } 
+      });
   }
 });
