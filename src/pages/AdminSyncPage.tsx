@@ -52,13 +52,21 @@ export default function AdminSyncPage() {
     if (!ANON_KEY) {
         throw new Error("Missing VITE_SUPABASE_ANON_KEY in environment variables");
     }
+    console.log(`[AdminSyncPage] Invoking ${functionName} with body:`, body);
     const res = await fetch(`${PROJECT_URL}/functions/v1/${functionName}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ANON_KEY}` },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error(await res.text());
-    return await res.json();
+    console.log(`[AdminSyncPage] Response status: ${res.status} ${res.statusText}`);
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error(`[AdminSyncPage] Function error:`, errorText);
+      throw new Error(errorText);
+    }
+    const result = await res.json();
+    console.log(`[AdminSyncPage] Function result:`, result);
+    return result;
   };
 
   const { data: syncStates } = useQuery({
@@ -157,7 +165,9 @@ export default function AdminSyncPage() {
   const runForceProcessing = async () => {
     setIsForceProcessing(true);
     try {
+      console.log('[AdminSyncPage] Starting force-process-queue...');
       const result = await invokeFunction('force-process-queue', { max_iterations: 100 });
+      console.log('[AdminSyncPage] Force processing result:', result);
       toast({ 
         title: 'Force Processing Complete', 
         description: `Processed ${result.summary?.jobs_cleared || 0} jobs in ${result.summary?.iterations || 0} iterations` 
@@ -166,7 +176,10 @@ export default function AdminSyncPage() {
       refetchQueue();
       refetchDiagnostics();
     }
-    catch (e) { toast({ title: 'Error', description: String(e), variant: 'destructive' }); }
+    catch (e) { 
+      console.error('[AdminSyncPage] Force processing error:', e);
+      toast({ title: 'Error', description: String(e), variant: 'destructive' }); 
+    }
     finally { setIsForceProcessing(false); }
   };
 
