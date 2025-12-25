@@ -202,9 +202,16 @@ serve(async (req) => {
     const summary = {
       ...stats,
       initial_pending: initialPending || 0,
+      initial_in_progress: initialInProgress || 0,
+      initial_failed: initialFailed || 0,
       final_pending: finalPending || 0,
       jobs_cleared: (initialPending || 0) - (finalPending || 0),
-      success: stats.errors.length === 0
+      jobs_dispatched: stats.total_dispatched,
+      jobs_processed: stats.total_processed,
+      success: stats.errors.length === 0,
+      message: stats.total_dispatched === 0 
+        ? "No jobs were dispatched. This usually means there are no pending jobs in the database. Try clicking 'Discover New Traders' first to create jobs."
+        : `Processed ${stats.total_dispatched} jobs across ${stats.iterations} iterations.`
     };
 
     console.log("Force processing complete:", summary);
