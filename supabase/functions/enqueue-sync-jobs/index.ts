@@ -158,24 +158,26 @@ serve(async (req) => {
       }));
       console.log(`Force mode: Creating ${jobsToInsert.length} jobs for all traders.`);
     } else {
-      // Normal mode: avoid duplicates
-      const { data: pendingJobs, error: pendingError } = await supabase
+      // Normal mode: only avoid duplicates for in_progress, allow multiple pending
+      // This allows queue to grow beyond 240
+      const { data: inProgressJobs, error: inProgressError } = await supabase
           .from('sync_jobs')
           .select('trader_id')
-          .in('status', ['pending', 'in_progress']);
+          .eq('status', 'in_progress');
 
-      if (pendingError) throw pendingError;
-      const pendingTraderIds = new Set(pendingJobs.map(j => j.trader_id));
+      if (inProgressError) throw inProgressError;
+      const inProgressTraderIds = new Set(inProgressJobs.map(j => j.trader_id));
       
+      // Only filter out in_progress, allow multiple pending jobs
       jobsToInsert = finalTraderIds
-        .filter(id => !pendingTraderIds.has(id))
+        .filter(id => !inProgressTraderIds.has(id))
         .map(trader_id => ({
           trader_id,
           status: 'pending',
           job_type: 'deep_sync'
         }));
 
-      console.log(`Filtered out ${pendingTraderIds.size} pending jobs. Inserting ${jobsToInsert.length} new jobs.`);
+      console.log(`Filtered out ${inProgressTraderIds.size} in_progress jobs. Inserting ${jobsToInsert.length} new pending jobs.`);
     }
 
     if (jobsToInsert.length > 0) {
