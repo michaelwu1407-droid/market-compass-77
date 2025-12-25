@@ -18,42 +18,71 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Helper function to fetch with timeout
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeout = 30000): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(id);
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    throw error;
+  }
+}
+
 async function processTrader(supabase: any, apiKey: string, username: string, traderId: string) {
   // 1. Details
-  const detailsRes = await fetch(ENDPOINTS.investorDetails(username), { headers: { 'Authorization': `Bearer ${apiKey}` } });
-  if (detailsRes.ok) {
-    const data = await detailsRes.json();
-    const investor = data.investor || data.data || data;
-    await supabase.from('traders').update({
-       profitable_weeks_pct: investor.profitableWeeksPct,
-       profitable_months_pct: investor.profitableMonthsPct,
-       daily_drawdown: investor.dailyDD,
-       weekly_drawdown: investor.weeklyDD,
-       details_synced_at: new Date().toISOString()
-    }).eq('id', traderId);
+  try {
+    const detailsRes = await fetchWithTimeout(ENDPOINTS.investorDetails(username), { headers: { 'Authorization': `Bearer ${apiKey}` } });
+    if (detailsRes.ok) {
+      const data = await detailsRes.json();
+      const investor = data.investor || data.data || data;
+      await supabase.from('traders').update({
+         profitable_weeks_pct: investor.profitableWeeksPct,
+         profitable_months_pct: investor.profitableMonthsPct,
+         daily_drawdown: investor.dailyDD,
+         weekly_drawdown: investor.weeklyDD,
+         details_synced_at: new Date().toISOString()
+      }).eq('id', traderId);
+    }
+  } catch (e) {
+    console.error(`Error processing details for ${username}:`, e);
   }
   await delay(6000); // 6s delay to respect 10 req/min
 
   // 2. Risk
-  const riskRes = await fetch(ENDPOINTS.riskScore(username), { headers: { 'Authorization': `Bearer ${apiKey}` } });
-  if (riskRes.ok) {
-    const data = await riskRes.json();
-    const score = typeof data === 'number' ? data : (data.riskScore || data.points?.[data.points.length-1]?.riskScore);
-    if (score) await supabase.from('traders').update({ risk_score: score }).eq('id', traderId);
+  try {
+    const riskRes = await fetchWithTimeout(ENDPOINTS.riskScore(username), { headers: { 'Authorization': `Bearer ${apiKey}` } });
+    if (riskRes.ok) {
+      const data = await riskRes.json();
+      const score = typeof data === 'number' ? data : (data.riskScore || data.points?.[data.points.length-1]?.riskScore);
+      if (score) await supabase.from('traders').update({ risk_score: score }).eq('id', traderId);
+    }
+  } catch (e) {
+    console.error(`Error processing risk for ${username}:`, e);
   }
   await delay(6000); // 6s delay
 
   // 3. Metrics
-  const metricsRes = await fetch(ENDPOINTS.metrics(username), { headers: { 'Authorization': `Bearer ${apiKey}` } });
-  if (metricsRes.ok) {
-    const data = await metricsRes.json();
-    const m = data.data || data;
-    await supabase.from('traders').update({
-       sharpe_ratio: m.sharpeRatio,
-       sortino_ratio: m.sortinoRatio,
-       alpha: m.alpha,
-       beta: m.beta
-    }).eq('id', traderId);
+  try {
+    const metricsRes = await fetchWithTimeout(ENDPOINTS.metrics(username), { headers: { 'Authorization': `Bearer ${apiKey}` } });
+    if (metricsRes.ok) {
+      const data = await metricsRes.json();
+      const m = data.data || data;
+      await supabase.from('traders').update({
+         sharpe_ratio: m.sharpeRatio,
+         sortino_ratio: m.sortinoRatio,
+         alpha: m.alpha,
+         beta: m.beta
+      }).eq('id', traderId);
+    }
+  } catch (e) {
+    console.error(`Error processing metrics for ${username}:`, e);
   }
 }
 
@@ -76,7 +105,7 @@ Deno.serve(async (req) => {
     // 1. Fetch 5 PENDING items, including their retry count
     const { data: items, error: fetchError } = await supabase
       .from('sync_queue')
-      .select('id, trader_id, retry_count') // <-- MODIFIED
+      .select('id, trader_id, retry_count')
       .eq('status', 'PENDING')
       .limit(5);
 
@@ -129,7 +158,7 @@ Deno.serve(async (req) => {
           .update({ 
             status: 'FAILED', 
             error_message: err instanceof Error ? err.message : 'Unknown error',
-            retry_count: (item.retry_count || 0) + 1 // <-- MODIFIED
+            retry_count: (item.retry_count || 0) + 1
           })
           .eq('id', item.id);
           

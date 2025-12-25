@@ -45,6 +45,23 @@ const isStale = (lastRun: string | null, hours: number): boolean => {
   return hoursDiff >= hours;
 };
 
+// Helper function to fetch with timeout
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeout = 30000): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(id);
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    throw error;
+  }
+}
+
 // --- Core API Logic ---
 
 /**
@@ -57,52 +74,95 @@ async function syncCompleteTraderDetails(supabase: SupabaseClient, apiKey: strin
 
   try {
     // 1. Fetch Investor Details
-    const detailsRes = await fetch(ENDPOINTS.investorDetails(etoro_username), { headers: { 'Authorization': `Bearer ${apiKey}` } });
-    if (!detailsRes.ok) throw new Error(`Bullaware details API failed with status ${detailsRes.status}: ${await detailsRes.text()}`);
-    const detailsData = await detailsRes.json();
-    const investor = detailsData.investor || detailsData.data || detailsData;
-    await supabase.from('traders').update({
-       profitable_weeks_pct: investor.profitableWeeksPct,
-       profitable_months_pct: investor.profitableMonthsPct,
-       daily_drawdown: investor.dailyDD,
-       weekly_drawdown: investor.weeklyDD,
-    }).eq('id', id);
+    try {
+      const detailsRes = await fetchWithTimeout(ENDPOINTS.investorDetails(etoro_username), { headers: { 'Authorization': `Bearer ${apiKey}` } });
+      if (detailsRes.ok) {
+        const detailsData = await detailsRes.json();
+        const investor = detailsData.investor || detailsData.data || detailsData;
+        await supabase.from('traders').update({
+           profitable_weeks_pct: investor.profitableWeeksPct,
+           profitable_months_pct: investor.profitableMonthsPct,
+           daily_drawdown: investor.dailyDD,
+           weekly_drawdown: investor.weeklyDD,
+        }).eq('id', id);
+      } else {
+        console.warn(`[sync-worker] Details API for ${etoro_username} returned ${detailsRes.status}`);
+      }
+    } catch (e) {
+      console.warn(`[sync-worker] Error fetching details for ${etoro_username}:`, e);
+      // Continue to next steps, don't abort yet unless it's critical
+    }
 
     await delay(RATE_LIMIT_DELAY_MS);
 
     // 2. Fetch Risk Score
-    const riskRes = await fetch(ENDPOINTS.riskScore(etoro_username), { headers: { 'Authorization': `Bearer ${apiKey}` } });
-    if (!riskRes.ok) throw new Error(`Bullaware risk API failed with status ${riskRes.status}: ${await riskRes.text()}`);
-    const riskData = await riskRes.json();
-    const score = typeof riskData === 'number' ? riskData : (riskData.riskScore || riskData.points?.[riskData.points.length - 1]?.riskScore);
-    if (score) await supabase.from('traders').update({ risk_score: score }).eq('id', id);
+    try {
+      const riskRes = await fetchWithTimeout(ENDPOINTS.riskScore(etoro_username), { headers: { 'Authorization': `Bearer ${apiKey}` } });
+      if (riskRes.ok) {
+        const riskData = await riskRes.json();
+        const score = typeof riskData === 'number' ? riskData : (riskData.riskScore || riskData.points?.[riskData.points.length - 1]?.riskScore);
+        if (score) await supabase.from('traders').update({ risk_score: score }).eq('id', id);
+      }
+    } catch (e) {
+      console.warn(`[sync-worker] Error fetching risk for ${etoro_username}:`, e);
+    }
 
     await delay(RATE_LIMIT_DELAY_MS);
 
     // 3. Fetch Metrics
-    const metricsRes = await fetch(ENDPOINTS.metrics(etoro_username), { headers: { 'Authorization': `Bearer ${apiKey}` } });
-    if (!metricsRes.ok) throw new Error(`Bullaware metrics API failed with status ${metricsRes.status}: ${await metricsRes.text()}`);
-    const metricsData = await metricsRes.json();
-    const m = metricsData.data || metricsData;
-    await supabase.from('traders').update({
-       sharpe_ratio: m.sharpeRatio,
-       sortino_ratio: m.sortinoRatio,
-       alpha: m.alpha,
-       beta: m.beta,
-    }).eq('id', id);
+    try {
+      const metricsRes = await fetchWithTimeout(ENDPOINTS.metrics(etoro_username), { headers: { 'Authorization': `Bearer ${apiKey}` } });
+      if (metricsRes.ok) {
+        const metricsData = await metricsRes.json();
+        const m = metricsData.data || metricsData;
+        await supabase.from('traders').update({
+           sharpe_ratio: m.sharpeRatio,
+           sortino_ratio: m.sortinoRatio,
+           alpha: m.alpha,
+           beta: m.beta,
+        }).eq('id', id);
+      }
+    } catch (e) {
+      console.warn(`[sync-worker] Error fetching metrics for ${etoro_username}:`, e);
+    }
 
     // 4. Finalize: Mark as synced
-    await supabase.from('traders').update({ details_synced_at: new Date().toISOString(), last_sync_error: null }).eq('id', id);
+    // If we reached here without fatal error (individual steps might have failed but caught), we consider it synced.
+    // If ALL steps failed, it might be a broken trader, but we still mark as synced to prevent infinite loops,
+    // unless we want to track 'last_sync_error'.
+
+    await supabase.from('traders').update({
+      details_synced_at: new Date().toISOString(),
+      last_sync_error: null
+    }).eq('id', id);
+
     console.log(`[sync-worker] Finished full detail sync for ${etoro_username}`);
 
   } catch (error) {
-    console.error(`[sync-worker] Failed to sync details for ${etoro_username}. Error: ${error.message}`);
-    // Record the error and timestamp on the trader row to prevent immediate re-processing.
-    await supabase.from('traders').update({
-        last_sync_error: error.message,
-        details_synced_at: new Date().toISOString() // Still update timestamp to avoid getting stuck
-    }).eq('id', id);
-    throw error; // Re-throw to ensure the main worker function logs it as a failure.
+    console.error(`[sync-worker] Fatal error syncing details for ${etoro_username}:`, error);
+
+    // CRITICAL FIX: Ensure we move on even if there's a fatal error
+    try {
+        // Attempt 1: Update error message and timestamp
+        await supabase.from('traders').update({
+            last_sync_error: error instanceof Error ? error.message : 'Unknown error',
+            details_synced_at: new Date().toISOString()
+        }).eq('id', id);
+    } catch (dbError) {
+        // Attempt 2: Fallback if 'last_sync_error' column is missing or other DB constraint
+        console.error(`[sync-worker] Failed to update error status for ${etoro_username}. Trying fallback update.`, dbError);
+        try {
+            await supabase.from('traders').update({
+                details_synced_at: new Date().toISOString()
+            }).eq('id', id);
+        } catch (finalError) {
+             console.error(`[sync-worker] CRITICAL: Could not update timestamp for ${etoro_username}. Trader will remain stale.`, finalError);
+        }
+    }
+
+    // We do NOT re-throw here to ensure the worker response is valid JSON (action: details_sync, status: error)
+    // allowing the system to log it but not crash the HTTP invocation if possible.
+    // However, the caller expects a return.
   }
 }
 
@@ -110,7 +170,8 @@ async function discoverTraders(supabase: SupabaseClient, apiKey: string, state: 
     const currentPage = state?.status === 'paginating' ? state.last_page : 1;
     console.log(`[sync-worker] Running discovery: page ${currentPage}`);
 
-    const response = await fetch(`${ENDPOINTS.investors}?page=${currentPage}&limit=${BATCH_SIZE_DISCOVERY}`, {
+    // Add timeout to discovery
+    const response = await fetchWithTimeout(`${ENDPOINTS.investors}?page=${currentPage}&limit=${BATCH_SIZE_DISCOVERY}`, {
         headers: { 'Authorization': `Bearer ${apiKey}` }
     });
     if (!response.ok) throw new Error(`Bullaware API error (traders): ${response.status}`);
@@ -180,8 +241,14 @@ Deno.serve(async (req) => {
 
     const discoveryState = states['traders_discovery'];
     if (!discoveryState || discoveryState.status === 'paginating' || isStale(discoveryState.last_run, STALE_THRESHOLD_HOURS.DISCOVERY)) {
-      const result = await discoverTraders(supabase, bullwareApiKey, discoveryState);
-      return new Response(JSON.stringify({ action: 'discovery', ...result }), { headers: corsHeaders });
+      try {
+          const result = await discoverTraders(supabase, bullwareApiKey, discoveryState);
+          return new Response(JSON.stringify({ action: 'discovery', ...result }), { headers: corsHeaders });
+      } catch (e) {
+          console.error('[sync-worker] Discovery failed:', e);
+           // If discovery fails, we might want to let it retry next time, but ensure we don't crash
+           return new Response(JSON.stringify({ action: 'discovery', error: e instanceof Error ? e.message : String(e) }), { status: 500, headers: corsHeaders });
+      }
     }
 
     const staleTraders = await getStaleTraders(supabase);

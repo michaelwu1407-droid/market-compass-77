@@ -21,6 +21,23 @@ interface DiscrepancyLog {
   value_used: string;
 }
 
+// Helper function to fetch with timeout
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeout = 30000): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(id);
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    throw error;
+  }
+}
+
 function checkDiscrepancy(
   field: string, 
   bullaware: any, 
@@ -60,7 +77,7 @@ async function scrapePortfolioFromEtoro(username: string, firecrawlApiKey: strin
     const url = `https://www.etoro.com/people/${username}/portfolio`;
     console.log(`Scraping eToro portfolio: ${url}`);
 
-    const response = await fetch('https://api.firecrawl.dev/v1/scrape', {
+    const response = await fetchWithTimeout('https://api.firecrawl.dev/v1/scrape', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${firecrawlApiKey}`,
@@ -182,7 +199,7 @@ serve(async (req) => {
     async function processTrader(trader: { id: string; etoro_username: string }) {
       try {
         // Fetch portfolio from Bullaware
-        const portfolioResponse = await fetch(
+        const portfolioResponse = await fetchWithTimeout(
           `https://api.bullaware.com/v1/investors/${trader.etoro_username}/portfolio`,
           {
             headers: {
@@ -248,7 +265,7 @@ serve(async (req) => {
         }
 
         // Fetch and save trades
-        const tradesResponse = await fetch(
+        const tradesResponse = await fetchWithTimeout(
           `https://api.bullaware.com/v1/investors/${trader.etoro_username}/trades`,
           {
             headers: {
@@ -279,7 +296,7 @@ serve(async (req) => {
         }
 
         // Fetch and save performance
-        const performanceResponse = await fetch(
+        const performanceResponse = await fetchWithTimeout(
           `https://api.bullaware.com/v1/investors/${trader.etoro_username}/performance`,
           {
             headers: {
@@ -324,11 +341,11 @@ serve(async (req) => {
       }
     }
 
-    // Process in parallel batches
+    // Process in parallel batches with Promise.allSettled to ensure one failure doesn't stop the whole batch
     for (let i = 0; i < tradersToSync.length; i += BATCH_SIZE) {
       const batch = tradersToSync.slice(i, i + BATCH_SIZE);
       console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(tradersToSync.length / BATCH_SIZE)}`);
-      await Promise.all(batch.map(trader => processTrader(trader)));
+      await Promise.allSettled(batch.map(trader => processTrader(trader)));
     }
 
     // Log discrepancies

@@ -17,6 +17,23 @@ interface SyncState {
   last_page: number;
 }
 
+// Helper function to fetch with timeout
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeout = 30000): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(id);
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    throw error;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -43,7 +60,7 @@ Deno.serve(async (req) => {
     const currentPage = syncState?.last_page || 1;
     console.log(`[Discovery] Fetching page ${currentPage}...`);
 
-    const response = await fetch(`${ENDPOINTS.investors}?page=${currentPage}&limit=${BATCH_SIZE}`, {
+    const response = await fetchWithTimeout(`${ENDPOINTS.investors}?page=${currentPage}&limit=${BATCH_SIZE}`, {
       headers: { 'Authorization': `Bearer ${bullwareApiKey}`, 'Content-Type': 'application/json' }
     });
 
