@@ -148,13 +148,13 @@ export default function AdminSyncPage() {
     refetchInterval: 10000,
   });
 
-  // Get diagnostics
+  // Get diagnostics - refresh more frequently to see updates
   const { data: diagnostics, refetch: refetchDiagnostics } = useQuery({
     queryKey: ['sync-diagnostics'],
     queryFn: async () => {
       return await invokeFunction('sync-diagnostics');
     },
-    refetchInterval: 30000,
+    refetchInterval: 10000, // Refresh every 10 seconds
   });
 
   const ITEMS_PER_HOUR = 60;

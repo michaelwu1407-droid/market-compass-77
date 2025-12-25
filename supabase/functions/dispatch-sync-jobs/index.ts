@@ -41,7 +41,7 @@ serve(async (req) => {
             .select('id, status')
             .eq('status', 'pending')
             .order('created_at', { ascending: true }) // Process oldest first
-            .limit(MAX_JOBS_TO_PROCESS);
+            .limit(MAX_JOBS_TO_PROCESS); // Process up to 10 jobs per call (with 7s delays = ~1.4 min per batch)
 
         if (fetchError) {
             console.error("Error fetching pending jobs:", fetchError);
