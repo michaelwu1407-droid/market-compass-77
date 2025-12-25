@@ -26,12 +26,13 @@ serve(async (req) => {
         // API limit is 1000 per request, and likely has rate limits (e.g., 10 req/min)
         // So we'll fetch one page per call and spread discovery over time
         console.log(`Attempting to fetch traders from Bullaware API...`);
+        console.log(`[DEBUG] BULLAWARE_API_KEY present: ${BULLAWARE_API_KEY ? 'Yes' : 'No'} (length: ${BULLAWARE_API_KEY?.length || 0})`);
         const maxPages = 3; // Fetch up to 3,000 traders per call (to respect rate limits)
         let page = 0;
         
         while (page < maxPages) {
             try {
-                const bullwareUrl = `https://api.bullware.com/v1/investors?limit=1000&offset=${page * 1000}`;
+                const bullwareUrl = `https://api.bullaware.com/v1/investors?limit=1000&offset=${page * 1000}`;
                 const response = await fetch(bullwareUrl, {
                     headers: {
                         'Authorization': `Bearer ${BULLAWARE_API_KEY}`,
@@ -77,8 +78,9 @@ serve(async (req) => {
                     }
                     break;
                 }
-            } catch (error) {
-                console.error(`Fetch to Bullaware failed on page ${page + 1}:`, error.message);
+            } catch (error: any) {
+                console.error(`Fetch to Bullaware failed on page ${page + 1}:`, error.message || error);
+                console.error(`Error details:`, error);
                 if (page === 0) {
                     apiWorks = false;
                 }
