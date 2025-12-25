@@ -16,13 +16,13 @@ const ENDPOINTS = {
 };
 
 // Syncing Strategy Configuration
-const BATCH_SIZE_DISCOVERY = 50;  // How many traders to discover in one run.
-const BATCH_SIZE_PROCESSING = 1;   // How many traders to process in one run (kept low to stay under 60s timeout).
-const RATE_LIMIT_DELAY_MS = 6000;  // 6s delay between API calls to respect 10 req/min limit.
+const BATCH_SIZE_DISCOVERY = 50;
+const BATCH_SIZE_PROCESSING = 1;
+const RATE_LIMIT_DELAY_MS = 6000;
 const STALE_THRESHOLD_HOURS = {
-    DISCOVERY: 6, // Re-run discovery every 6 hours.
-    DETAILS: 2,   // Sync trader details if they are older than 2 hours.
-    ASSETS: 24,   // Refresh asset list every 24 hours.
+    DISCOVERY: 6,
+    DETAILS: 2,
+    ASSETS: 24,
 };
 
 // --- Type Definitions ---
@@ -49,57 +49,63 @@ const isStale = (lastRun: string | null, hours: number): boolean => {
 
 /**
  * Fetches all the detailed data for a single trader from Bullaware and updates the database.
- * This is the REAL implementation, moved from the ignored `process-queue` function.
+ * This version includes ROBUST ERROR HANDLING for each API call.
  */
 async function syncCompleteTraderDetails(supabase: SupabaseClient, apiKey: string, trader: Trader) {
   const { id, etoro_username } = trader;
   console.log(`[sync-worker] Starting full detail sync for ${etoro_username}`);
 
-  // 1. Fetch Investor Details
-  const detailsRes = await fetch(ENDPOINTS.investorDetails(etoro_username), { headers: { 'Authorization': `Bearer ${apiKey}` } });
-  if (detailsRes.ok) {
-    const data = await detailsRes.json();
-    const investor = data.investor || data.data || data;
+  try {
+    // 1. Fetch Investor Details
+    const detailsRes = await fetch(ENDPOINTS.investorDetails(etoro_username), { headers: { 'Authorization': `Bearer ${apiKey}` } });
+    if (!detailsRes.ok) throw new Error(`Bullaware details API failed with status ${detailsRes.status}: ${await detailsRes.text()}`);
+    const detailsData = await detailsRes.json();
+    const investor = detailsData.investor || detailsData.data || detailsData;
     await supabase.from('traders').update({
        profitable_weeks_pct: investor.profitableWeeksPct,
        profitable_months_pct: investor.profitableMonthsPct,
        daily_drawdown: investor.dailyDD,
        weekly_drawdown: investor.weeklyDD,
     }).eq('id', id);
-  }
-  await delay(RATE_LIMIT_DELAY_MS);
 
-  // 2. Fetch Risk Score
-  const riskRes = await fetch(ENDPOINTS.riskScore(etoro_username), { headers: { 'Authorization': `Bearer ${apiKey}` } });
-  if (riskRes.ok) {
-    const data = await riskRes.json();
-    const score = typeof data === 'number' ? data : (data.riskScore || data.points?.[data.points.length - 1]?.riskScore);
+    await delay(RATE_LIMIT_DELAY_MS);
+
+    // 2. Fetch Risk Score
+    const riskRes = await fetch(ENDPOINTS.riskScore(etoro_username), { headers: { 'Authorization': `Bearer ${apiKey}` } });
+    if (!riskRes.ok) throw new Error(`Bullaware risk API failed with status ${riskRes.status}: ${await riskRes.text()}`);
+    const riskData = await riskRes.json();
+    const score = typeof riskData === 'number' ? riskData : (riskData.riskScore || riskData.points?.[riskData.points.length - 1]?.riskScore);
     if (score) await supabase.from('traders').update({ risk_score: score }).eq('id', id);
-  }
-  await delay(RATE_LIMIT_DELAY_MS);
 
-  // 3. Fetch Metrics
-  const metricsRes = await fetch(ENDPOINTS.metrics(etoro_username), { headers: { 'Authorization': `Bearer ${apiKey}` } });
-  if (metricsRes.ok) {
-    const data = await metricsRes.json();
-    const m = data.data || data;
+    await delay(RATE_LIMIT_DELAY_MS);
+
+    // 3. Fetch Metrics
+    const metricsRes = await fetch(ENDPOINTS.metrics(etoro_username), { headers: { 'Authorization': `Bearer ${apiKey}` } });
+    if (!metricsRes.ok) throw new Error(`Bullaware metrics API failed with status ${metricsRes.status}: ${await metricsRes.text()}`);
+    const metricsData = await metricsRes.json();
+    const m = metricsData.data || metricsData;
     await supabase.from('traders').update({
        sharpe_ratio: m.sharpeRatio,
        sortino_ratio: m.sortinoRatio,
        alpha: m.alpha,
        beta: m.beta,
     }).eq('id', id);
-  }
 
-  // 4. Finalize: Mark as synced
-  await supabase.from('traders').update({ details_synced_at: new Date().toISOString() }).eq('id', id);
-  console.log(`[sync-worker] Finished full detail sync for ${etoro_username}`);
+    // 4. Finalize: Mark as synced
+    await supabase.from('traders').update({ details_synced_at: new Date().toISOString(), last_sync_error: null }).eq('id', id);
+    console.log(`[sync-worker] Finished full detail sync for ${etoro_username}`);
+
+  } catch (error) {
+    console.error(`[sync-worker] Failed to sync details for ${etoro_username}. Error: ${error.message}`);
+    // Record the error and timestamp on the trader row to prevent immediate re-processing.
+    await supabase.from('traders').update({
+        last_sync_error: error.message,
+        details_synced_at: new Date().toISOString() // Still update timestamp to avoid getting stuck
+    }).eq('id', id);
+    throw error; // Re-throw to ensure the main worker function logs it as a failure.
+  }
 }
 
-
-/**
- * Discovers new traders from the Bullaware API and adds them to our database.
- */
 async function discoverTraders(supabase: SupabaseClient, apiKey: string, state: SyncState | undefined) {
     const currentPage = state?.status === 'paginating' ? state.last_page : 1;
     console.log(`[sync-worker] Running discovery: page ${currentPage}`);
@@ -135,9 +141,6 @@ async function discoverTraders(supabase: SupabaseClient, apiKey: string, state: 
     return { discovered: traders.length, page: currentPage, totalPages, status: isComplete ? 'idle' : 'paginating' };
 }
 
-/**
- * Finds traders in our database whose details are missing or stale.
- */
 async function getStaleTraders(supabase: SupabaseClient): Promise<Trader[]> {
   const threshold = new Date();
   threshold.setHours(threshold.getHours() - STALE_THRESHOLD_HOURS.DETAILS);
@@ -175,30 +178,25 @@ Deno.serve(async (req) => {
     if (stateError) throw stateError;
     const states: Record<string, SyncState> = (statesData || []).reduce((acc, s) => ({ ...acc, [s.id]: s }), {});
 
-    // --- Task Prioritization ---
-
-    // 1. Should we run discovery? (In progress, or stale)
     const discoveryState = states['traders_discovery'];
     if (!discoveryState || discoveryState.status === 'paginating' || isStale(discoveryState.last_run, STALE_THRESHOLD_HOURS.DISCOVERY)) {
       const result = await discoverTraders(supabase, bullwareApiKey, discoveryState);
       return new Response(JSON.stringify({ action: 'discovery', ...result }), { headers: corsHeaders });
     }
 
-    // 2. Are there stale traders to process? (Highest priority after discovery)
     const staleTraders = await getStaleTraders(supabase);
     if (staleTraders.length > 0) {
-      const traderToProcess = staleTraders[0]; // Process one at a time
+      const traderToProcess = staleTraders[0];
       await syncCompleteTraderDetails(supabase, bullwareApiKey, traderToProcess);
       await supabase.from('sync_state').upsert({ id: 'trader_details_sync', last_run: new Date().toISOString() });
-      return new Response(JSON.stringify({ action: 'details_sync', trader: traderToProcess.etoro_username }), { headers: corsHeaders });
+      return new Response(JSON.stringify({ action: 'details_sync', status: 'success', trader: traderToProcess.etoro_username }), { headers: corsHeaders });
     }
     
-    // Fallback: If nothing else to do, just report it.
     console.log('[sync-worker] No tasks to perform. All data is fresh.');
     return new Response(JSON.stringify({ action: 'idle', message: 'All data is fresh' }), { headers: corsHeaders });
 
   } catch (error) {
-    console.error('[sync-worker] Fatal error:', error.message);
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+    console.error(`[sync-worker] Fatal error during execution: ${error.message}`);
+    return new Response(JSON.stringify({ action: 'error', error: error.message }), { status: 500 });
   }
 });
