@@ -62,15 +62,17 @@ serve(async (req) => {
             .from('traders')
             .select('*', { count: 'exact', head: true });
         
-        // Always create a batch of new traders to ensure continuous growth
-        // Create 50-100 new traders each time (or more if count is very low)
+        // Create enough traders to reach target of 5000+ traders
         const currentCount = existingCount || 0;
-        const batchSize = currentCount < 500 ? 100 : 50; // Larger batches when starting out
+        const targetCount = 5000;
+        const tradersNeeded = Math.max(0, targetCount - currentCount);
         
+        // Create in batches of 1000 to avoid timeouts
+        const batchSize = Math.min(1000, tradersNeeded);
         const startIndex = currentCount + 1;
         const endIndex = startIndex + batchSize;
         
-        console.log(`Existing traders: ${currentCount}, Creating ${batchSize} new mock traders (${startIndex} to ${endIndex})`);
+        console.log(`Existing traders: ${currentCount}, Target: ${targetCount}, Creating ${batchSize} new mock traders (${startIndex} to ${endIndex})`);
         
         for (let i = startIndex; i < endIndex; i++) {
             allBullwareTraders.push({
@@ -80,6 +82,11 @@ serve(async (req) => {
                 copiers: Math.floor(Math.random() * 5000),
                 gain12Months: (Math.random() * 40 - 10).toFixed(2),
             });
+        }
+        
+        // If we still need more traders, create them in additional batches
+        if (tradersNeeded > batchSize) {
+            console.log(`Need ${tradersNeeded - batchSize} more traders. Will create in subsequent runs or can be called again.`);
         }
     }
 
