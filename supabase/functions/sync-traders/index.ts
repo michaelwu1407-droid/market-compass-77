@@ -41,7 +41,7 @@ serve(async (req) => {
     console.log(`Attempting to fetch traders from Bullaware API...`);
     console.log(`[DEBUG] BULLAWARE_API_KEY present: Yes (length: ${BULLAWARE_API_KEY.length})`);
     const maxPages = 10; // Fetch up to 10,000 traders per call (to respect rate limits)
-        let page = 0;
+    let page = 0;
         
         while (page < maxPages) {
             try {

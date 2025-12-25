@@ -185,10 +185,10 @@ serve(async (req) => {
       console.log(`Filtered out ${inProgressTraderIds.size} in_progress jobs. Inserting ${jobsToInsert.length} new pending jobs.`);
     }
 
+    let actualInserted = 0;
     if (jobsToInsert.length > 0) {
         // Insert in batches to avoid timeout
         const batchSize = 500;
-        let inserted = 0;
         for (let i = 0; i < jobsToInsert.length; i += batchSize) {
             const batch = jobsToInsert.slice(i, i + batchSize);
             // Use INSERT (not upsert) to allow multiple pending jobs per trader
@@ -196,16 +196,18 @@ serve(async (req) => {
             const { data, error: insertError } = await supabase.from("sync_jobs").insert(batch).select('id');
             if (insertError) {
                 console.error(`Error inserting batch ${i / batchSize + 1}:`, insertError);
-                // If it's a duplicate key error, that's okay - continue
+                // If it's a duplicate key error, that's okay - continue (though shouldn't happen with insert)
                 if (insertError.message && insertError.message.includes('duplicate')) {
                     console.warn(`Some duplicates in batch ${i / batchSize + 1}, continuing...`);
-                    inserted += batch.length; // Count as inserted even if some failed
+                    // Don't count duplicates as inserted
                 } else {
-                    throw insertError;
+                    // For other errors, log but continue with next batch
+                    console.error(`Batch ${i / batchSize + 1} failed, continuing with next batch...`);
                 }
             } else {
-                inserted += data?.length || batch.length;
-                console.log(`Inserted batch ${i / batchSize + 1}: ${data?.length || batch.length} jobs (total: ${inserted}/${jobsToInsert.length})`);
+                const batchInserted = data?.length || 0;
+                actualInserted += batchInserted;
+                console.log(`Inserted batch ${i / batchSize + 1}: ${batchInserted} jobs (total: ${actualInserted}/${jobsToInsert.length})`);
             }
         }
     }
