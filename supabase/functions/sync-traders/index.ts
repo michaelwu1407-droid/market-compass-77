@@ -58,21 +58,25 @@ serve(async (req) => {
         allBullwareTraders = []; // Clear any partial data
         
         // Check how many traders we already have
-        const { count: existingCount } = await supabase
+        const { count: existingCount, error: countError } = await supabase
             .from('traders')
             .select('*', { count: 'exact', head: true });
+        
+        if (countError) {
+            console.error("Error counting traders:", countError);
+        }
         
         // Create enough traders to reach target of 5000+ traders
         const currentCount = existingCount || 0;
         const targetCount = 5000;
         const tradersNeeded = Math.max(0, targetCount - currentCount);
         
-        // Create in batches of 1000 to avoid timeouts
-        const batchSize = Math.min(1000, tradersNeeded);
+        // Always create at least 1000 new traders per call (or whatever is needed)
+        const batchSize = Math.min(1000, Math.max(1000, tradersNeeded));
         const startIndex = currentCount + 1;
         const endIndex = startIndex + batchSize;
         
-        console.log(`Existing traders: ${currentCount}, Target: ${targetCount}, Creating ${batchSize} new mock traders (${startIndex} to ${endIndex})`);
+        console.log(`Existing traders: ${currentCount}, Target: ${targetCount}, Needed: ${tradersNeeded}, Creating ${batchSize} new mock traders (${startIndex} to ${endIndex})`);
         
         for (let i = startIndex; i < endIndex; i++) {
             allBullwareTraders.push({
@@ -84,10 +88,7 @@ serve(async (req) => {
             });
         }
         
-        // If we still need more traders, create them in additional batches
-        if (tradersNeeded > batchSize) {
-            console.log(`Need ${tradersNeeded - batchSize} more traders. Will create in subsequent runs or can be called again.`);
-        }
+        console.log(`Generated ${allBullwareTraders.length} trader objects to upsert`);
     }
 
     console.log(`Processing ${allBullwareTraders.length} traders for upsert.`);
@@ -102,17 +103,38 @@ serve(async (req) => {
     }));
 
     if (tradersToUpsert.length > 0) {
-        const { data, error: upsertError } = await supabase
-            .from('traders')
-            .upsert(tradersToUpsert, { onConflict: 'etoro_username', ignoreDuplicates: false })
-            .select('etoro_username');
+        console.log(`Attempting to upsert ${tradersToUpsert.length} traders...`);
         
-        if (upsertError) {
-            console.error('Supabase upsert error:', upsertError);
-            throw upsertError;
+        // Insert in batches to avoid timeouts and ensure all get inserted
+        const insertBatchSize = 500;
+        let totalInserted = 0;
+        
+        for (let i = 0; i < tradersToUpsert.length; i += insertBatchSize) {
+            const batch = tradersToUpsert.slice(i, i + insertBatchSize);
+            console.log(`Upserting batch ${Math.floor(i / insertBatchSize) + 1}: ${batch.length} traders...`);
+            
+            const { data, error: upsertError } = await supabase
+                .from('traders')
+                .upsert(batch, { onConflict: 'etoro_username', ignoreDuplicates: false })
+                .select('etoro_username');
+            
+            if (upsertError) {
+                console.error(`Supabase upsert error on batch ${Math.floor(i / insertBatchSize) + 1}:`, upsertError);
+                throw upsertError;
+            }
+            
+            const batchInserted = data?.length || 0;
+            totalInserted += batchInserted;
+            console.log(`Batch ${Math.floor(i / insertBatchSize) + 1} completed: ${batchInserted} traders inserted/updated`);
         }
 
-        console.log(`Successfully synced ${data?.length || 0} traders.`);
+        console.log(`Successfully synced ${totalInserted} traders total.`);
+        
+        // Verify the count after insertion
+        const { count: newCount } = await supabase
+            .from('traders')
+            .select('*', { count: 'exact', head: true });
+        console.log(`Total traders in database after sync: ${newCount}`);
         
         console.log('Invoking enqueue-sync-jobs with force: true');
         const { error: enqueueError } = await supabase.functions.invoke('enqueue-sync-jobs', {
@@ -124,11 +146,17 @@ serve(async (req) => {
         console.log("No traders to upsert.");
     }
 
+    // Get final count
+    const { count: finalCount } = await supabase
+        .from('traders')
+        .select('*', { count: 'exact', head: true });
+    
     return new Response(
       JSON.stringify({
         success: true,
         synced: tradersToUpsert.length,
-        message: `Synced ${tradersToUpsert.length} traders`,
+        total_traders: finalCount || 0,
+        message: `Synced ${tradersToUpsert.length} traders. Total in database: ${finalCount || 0}`,
         using_mock_data: !apiWorks
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
