@@ -165,7 +165,17 @@ serve(async (req) => {
     console.log(`Total unique traders to enqueue: ${finalTraderIds.length}`);
 
     if (finalTraderIds.length === 0) {
-      return new Response(JSON.stringify({ message: "No traders to enqueue." }), {
+      console.log("WARNING: No traders found to enqueue. This might indicate a problem.");
+      return new Response(JSON.stringify({ 
+        success: false,
+        message: "No traders to enqueue.",
+        debug: {
+          force_mode: force,
+          specific_ids_provided: specific_trader_ids?.length || 0,
+          hours_stale: hours_stale,
+          hours_active: hours_active
+        }
+      }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 200,
       });
