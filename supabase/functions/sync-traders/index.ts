@@ -27,6 +27,7 @@ serve(async (req) => {
         // So we'll fetch one page per call and spread discovery over time
         console.log(`Attempting to fetch traders from Bullaware API...`);
         console.log(`[DEBUG] BULLAWARE_API_KEY present: ${BULLAWARE_API_KEY ? 'Yes' : 'No'} (length: ${BULLAWARE_API_KEY?.length || 0})`);
+        console.log(`[DEBUG] BULLAWARE_API_KEY present: ${BULLAWARE_API_KEY ? 'Yes' : 'No'} (length: ${BULLAWARE_API_KEY?.length || 0})`);
         const maxPages = 3; // Fetch up to 3,000 traders per call (to respect rate limits)
         let page = 0;
         
@@ -43,10 +44,13 @@ serve(async (req) => {
 
                 if (response.ok) {
                     const data = await response.json();
-                    const pageTraders = data.items || data.data || data.investors || (Array.isArray(data) ? data : []);
+                    console.log(`[DEBUG] Page ${page + 1} response structure:`, Object.keys(data));
+                    
+                    // Try multiple possible response formats
+                    const pageTraders = data.items || data.data || data.investors || data.results || (Array.isArray(data) ? data : []);
                     
                     if (pageTraders.length === 0) {
-                        console.log(`Page ${page + 1}: No more traders, stopping pagination.`);
+                        console.log(`Page ${page + 1}: No more traders, stopping pagination. Response:`, JSON.stringify(data).substring(0, 500));
                         break;
                     }
                     
@@ -68,11 +72,21 @@ serve(async (req) => {
                     }
                 } else {
                     const status = response.status;
+                    const errorText = await response.text().catch(() => 'Unable to read error response');
+                    console.error(`Bullaware API Error on page ${page + 1}: Status ${status}, Response: ${errorText.substring(0, 500)}`);
+                    
                     if (status === 429) {
                         console.error(`Rate limit hit on page ${page + 1}. Will use mock data for remaining.`);
+                        apiWorks = false;
                         break;
                     }
-                    console.error(`Bullaware API Error on page ${page + 1}: Status ${status}`);
+                    
+                    if (status === 401 || status === 403) {
+                        console.error(`Authentication error (${status}). Check BULLAWARE_API_KEY.`);
+                        apiWorks = false;
+                        break;
+                    }
+                    
                     if (page === 0) {
                         apiWorks = false;
                     }
@@ -134,13 +148,13 @@ serve(async (req) => {
     console.log(`Processing ${allBullwareTraders.length} traders for upsert.`);
 
     const tradersToUpsert = allBullwareTraders.map(trader => ({
-        etoro_username: trader.username || trader.userName,
-        display_name: trader.displayName || trader.fullName || trader.username,
-        risk_score: trader.riskScore,
-        copiers: trader.copiers,
-        gain_12m: trader.gain12Months,
+        etoro_username: trader.username || trader.userName || trader.etoro_username || trader.id,
+        display_name: trader.displayName || trader.fullName || trader.name || trader.username || trader.userName || trader.etoro_username,
+        risk_score: trader.riskScore || trader.risk_score || trader.risk || null,
+        copiers: trader.copiers || trader.copier_count || trader.followers || 0,
+        gain_12m: trader.gain12Months || trader.gain_12m || trader.gain_12_months || trader.return_12m || null,
         updated_at: new Date().toISOString(),
-    }));
+    })).filter(t => t.etoro_username); // Filter out any traders without a username
 
     if (tradersToUpsert.length > 0) {
         console.log(`Attempting to upsert ${tradersToUpsert.length} traders...`);
