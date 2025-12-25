@@ -64,11 +64,17 @@ serve(async (req) => {
                 console.log(`[DEBUG] All pending jobs query:`, allPending?.length, 'error:', allPendingError);
             }
             
-            return new Response(JSON.stringify({ 
-                message: "No pending jobs to dispatch.", 
-                total_jobs: count,
-                debug: { count, countError }
-            }), { headers: corsHeaders });
+        return new Response(JSON.stringify({ 
+            message: "No pending jobs to dispatch.", 
+            total_jobs: count,
+            dispatched_jobs: 0,
+            attempted: 0,
+            errors: [],
+            debug: { count, countError }
+        }), { 
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 200
+        });
         }
 
         const invocationPromises = pendingJobs.map(job => {
@@ -99,7 +105,10 @@ serve(async (req) => {
             dispatched_jobs: invokedCount,
             attempted: pendingJobs.length,
             errors: errors // Return errors in response
-        }), { headers: corsHeaders });
+        }), { 
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 200
+        });
 
     } catch (error) {
         console.error("Dispatch error:", error);

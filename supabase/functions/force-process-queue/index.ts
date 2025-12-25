@@ -90,11 +90,20 @@ serve(async (req) => {
 
       if (dispatchError) {
         console.error(`Error in iteration ${i + 1}:`, dispatchError);
+        const errorMessage = typeof dispatchError === 'string' ? dispatchError : (dispatchError.message || JSON.stringify(dispatchError));
         stats.errors.push({
           iteration: i + 1,
-          error: dispatchError.message || dispatchError
+          error: `dispatch-sync-jobs failed: ${errorMessage}`
         });
-        break; // Stop on error
+        // Don't break - continue trying in case it's a transient error
+        // Only break if we've had too many consecutive errors
+        if (stats.errors.length >= 5 && stats.errors.slice(-5).every(e => e.iteration === i + 1)) {
+          console.log("Too many consecutive errors, stopping.");
+          break;
+        }
+        // Wait a bit before retrying
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        continue;
       }
 
       const dispatched = dispatchResult?.dispatched_jobs || 0;
