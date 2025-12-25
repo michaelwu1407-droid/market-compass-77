@@ -374,8 +374,9 @@ export default function AdminSyncPage() {
                     Last active: {getState('trader_details')?.last_run ? formatDistanceToNow(new Date(getState('trader_details')!.last_run), { addSuffix: true }) : 'Never'}
                 </div>
                 <div className="flex gap-2">
-                    <Button title="Start Full Sync" size="sm" variant="ghost" onClick={runDiscovery} disabled={isDiscovering}>
-                        {isDiscovering ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+                    <Button title="Discover New Traders & Create Jobs" size="sm" variant="default" onClick={runDiscovery} disabled={isDiscovering}>
+                        {isDiscovering ? <Loader2 className="h-3 w-3 animate-spin mr-2" /> : <Users className="h-3 w-3 mr-2" />}
+                        {isDiscovering ? 'Discovering...' : 'Discover New Traders'}
                     </Button>
                     <Button title="Dispatch Batch" size="sm" variant="ghost" onClick={runProcessing} disabled={isProcessing}>
                         {isProcessing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}

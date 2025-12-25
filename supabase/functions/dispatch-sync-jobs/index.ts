@@ -23,11 +23,15 @@ serve(async (req) => {
 
         // Also reset stuck in_progress jobs (older than 10 minutes) before fetching
         const stuckThreshold = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-        await supabase
+        const { error: resetError } = await supabase
             .from('sync_jobs')
             .update({ status: 'pending', started_at: null })
             .eq('status', 'in_progress')
             .lt('started_at', stuckThreshold);
+        
+        if (resetError) {
+            console.warn("Warning: Error resetting stuck jobs (non-fatal):", resetError);
+        }
 
         const { data: pendingJobs, error: fetchError } = await supabase
             .from('sync_jobs')

@@ -118,10 +118,10 @@ serve(async (req) => {
           iteration: i + 1,
           error: `dispatch-sync-jobs failed: ${errorMessage}`
         });
-        // Don't break - continue trying in case it's a transient error
-        // Only break if we've had too many consecutive errors
-        if (stats.errors.length >= 5 && stats.errors.slice(-5).every(e => e.iteration === i + 1)) {
-          console.log("Too many consecutive errors, stopping.");
+        // Stop after 3 consecutive errors to avoid wasting iterations
+        const recentErrors = stats.errors.filter(e => e.iteration > i - 2);
+        if (recentErrors.length >= 3) {
+          console.log("Too many consecutive errors, stopping to avoid wasting iterations.");
           break;
         }
         // Wait a bit before retrying
