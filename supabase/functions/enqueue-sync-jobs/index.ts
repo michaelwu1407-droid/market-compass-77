@@ -22,11 +22,43 @@ serve(async (req) => {
     );
 
     if (sync_traders) {
-        console.log('sync_traders is true, invoking sync-traders function asynchronously');
-        supabase.functions.invoke('sync-traders');
-        return new Response(JSON.stringify({ message: "Asynchronously invoked sync-traders. The queue will be populated shortly." }), {
+        console.log('sync_traders is true, invoking sync-traders function');
+        // Invoke sync-traders and wait for it to complete, then enqueue jobs for new traders
+        const { data: syncResult, error: syncError } = await supabase.functions.invoke('sync-traders');
+        
+        if (syncError) {
+            console.error("Error invoking sync-traders:", syncError);
+            return new Response(JSON.stringify({ 
+                error: "Failed to invoke sync-traders", 
+                details: syncError 
+            }), {
+                headers: { ...corsHeaders, "Content-Type": "application/json" },
+                status: 500,
+            });
+        }
+        
+        console.log("sync-traders completed:", syncResult);
+        
+        // After sync-traders completes, enqueue jobs for all traders (including new ones)
+        // Wait a moment for traders to be inserted
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Now enqueue jobs for all traders (force mode to get new ones too)
+        const { data: enqueueResult, error: enqueueError } = await supabase.functions.invoke('enqueue-sync-jobs', {
+            body: { force: true }
+        });
+        
+        if (enqueueError) {
+            console.error("Error enqueuing jobs after sync:", enqueueError);
+        }
+        
+        return new Response(JSON.stringify({ 
+            message: "Sync-traders completed and jobs enqueued", 
+            sync_result: syncResult,
+            enqueue_result: enqueueResult
+        }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
-            status: 202, // Accepted
+            status: 200,
         });
     }
 

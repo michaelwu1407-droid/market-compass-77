@@ -30,21 +30,38 @@ serve(async (req) => {
         console.log("Dispatch result:", dispatchData);
 
         // 2. Check if queue is empty or low, and if so, refill it
-        // If no pending jobs were found, try to enqueue more
-        const pendingCount = dispatchData?.dispatched_jobs === 0 && dispatchData?.attempted === 0;
+        // Check current pending count
+        const { count: currentPending } = await supabase
+            .from('sync_jobs')
+            .select('*', { count: 'exact', head: true })
+            .eq('status', 'pending');
         
-        if (pendingCount) {
-            console.log("No pending jobs found. Checking if we should enqueue more...");
-            
-            // Check current pending count
-            const { count: currentPending } = await supabase
-                .from('sync_jobs')
-                .select('*', { count: 'exact', head: true })
-                .eq('status', 'pending');
-            
-            // If we have less than 20 pending jobs, try to enqueue more
-            if ((currentPending || 0) < 20) {
-                console.log("Queue is low. Invoking enqueue-sync-jobs...");
+        // Check trader count
+        const { count: traderCount } = await supabase
+            .from('traders')
+            .select('*', { count: 'exact', head: true });
+        
+        // If trader count is low, discover new traders
+        if ((traderCount || 0) < 1000) {
+            console.log(`Trader count (${traderCount}) is below 1000. Triggering sync-traders to discover more...`);
+            try {
+                const { error: syncTradersError } = await supabase.functions.invoke('enqueue-sync-jobs', {
+                    body: { sync_traders: true }
+                });
+                if (syncTradersError) {
+                    console.error("Error triggering sync-traders:", syncTradersError);
+                } else {
+                    console.log("Triggered sync-traders to discover new traders");
+                }
+            } catch (e: any) {
+                console.error("Exception triggering sync-traders:", e.message);
+            }
+        }
+        
+        // If we have less than 50 pending jobs, try to enqueue more from existing traders
+        if ((currentPending || 0) < 50) {
+            console.log(`Queue is low (${currentPending} pending). Enqueuing stale traders...`);
+            try {
                 const { data: enqueueData, error: enqueueError } = await supabase.functions.invoke('enqueue-sync-jobs', {
                     body: { hours_stale: 6, hours_active: 7 * 24 }
                 });
@@ -54,13 +71,21 @@ serve(async (req) => {
                 } else {
                     console.log("Enqueued new jobs:", enqueueData);
                 }
+            } catch (e: any) {
+                console.error("Exception enqueuing jobs:", e.message);
             }
         }
         
         return new Response(JSON.stringify({ 
             message: "Worker ran successfully", 
             dispatch_result: dispatchData,
-            refilled_queue: pendingCount
+            pending_jobs: currentPending || 0,
+            trader_count: traderCount || 0,
+            actions_taken: {
+                processed_jobs: dispatchData?.dispatched_jobs || 0,
+                triggered_discovery: (traderCount || 0) < 1000,
+                refilled_queue: (currentPending || 0) < 50
+            }
         }), { 
             headers: { ...corsHeaders, "Content-Type": "application/json" } 
         });

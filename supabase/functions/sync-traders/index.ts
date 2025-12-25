@@ -62,13 +62,17 @@ serve(async (req) => {
             .from('traders')
             .select('*', { count: 'exact', head: true });
         
-        const targetCount = 200; // Target number of traders
-        const startIndex = (existingCount || 0) + 1;
-        const neededCount = Math.max(0, targetCount - (existingCount || 0));
+        // Always create a batch of new traders to ensure continuous growth
+        // Create 50-100 new traders each time (or more if count is very low)
+        const currentCount = existingCount || 0;
+        const batchSize = currentCount < 500 ? 100 : 50; // Larger batches when starting out
         
-        console.log(`Existing traders: ${existingCount}, Creating ${neededCount} new mock traders`);
+        const startIndex = currentCount + 1;
+        const endIndex = startIndex + batchSize;
         
-        for (let i = startIndex; i < startIndex + neededCount; i++) {
+        console.log(`Existing traders: ${currentCount}, Creating ${batchSize} new mock traders (${startIndex} to ${endIndex})`);
+        
+        for (let i = startIndex; i < endIndex; i++) {
             allBullwareTraders.push({
                 username: `trader_${i}`,
                 displayName: `Trader ${i}`,
