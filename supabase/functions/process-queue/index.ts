@@ -73,10 +73,10 @@ Deno.serve(async (req) => {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
   try {
-    // 1. Fetch 5 PENDING items
+    // 1. Fetch 5 PENDING items, including their retry count
     const { data: items, error: fetchError } = await supabase
       .from('sync_queue')
-      .select('id, trader_id')
+      .select('id, trader_id, retry_count') // <-- MODIFIED
       .eq('status', 'PENDING')
       .limit(5);
 
@@ -129,7 +129,7 @@ Deno.serve(async (req) => {
           .update({ 
             status: 'FAILED', 
             error_message: err instanceof Error ? err.message : 'Unknown error',
-            retry_count: 0 
+            retry_count: (item.retry_count || 0) + 1 // <-- MODIFIED
           })
           .eq('id', item.id);
           
