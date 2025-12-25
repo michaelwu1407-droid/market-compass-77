@@ -246,9 +246,12 @@ serve(async (req) => {
     }
 
     return new Response(JSON.stringify({
+        success: true,
         message: `Successfully enqueued ${actualInserted} new sync jobs.`,
         enqueued_count: actualInserted,
-        attempted: jobsToInsert.length
+        attempted: jobsToInsert?.length || 0,
+        jobs_to_insert: jobsToInsert?.length || 0,
+        final_trader_ids: finalTraderIds.length
     }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 200,
