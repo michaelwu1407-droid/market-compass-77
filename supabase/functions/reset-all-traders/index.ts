@@ -102,11 +102,6 @@ serve(async (req) => {
         }
       }
     }
-    
-    if (deleteTradersError) {
-      console.error("Error deleting traders:", deleteTradersError);
-      throw deleteTradersError;
-    }
 
     console.log(`RESET: Deleted ${tradersBefore || 0} traders, ${jobsBefore || 0} jobs, and all holdings`);
 
