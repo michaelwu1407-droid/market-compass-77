@@ -7,9 +7,9 @@ const corsHeaders = {
 };
 
 // Process jobs sequentially to respect Bullaware API rate limit (10 req/min)
-// We'll process 1 job every 7 seconds = ~8.5 req/min (safe margin)
-const MAX_JOBS_TO_PROCESS = 10;
-const DELAY_BETWEEN_JOBS_MS = 7000; // 7 seconds = ~8.5 req/min
+// Optimized: 1 job every 6 seconds = exactly 10 req/min (using full capacity)
+const MAX_JOBS_TO_PROCESS = 10; // Process 10 jobs per batch = 1 minute per batch
+const DELAY_BETWEEN_JOBS_MS = 6000; // 6 seconds = exactly 10 req/min
 
 serve(async (req) => {
     if (req.method === 'OPTIONS') {

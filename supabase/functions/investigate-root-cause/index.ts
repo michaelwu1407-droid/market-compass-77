@@ -62,11 +62,12 @@ serve(async (req) => {
       }
     };
 
-    // 2. Test Bullaware API directly
+    // 2. Test Bullaware API directly - test multiple pages to see total available
     if (BULLAWARE_API_KEY) {
       try {
-        const testUrl = 'https://api.bullaware.com/v1/investors?limit=10&offset=0';
-        const testResponse = await fetch(testUrl, {
+        // Test first page
+        const testUrl1 = 'https://api.bullaware.com/v1/investors?limit=1000&offset=0';
+        const testResponse1 = await fetch(testUrl1, {
           headers: {
             'Authorization': `Bearer ${BULLAWARE_API_KEY}`,
             'Content-Type': 'application/json',
@@ -74,29 +75,57 @@ serve(async (req) => {
           signal: AbortSignal.timeout(10000)
         });
 
-        if (testResponse.ok) {
-          const testData = await testResponse.json();
-          const testTraders = testData.items || testData.data || testData.investors || testData.results || (Array.isArray(testData) ? testData : []);
+        if (testResponse1.ok) {
+          const testData1 = await testResponse1.json();
+          const testTraders1 = testData1.items || testData1.data || testData1.investors || testData1.results || (Array.isArray(testData1) ? testData1 : []);
           
           investigation.bullaware_api = {
             status: 'working',
-            test_response_status: testResponse.status,
-            test_traders_returned: testTraders.length,
-            response_structure: Object.keys(testData),
-            sample_trader: testTraders[0] || null
+            test_response_status: testResponse1.status,
+            page_1_traders_returned: testTraders1.length,
+            response_structure: Object.keys(testData1),
+            sample_trader: testTraders1[0] || null
           };
 
           // Try to get total count if available
-          if (testData.total !== undefined) {
-            investigation.bullaware_api.total_available = testData.total;
-          } else if (testData.count !== undefined) {
-            investigation.bullaware_api.total_available = testData.count;
+          if (testData1.total !== undefined) {
+            investigation.bullaware_api.total_available = testData1.total;
+          } else if (testData1.count !== undefined) {
+            investigation.bullaware_api.total_available = testData1.count;
+          }
+
+          // Test second page to see if pagination works
+          if (testTraders1.length === 1000) {
+            await new Promise(resolve => setTimeout(resolve, 6000)); // Respect rate limit
+            const testUrl2 = 'https://api.bullaware.com/v1/investors?limit=1000&offset=1000';
+            const testResponse2 = await fetch(testUrl2, {
+              headers: {
+                'Authorization': `Bearer ${BULLAWARE_API_KEY}`,
+                'Content-Type': 'application/json',
+              },
+              signal: AbortSignal.timeout(10000)
+            });
+
+            if (testResponse2.ok) {
+              const testData2 = await testResponse2.json();
+              const testTraders2 = testData2.items || testData2.data || testData2.investors || testData2.results || (Array.isArray(testData2) ? testData2 : []);
+              investigation.bullaware_api.page_2_traders_returned = testTraders2.length;
+              investigation.bullaware_api.pagination_works = testTraders2.length > 0;
+              
+              if (testTraders2.length === 0) {
+                investigation.bullaware_api.note = 'Pagination may have reached end, or API only returns first 1000 traders';
+              }
+            } else {
+              investigation.bullaware_api.page_2_error = testResponse2.status;
+            }
+          } else {
+            investigation.bullaware_api.note = `First page returned ${testTraders1.length} traders (less than 1000), may be all available traders`;
           }
         } else {
           investigation.bullaware_api = {
             status: 'error',
-            error_status: testResponse.status,
-            error_text: await testResponse.text().catch(() => 'Unable to read error')
+            error_status: testResponse1.status,
+            error_text: await testResponse1.text().catch(() => 'Unable to read error')
           };
         }
       } catch (e: any) {

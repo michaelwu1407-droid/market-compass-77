@@ -63,3 +63,6 @@ jobs:
 
       - name: Deploy force-enqueue-all
         run: supabase functions deploy force-enqueue-all --project-ref $PROJECT_ID
+
+      - name: Deploy check-system-health
+        run: supabase functions deploy check-system-health --project-ref $PROJECT_ID
