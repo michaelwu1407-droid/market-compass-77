@@ -321,6 +321,43 @@ export default function AdminSyncPage() {
     }
   };
 
+  const resetAllTraders = async () => {
+    if (!confirm('⚠️ WARNING: This will DELETE ALL traders, jobs, and holdings. Are you sure?')) {
+      return;
+    }
+    
+    setIsResetting(true);
+    try {
+      const result = await invokeFunction('reset-all-traders', { confirm: 'DELETE_ALL_TRADERS' });
+      console.log('Reset result:', result);
+      toast({ 
+        title: 'Reset Complete', 
+        description: `Deleted ${result.deleted?.traders || 0} traders. System will discover new traders automatically.`,
+        duration: 10000
+      });
+      
+      // Refresh all data
+      refetchStats();
+      refetchQueue();
+      refetchDiagnostics();
+      
+      // Trigger discovery immediately
+      setTimeout(async () => {
+        try {
+          await invokeFunction('enqueue-sync-jobs', { sync_traders: true });
+          toast({ title: 'Discovery Started', description: 'Fetching new traders from Bullaware API...' });
+        } catch (e) {
+          console.error('Auto-discovery error:', e);
+        }
+      }, 2000);
+    } catch (e) {
+      console.error('Reset error:', e);
+      toast({ title: 'Reset Failed', description: String(e), variant: 'destructive' });
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
   return (
     <div className="max-w-7xl mx-auto space-y-8 p-6">
       
