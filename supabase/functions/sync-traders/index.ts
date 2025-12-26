@@ -57,13 +57,27 @@ serve(async (req) => {
                 if (response.ok) {
                     const data = await response.json();
                     console.log(`[DEBUG] Page ${page + 1} response structure:`, Object.keys(data));
+                    console.log(`[DEBUG] Page ${page + 1} full response (first 1000 chars):`, JSON.stringify(data).substring(0, 1000));
                     
                     // Try multiple possible response formats
                     const pageTraders = data.items || data.data || data.investors || data.results || (Array.isArray(data) ? data : []);
                     
+                    console.log(`[DEBUG] Page ${page + 1} parsed traders count: ${pageTraders.length}`);
+                    console.log(`[DEBUG] Page ${page + 1} request was: limit=1000&offset=${page * 1000}`);
+                    
                     if (pageTraders.length === 0) {
                         console.log(`Page ${page + 1}: No more traders, stopping pagination. Response:`, JSON.stringify(data).substring(0, 500));
                         break;
+                    }
+                    
+                    // CRITICAL: If API only returns 10 traders when we request 1000, log a warning
+                    if (pageTraders.length < 100 && page === 0) {
+                        console.error(`[WARNING] Bullaware API only returned ${pageTraders.length} traders when requesting 1000. This suggests:`);
+                        console.error(`  - API might be ignoring limit parameter`);
+                        console.error(`  - API might have a default limit`);
+                        console.error(`  - API response structure might be different`);
+                        console.error(`  - Full response keys:`, Object.keys(data));
+                        console.error(`  - Sample response:`, JSON.stringify(data).substring(0, 2000));
                     }
                     
                     allBullwareTraders = allBullwareTraders.concat(pageTraders);
@@ -71,6 +85,7 @@ serve(async (req) => {
                     
                     if (pageTraders.length < 1000) {
                         // Last page
+                        console.log(`Page ${page + 1}: Received ${pageTraders.length} traders (less than 1000), stopping pagination.`);
                         break;
                     }
                     

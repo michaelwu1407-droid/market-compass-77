@@ -45,6 +45,7 @@ export default function AdminSyncPage() {
   const [isSyncingMovers, setIsSyncingMovers] = useState(false);
   const [isSyncingPosts, setIsSyncingPosts] = useState(false);
   const [isInvestigating, setIsInvestigating] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
 
   const PROJECT_URL = 'https://xgvaibxxiwfraklfbwey.supabase.co';
   const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -332,6 +333,10 @@ export default function AdminSyncPage() {
           <Button variant="outline" size="sm" onClick={investigateRootCause} disabled={isInvestigating}>
             {isInvestigating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileText className="h-4 w-4 mr-2" />}
             Investigate Issue
+          </Button>
+          <Button variant="outline" size="sm" onClick={resetAllTraders} disabled={isResetting} className="text-red-600 hover:text-red-700">
+            {isResetting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RotateCcw className="h-4 w-4 mr-2" />}
+            Reset All Data
           </Button>
           {(stats?.pending ?? 0) > 100 && (
             <Button variant="default" size="sm" onClick={runForceProcessing} disabled={isForceProcessing}>

@@ -66,3 +66,6 @@ jobs:
 
       - name: Deploy check-system-health
         run: supabase functions deploy check-system-health --project-ref $PROJECT_ID
+
+      - name: Deploy reset-all-traders
+        run: supabase functions deploy reset-all-traders --project-ref $PROJECT_ID
