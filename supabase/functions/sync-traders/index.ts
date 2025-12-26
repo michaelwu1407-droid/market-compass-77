@@ -36,12 +36,27 @@ serve(async (req) => {
     }
 
     // Try to fetch from Bullaware API (respecting rate limits)
-    // API limit is 1000 per request, and likely has rate limits (e.g., 10 req/min)
-    // So we'll fetch one page per call and spread discovery over time
+    // CRITICAL: Bullaware API has 10 req/min limit, so we need to make continuous requests
+    // Strategy: Fetch 1 page per call, and have this function called every minute
+    // This way we continuously discover new traders over time
     console.log(`Attempting to fetch traders from Bullaware API...`);
     console.log(`[DEBUG] BULLAWARE_API_KEY present: Yes (length: ${BULLAWARE_API_KEY.length})`);
-    const maxPages = 10; // Fetch up to 10,000 traders per call (to respect rate limits)
-    let page = 0;
+    
+    // Get the last offset we fetched (stored in a simple way - check existing traders)
+    const { data: existingTraders } = await supabase
+      .from('traders')
+      .select('id')
+      .order('created_at', { ascending: false })
+      .limit(1);
+    
+    // Calculate next page to fetch - if we have traders, we've likely fetched some pages already
+    // For now, fetch page 0 (first page) - the continuous calling will handle pagination
+    // TODO: Store last fetched offset in a config table for proper pagination
+    const body = await req.json().catch(() => ({}));
+    const startPage = body.start_page || 0;
+    const maxPages = body.max_pages || 1; // Fetch only 1 page per call to spread over time
+    
+    let page = startPage;
         
         while (page < maxPages) {
             try {

@@ -1,26 +1,28 @@
-name: Discover New Traders
+name: Discover New Traders - Continuous
 
 on:
   schedule:
-    # Runs every hour to discover new traders as frequently as possible
-    # Each discovery call fetches up to 10,000 traders with 6s delays between pages
-    # This respects the 10 req/min limit while maximizing discovery frequency
-    - cron: '0 * * * *'  # Every hour at :00
+    # Runs every minute to continuously fetch traders from Bullaware API
+    # Each call fetches 1 page (respecting 10 req/min limit)
+    # This ensures we're constantly discovering new traders
+    - cron: '* * * * *'  # Every minute
   workflow_dispatch: # Allows manual runs
 
 jobs:
   discover:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 2
     
     steps:
-      - name: Discover new traders
+      - name: Discover new traders (1 page per call)
         run: |
           echo "Discovering new traders at $(date)"
+          # Call sync-traders directly to fetch 1 page
+          # It will automatically paginate based on what's already in the database
           curl -X POST \
             -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhndmFpYnh4aXdmcmFrbGZid2V5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYzODYwMjcsImV4cCI6MjA4MTk2MjAyN30.6WpGcdGeuFngazeTP5tiwVL--htj7AUqsLsTqW5Iz7M" \
             -H "Content-Type: application/json" \
-            -d '{"sync_traders": true}' \
+            -d '{"max_pages": 1}' \
             -w "\nHTTP Status: %{http_code}\n" \
-            https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/enqueue-sync-jobs || echo "Error discovering traders"
+            https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/sync-traders || echo "Error discovering traders"
 

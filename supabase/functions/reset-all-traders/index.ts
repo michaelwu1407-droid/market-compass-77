@@ -35,25 +35,45 @@ serve(async (req) => {
       .from('sync_jobs')
       .select('*', { count: 'exact', head: true });
     
-    const { error: deleteJobsError } = await supabase
+    // Delete all by selecting all IDs first, then deleting
+    const { data: allJobs } = await supabase
       .from('sync_jobs')
-      .delete()
-      .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all
+      .select('id')
+      .limit(10000); // Get all job IDs
     
-    if (deleteJobsError) {
-      console.error("Error deleting sync_jobs:", deleteJobsError);
-      throw deleteJobsError;
+    if (allJobs && allJobs.length > 0) {
+      const { error: deleteJobsError } = await supabase
+        .from('sync_jobs')
+        .delete()
+        .in('id', allJobs.map(j => j.id));
+      
+      if (deleteJobsError) {
+        console.error("Error deleting sync_jobs:", deleteJobsError);
+        throw deleteJobsError;
+      }
     }
 
     // 2. Delete all trader holdings
-    const { error: deleteHoldingsError } = await supabase
+    const { data: allHoldings } = await supabase
       .from('trader_holdings')
-      .delete()
-      .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all
+      .select('id')
+      .limit(100000); // Get all holding IDs
     
-    if (deleteHoldingsError) {
-      console.error("Error deleting trader_holdings:", deleteHoldingsError);
-      throw deleteHoldingsError;
+    if (allHoldings && allHoldings.length > 0) {
+      // Delete in batches to avoid query size limits
+      const batchSize = 1000;
+      for (let i = 0; i < allHoldings.length; i += batchSize) {
+        const batch = allHoldings.slice(i, i + batchSize);
+        const { error: deleteHoldingsError } = await supabase
+          .from('trader_holdings')
+          .delete()
+          .in('id', batch.map(h => h.id));
+        
+        if (deleteHoldingsError) {
+          console.error("Error deleting trader_holdings batch:", deleteHoldingsError);
+          throw deleteHoldingsError;
+        }
+      }
     }
 
     // 3. Delete all traders
@@ -61,10 +81,27 @@ serve(async (req) => {
       .from('traders')
       .select('*', { count: 'exact', head: true });
     
-    const { error: deleteTradersError } = await supabase
+    const { data: allTraders } = await supabase
       .from('traders')
-      .delete()
-      .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all
+      .select('id')
+      .limit(100000); // Get all trader IDs
+    
+    if (allTraders && allTraders.length > 0) {
+      // Delete in batches to avoid query size limits
+      const batchSize = 1000;
+      for (let i = 0; i < allTraders.length; i += batchSize) {
+        const batch = allTraders.slice(i, i + batchSize);
+        const { error: deleteTradersError } = await supabase
+          .from('traders')
+          .delete()
+          .in('id', batch.map(t => t.id));
+        
+        if (deleteTradersError) {
+          console.error("Error deleting traders batch:", deleteTradersError);
+          throw deleteTradersError;
+        }
+      }
+    }
     
     if (deleteTradersError) {
       console.error("Error deleting traders:", deleteTradersError);

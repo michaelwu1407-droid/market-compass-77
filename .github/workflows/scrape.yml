@@ -1,37 +1,32 @@
-name: Scrape eToro Profiles
+# DISABLED: Playwright scraper is redundant - we use Bullaware API for trader data
+# and eToro API directly for posts (via scrape-posts Edge Function)
+# This workflow is kept for reference but disabled
 
-on:
-  schedule:
-    # Runs every 3 hours
-    - cron: "0 */3 * * *"
-  workflow_dispatch: # Allows manual runs from the Actions tab
+# name: Scrape eToro Profiles (DISABLED - Redundant)
 
-jobs:
-  scrape:
-    runs-on: ubuntu-latest
-    # Cap total runtime to 20 minutes
-    timeout-minutes: 20
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+# on:
+#   schedule:
+#     # Runs every 3 hours
+#     - cron: "0 */3 * * *"
+#   workflow_dispatch: # Allows manual runs from the Actions tab
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install dependencies
-        run: npm install
-        
-      - name: Install Playwright browsers and dependencies
-        run: npx playwright install --with-deps chromium
-
-      - name: Run scraper script
-        run: node scripts/scrape_etoro.mjs
-        env:
-          SUPABASE_INGEST_URL: ${{ secrets.SUPABASE_INGEST_URL }}
-          INGEST_KEY: ${{ secrets.INGEST_KEY }}
+# jobs:
+#   scrape:
+#     runs-on: ubuntu-latest
+#     timeout-minutes: 20
+#     steps:
+#       - name: Checkout repository
+#         uses: actions/checkout@v4
+#       - name: Setup Node.js
+#         uses: actions/setup-node@v4
+#         with:
+#           node-version: '20'
+#       - name: Install dependencies
+#         run: npm ci
+#       - name: Install Playwright browsers and dependencies
+#         run: npx playwright install --with-deps chromium
+#       - name: Run scraper script
+#         run: node scripts/scrape_etoro.mjs
+#         env:
+#           SUPABASE_INGEST_URL: ${{ secrets.SUPABASE_INGEST_URL }}
+#           INGEST_KEY: ${{ secrets.INGEST_KEY }}
