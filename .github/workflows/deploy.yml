@@ -57,3 +57,9 @@ jobs:
 
       - name: Deploy inspect-sync-jobs
         run: supabase functions deploy inspect-sync-jobs --project-ref $PROJECT_ID
+
+      - name: Deploy investigate-root-cause
+        run: supabase functions deploy investigate-root-cause --project-ref $PROJECT_ID
+
+      - name: Deploy force-enqueue-all
+        run: supabase functions deploy force-enqueue-all --project-ref $PROJECT_ID

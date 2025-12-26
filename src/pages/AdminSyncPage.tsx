@@ -44,6 +44,7 @@ export default function AdminSyncPage() {
   const [isSyncingAssets, setIsSyncingAssets] = useState(false);
   const [isSyncingMovers, setIsSyncingMovers] = useState(false);
   const [isSyncingPosts, setIsSyncingPosts] = useState(false);
+  const [isInvestigating, setIsInvestigating] = useState(false);
 
   const PROJECT_URL = 'https://xgvaibxxiwfraklfbwey.supabase.co';
   const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -293,6 +294,32 @@ export default function AdminSyncPage() {
     }
   };
 
+  const investigateRootCause = async () => {
+    setIsInvestigating(true);
+    try {
+      const result = await invokeFunction('investigate-root-cause');
+      console.log('Root Cause Investigation:', result);
+      toast({ 
+        title: 'Investigation Complete', 
+        description: `Found ${result.database?.total_traders || 0} traders. Check console for full report.`,
+        duration: 15000
+      });
+      
+      // Log full investigation to console
+      console.group('🔍 Root Cause Investigation Report');
+      console.log('Database:', result.database);
+      console.log('Bullaware API:', result.bullaware_api);
+      console.log('Functions:', result.functions);
+      console.log('Recommendations:', result.recommendations);
+      console.groupEnd();
+    } catch (e) {
+      console.error('Investigation error:', e);
+      toast({ title: 'Investigation Failed', description: String(e), variant: 'destructive' });
+    } finally {
+      setIsInvestigating(false);
+    }
+  };
+
   return (
     <div className="max-w-7xl mx-auto space-y-8 p-6">
       
@@ -302,6 +329,10 @@ export default function AdminSyncPage() {
           <p className="text-muted-foreground mt-1">Continuous trader discovery and profile synchronization</p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={investigateRootCause} disabled={isInvestigating}>
+            {isInvestigating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileText className="h-4 w-4 mr-2" />}
+            Investigate Issue
+          </Button>
           {(stats?.pending ?? 0) > 100 && (
             <Button variant="default" size="sm" onClick={runForceProcessing} disabled={isForceProcessing}>
               {isForceProcessing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Zap className="h-4 w-4 mr-2" />}
