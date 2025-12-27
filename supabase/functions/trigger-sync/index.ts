@@ -7,37 +7,129 @@ const corsHeaders = {
 };
 
 type Domain = 'discussion_feed' | 'trader_profiles' | 'stock_data';
+
+const LOCK_TTL_MINUTES = 5; // Stale lock threshold
+
+type LockResult = {
+  acquired: boolean;
+  reason: 'success' | 'already_running' | 'stale_cleared' | 'row_initialized' | 'error';
+  lockHolder?: string;
+  lockAcquiredAt?: string;
+  lockAgeMinutes?: number;
+  message?: string;
+};
+
 type TriggerResult = {
   domain: Domain;
   status: 'started' | 'queued' | 'blocked' | 'error';
   message: string;
   run_id?: string;
+  lock_info?: {
+    holder: string;
+    acquired_at: string;
+    age_minutes: number;
+    is_stale: boolean;
+  };
 };
 
-async function acquireLock(supabase: any, domain: Domain, lockHolder: string): Promise<boolean> {
-  const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+async function acquireLock(supabase: any, domain: Domain, lockHolder: string): Promise<LockResult> {
+  const staleCutoff = new Date(Date.now() - LOCK_TTL_MINUTES * 60 * 1000).toISOString();
+  const now = new Date().toISOString();
   
   console.log(`[acquireLock] Attempting to acquire lock for domain: ${domain}`);
   
-  const { data, error } = await supabase
+  // Step 1: Check current state using maybeSingle (won't throw on 0 rows)
+  const { data: current, error: fetchError } = await supabase
+    .from('sync_domain_status')
+    .select('status, lock_holder, lock_acquired_at')
+    .eq('domain', domain)
+    .maybeSingle();
+  
+  if (fetchError) {
+    console.error(`[acquireLock] Error fetching status for ${domain}:`, fetchError);
+    return { acquired: false, reason: 'error', message: fetchError.message };
+  }
+  
+  // Step 2: If row doesn't exist, create it (defensive)
+  if (!current) {
+    console.log(`[acquireLock] No row found for ${domain}, creating one`);
+    const { error: insertError } = await supabase
+      .from('sync_domain_status')
+      .insert({ 
+        domain, 
+        status: 'running', 
+        lock_holder: lockHolder, 
+        lock_acquired_at: now 
+      });
+    
+    if (insertError) {
+      console.error(`[acquireLock] Error creating row for ${domain}:`, insertError);
+      return { acquired: false, reason: 'error', message: insertError.message };
+    }
+    
+    console.log(`[acquireLock] Created new row and acquired lock for ${domain}`);
+    return { acquired: true, reason: 'row_initialized' };
+  }
+  
+  // Step 3: Calculate lock age if running
+  const lockAcquiredAt = current.lock_acquired_at;
+  const lockAgeMinutes = lockAcquiredAt 
+    ? Math.floor((Date.now() - new Date(lockAcquiredAt).getTime()) / 60000)
+    : 0;
+  const isStale = lockAcquiredAt && lockAcquiredAt < staleCutoff;
+  
+  // Step 4: If running with fresh lock, reject with details
+  if (current.status === 'running' && !isStale) {
+    console.log(`[acquireLock] Domain ${domain} is running with fresh lock (${lockAgeMinutes} min old)`);
+    return { 
+      acquired: false, 
+      reason: 'already_running',
+      lockHolder: current.lock_holder,
+      lockAcquiredAt,
+      lockAgeMinutes,
+      message: `Already running by ${current.lock_holder} (${lockAgeMinutes} min ago)`
+    };
+  }
+  
+  // Step 5: If stale lock, log warning and clear it
+  if (current.status === 'running' && isStale) {
+    console.log(`[acquireLock] Clearing stale lock for ${domain} (was held by ${current.lock_holder} for ${lockAgeMinutes} min)`);
+    await supabase
+      .from('sync_logs')
+      .insert({
+        domain,
+        level: 'warn',
+        message: `Stale lock auto-cleared (was held by ${current.lock_holder} for ${lockAgeMinutes} min, TTL is ${LOCK_TTL_MINUTES} min)`,
+      });
+  }
+  
+  // Step 6: Attempt to acquire lock (status is idle/error/completed OR stale)
+  const { data: updated, error: updateError } = await supabase
     .from('sync_domain_status')
     .update({
       status: 'running',
       lock_holder: lockHolder,
-      lock_acquired_at: new Date().toISOString(),
+      lock_acquired_at: now,
     })
     .eq('domain', domain)
-    .or(`status.eq.idle,status.eq.error,status.eq.completed,lock_acquired_at.lt.${thirtyMinutesAgo}`)
     .select()
-    .single();
-
-  console.log(`[acquireLock] Result for ${domain}:`, { data: !!data, error: error?.message || null });
+    .maybeSingle();
   
-  if (error) {
-    console.error(`[acquireLock] Error acquiring lock for ${domain}:`, error);
+  if (updateError) {
+    console.error(`[acquireLock] Error updating lock for ${domain}:`, updateError);
+    return { acquired: false, reason: 'error', message: updateError.message };
   }
   
-  return !!data && !error;
+  if (!updated) {
+    console.error(`[acquireLock] Update returned no data for ${domain}`);
+    return { acquired: false, reason: 'error', message: 'Update returned no data' };
+  }
+  
+  console.log(`[acquireLock] Successfully acquired lock for ${domain}${isStale ? ' (after clearing stale lock)' : ''}`);
+  return { 
+    acquired: true, 
+    reason: isStale ? 'stale_cleared' : 'success' 
+  };
 }
 
 async function releaseLock(supabase: any, domain: Domain, status: string, errorMessage?: string): Promise<void> {
@@ -475,21 +567,22 @@ serve(async (req) => {
     const results: TriggerResult[] = [];
 
     for (const domain of domains) {
-      const lockAcquired = await acquireLock(supabase, domain, lockHolder);
+      const lockResult = await acquireLock(supabase, domain, lockHolder);
 
-      if (!lockAcquired) {
-        const { data: status } = await supabase
-          .from('sync_domain_status')
-          .select('status, lock_holder')
-          .eq('domain', domain)
-          .single();
+      if (!lockResult.acquired) {
+        // Return detailed lock info for UX
+        const lockInfo = lockResult.lockHolder ? {
+          holder: lockResult.lockHolder,
+          acquired_at: lockResult.lockAcquiredAt || '',
+          age_minutes: lockResult.lockAgeMinutes || 0,
+          is_stale: (lockResult.lockAgeMinutes || 0) > LOCK_TTL_MINUTES,
+        } : undefined;
 
         results.push({
           domain,
-          status: status?.status === 'running' ? 'blocked' : 'error',
-          message: status?.status === 'running' 
-            ? `Already running by ${status?.lock_holder || 'unknown'}` 
-            : 'Failed to acquire lock',
+          status: lockResult.reason === 'already_running' ? 'blocked' : 'error',
+          message: lockResult.message || 'Failed to acquire lock',
+          lock_info: lockInfo,
         });
         continue;
       }
