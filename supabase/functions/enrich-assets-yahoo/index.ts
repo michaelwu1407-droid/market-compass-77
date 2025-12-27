@@ -134,8 +134,9 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-  const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  // Use external Supabase project
+  const supabaseUrl = Deno.env.get('EXTERNAL_SUPABASE_URL')!;
+  const supabaseServiceKey = Deno.env.get('EXTERNAL_SUPABASE_SERVICE_ROLE_KEY')!;
 
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
