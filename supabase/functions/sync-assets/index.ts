@@ -13,11 +13,16 @@ serve(async (req) => {
 
   try {
     const BULLAWARE_API_KEY = Deno.env.get('BULLAWARE_API_KEY');
-    const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
-    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    // Use external Supabase project
+    const SUPABASE_URL = Deno.env.get('EXTERNAL_SUPABASE_URL');
+    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('EXTERNAL_SUPABASE_SERVICE_ROLE_KEY');
 
     if (!BULLAWARE_API_KEY) {
       throw new Error('BULLAWARE_API_KEY is not configured');
+    }
+
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      throw new Error('External Supabase environment variables are not configured');
     }
 
     console.log('Starting asset sync from Bullaware API...');
@@ -31,7 +36,7 @@ serve(async (req) => {
       // No body provided
     }
 
-    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     let allAssets: any[] = [];
 

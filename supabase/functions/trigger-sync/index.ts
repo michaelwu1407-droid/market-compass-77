@@ -17,6 +17,8 @@ type TriggerResult = {
 async function acquireLock(supabase: any, domain: Domain, lockHolder: string): Promise<boolean> {
   const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
   
+  console.log(`[acquireLock] Attempting to acquire lock for domain: ${domain}`);
+  
   const { data, error } = await supabase
     .from('sync_domain_status')
     .update({
@@ -29,6 +31,12 @@ async function acquireLock(supabase: any, domain: Domain, lockHolder: string): P
     .select()
     .single();
 
+  console.log(`[acquireLock] Result for ${domain}:`, { data: !!data, error: error?.message || null });
+  
+  if (error) {
+    console.error(`[acquireLock] Error acquiring lock for ${domain}:`, error);
+  }
+  
   return !!data && !error;
 }
 
@@ -405,10 +413,18 @@ serve(async (req) => {
   }
 
   try {
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    );
+    // Use external Supabase project
+    const externalUrl = Deno.env.get('EXTERNAL_SUPABASE_URL');
+    const externalKey = Deno.env.get('EXTERNAL_SUPABASE_SERVICE_ROLE_KEY');
+    
+    console.log(`[trigger-sync] EXTERNAL_SUPABASE_URL configured: ${!!externalUrl}`);
+    console.log(`[trigger-sync] EXTERNAL_SUPABASE_SERVICE_ROLE_KEY configured: ${!!externalKey}`);
+    
+    if (!externalUrl || !externalKey) {
+      throw new Error('EXTERNAL_SUPABASE_URL or EXTERNAL_SUPABASE_SERVICE_ROLE_KEY not configured');
+    }
+    
+    const supabase = createClient(externalUrl, externalKey);
 
     const body = await req.json().catch(() => ({}));
     const domains: Domain[] = body.domains || ['discussion_feed', 'trader_profiles', 'stock_data'];
@@ -416,6 +432,13 @@ serve(async (req) => {
     const lockHolder = `trigger-${Date.now()}`;
 
     console.log(`trigger-sync called for domains: ${domains.join(', ')} by ${triggeredBy}`);
+    
+    // Debug: Check if we can read the domain status
+    const { data: debugStatus, error: debugError } = await supabase
+      .from('sync_domain_status')
+      .select('*')
+      .limit(3);
+    console.log(`[trigger-sync] Debug domain status read:`, { count: debugStatus?.length, error: debugError?.message });
 
     const results: TriggerResult[] = [];
 
