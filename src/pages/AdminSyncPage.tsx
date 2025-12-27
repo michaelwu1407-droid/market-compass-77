@@ -4,9 +4,9 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { toast } from '@/hooks/use-toast';
 import { 
-  Loader2, Play, RotateCcw, CheckCircle2, XCircle, Clock, AlertCircle, 
+  Loader2, Play, CheckCircle2, XCircle, Clock, AlertCircle, 
   Zap, MessageSquare, Users, TrendingUp, RefreshCw, ChevronDown, ChevronUp,
-  Gauge, Timer, AlertTriangle
+  Gauge, AlertTriangle, Circle, Pause
 } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Badge } from "@/components/ui/badge";
@@ -53,6 +53,19 @@ interface SyncLog {
   created_at: string;
 }
 
+interface SyncDatapoint {
+  id: string;
+  run_id: string;
+  domain: string;
+  datapoint_key: string;
+  datapoint_label: string;
+  value_current: number;
+  value_total: number | null;
+  status: string;
+  details: any;
+  updated_at: string;
+}
+
 const DOMAIN_CONFIG: Record<Domain, { label: string; icon: React.ElementType; color: string; description: string }> = {
   discussion_feed: {
     label: 'Discussion Feed',
@@ -83,6 +96,15 @@ const STATUS_CONFIG: Record<SyncStatus, { label: string; color: string; icon: Re
   rate_limited: { label: 'Rate Limited', color: 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300', icon: AlertTriangle },
 };
 
+const DATAPOINT_STATUS_ICON: Record<string, React.ElementType> = {
+  pending: Circle,
+  running: Loader2,
+  completed: CheckCircle2,
+  error: XCircle,
+  info: Circle,
+  rate_limited: Pause,
+};
+
 function formatEta(seconds: number | null): string {
   if (!seconds || seconds <= 0) return '-';
   if (seconds < 60) return `${seconds}s`;
@@ -90,11 +112,56 @@ function formatEta(seconds: number | null): string {
   return `${(seconds / 3600).toFixed(1)}h`;
 }
 
+function DatapointRow({ datapoint }: { datapoint: SyncDatapoint }) {
+  const StatusIcon = DATAPOINT_STATUS_ICON[datapoint.status] || Circle;
+  const isRunning = datapoint.status === 'running';
+  const isError = datapoint.status === 'error';
+  const isCompleted = datapoint.status === 'completed';
+  
+  const progress = datapoint.value_total && datapoint.value_total > 0 
+    ? (datapoint.value_current / datapoint.value_total) * 100 
+    : null;
+
+  return (
+    <div className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-muted/50 text-sm">
+      <div className="flex items-center gap-2 flex-1 min-w-0">
+        <StatusIcon className={cn(
+          "h-3.5 w-3.5 shrink-0",
+          isRunning && "animate-spin text-blue-500",
+          isError && "text-red-500",
+          isCompleted && "text-green-500",
+          !isRunning && !isError && !isCompleted && "text-muted-foreground"
+        )} />
+        <span className="truncate">{datapoint.datapoint_label}</span>
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        {progress !== null ? (
+          <div className="flex items-center gap-2">
+            <Progress value={progress} className="w-16 h-1.5" />
+            <span className="text-xs text-muted-foreground w-16 text-right">
+              {datapoint.value_current}/{datapoint.value_total}
+            </span>
+          </div>
+        ) : (
+          <span className={cn(
+            "font-medium tabular-nums",
+            isError && "text-red-600",
+            isCompleted && "text-green-600"
+          )}>
+            {datapoint.value_current}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function DomainPanel({ 
   domain, 
   status, 
   rateLimit,
   logs,
+  datapoints,
   onTriggerSync,
   isSyncing,
 }: {
@@ -102,6 +169,7 @@ function DomainPanel({
   status: DomainStatus | undefined;
   rateLimit: RateLimitInfo | undefined;
   logs: SyncLog[];
+  datapoints: SyncDatapoint[];
   onTriggerSync: (domain: Domain) => void;
   isSyncing: boolean;
 }) {
@@ -122,9 +190,15 @@ function DomainPanel({
     green: 'border-t-green-500',
   }[config.color];
 
+  // Get latest datapoints for current run
+  const currentDatapoints = datapoints.filter(dp => 
+    dp.run_id === status?.current_run_id || 
+    (status?.status === 'idle' && datapoints.length > 0)
+  );
+
   return (
     <Card className={cn("border-t-4 shadow-sm relative overflow-hidden", borderColor)}>
-      <div className="absolute top-0 right-0 p-4 opacity-10">
+      <div className="absolute top-0 right-0 p-4 opacity-5">
         <Icon className="w-24 h-24" />
       </div>
       
@@ -143,11 +217,11 @@ function DomainPanel({
       </CardHeader>
 
       <CardContent className="space-y-4">
-        {/* Progress */}
-        {(currentStatus === 'running' || status?.items_total) && status?.items_total > 0 && (
+        {/* Progress bar for running status */}
+        {currentStatus === 'running' && status?.items_total && status.items_total > 0 && (
           <div className="space-y-2">
             <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Progress</span>
+              <span className="text-muted-foreground">Overall Progress</span>
               <span className="font-medium">{status?.items_completed || 0} / {status?.items_total || 0}</span>
             </div>
             <Progress value={progress} className="h-2" />
@@ -156,9 +230,23 @@ function DomainPanel({
 
         {/* Current Stage */}
         {status?.current_stage && (
-          <div className="text-sm">
-            <span className="text-muted-foreground">Stage: </span>
+          <div className="text-sm p-2 bg-muted/50 rounded">
+            <span className="text-muted-foreground">Current: </span>
             <span className="font-medium">{status.current_stage}</span>
+          </div>
+        )}
+
+        {/* Granular Datapoints */}
+        {currentDatapoints.length > 0 && (
+          <div className="border rounded-lg overflow-hidden">
+            <div className="bg-muted/50 px-3 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Datapoints
+            </div>
+            <div className="divide-y divide-border/50">
+              {currentDatapoints.map(dp => (
+                <DatapointRow key={dp.id} datapoint={dp} />
+              ))}
+            </div>
           </div>
         )}
 
@@ -223,6 +311,10 @@ function DomainPanel({
                 </span>
               </div>
             </div>
+            <Progress 
+              value={(rateLimit.requests_this_minute / rateLimit.max_per_minute) * 100} 
+              className="h-1.5 mt-2" 
+            />
           </div>
         )}
 
@@ -348,6 +440,21 @@ export default function AdminSyncPage() {
     refetchInterval: 5000,
   });
 
+  // Fetch datapoints
+  const { data: datapoints } = useQuery({
+    queryKey: ['sync-datapoints'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('sync_datapoints')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
+      if (error) throw error;
+      return data as SyncDatapoint[];
+    },
+    refetchInterval: 3000,
+  });
+
   const getStatusForDomain = (domain: Domain) => 
     domainStatuses?.find(s => s.domain === domain);
 
@@ -356,6 +463,9 @@ export default function AdminSyncPage() {
 
   const getLogsForDomain = (domain: Domain) => 
     (recentLogs || []).filter(l => l.domain === domain).slice(0, 20);
+
+  const getDatapointsForDomain = (domain: Domain) =>
+    (datapoints || []).filter(dp => dp.domain === domain);
 
   const triggerSync = async (domains: Domain[]) => {
     const newSyncing = new Set(syncingDomains);
@@ -388,6 +498,7 @@ export default function AdminSyncPage() {
       // Refresh data
       queryClient.invalidateQueries({ queryKey: ['sync-domain-status'] });
       queryClient.invalidateQueries({ queryKey: ['sync-logs-recent'] });
+      queryClient.invalidateQueries({ queryKey: ['sync-datapoints'] });
 
     } catch (err: any) {
       toast({
@@ -430,6 +541,7 @@ export default function AdminSyncPage() {
               queryClient.invalidateQueries({ queryKey: ['sync-domain-status'] });
               queryClient.invalidateQueries({ queryKey: ['sync-rate-limits'] });
               queryClient.invalidateQueries({ queryKey: ['sync-logs-recent'] });
+              queryClient.invalidateQueries({ queryKey: ['sync-datapoints'] });
             }}
           >
             <RefreshCw className="h-4 w-4 mr-2" />
@@ -461,6 +573,7 @@ export default function AdminSyncPage() {
           status={getStatusForDomain('discussion_feed')}
           rateLimit={undefined}
           logs={getLogsForDomain('discussion_feed')}
+          datapoints={getDatapointsForDomain('discussion_feed')}
           onTriggerSync={handleSyncDomain}
           isSyncing={syncingDomains.has('discussion_feed')}
         />
@@ -469,6 +582,7 @@ export default function AdminSyncPage() {
           status={getStatusForDomain('trader_profiles')}
           rateLimit={getRateLimitForDomain('trader_profiles')}
           logs={getLogsForDomain('trader_profiles')}
+          datapoints={getDatapointsForDomain('trader_profiles')}
           onTriggerSync={handleSyncDomain}
           isSyncing={syncingDomains.has('trader_profiles')}
         />
@@ -477,6 +591,7 @@ export default function AdminSyncPage() {
           status={getStatusForDomain('stock_data')}
           rateLimit={undefined}
           logs={getLogsForDomain('stock_data')}
+          datapoints={getDatapointsForDomain('stock_data')}
           onTriggerSync={handleSyncDomain}
           isSyncing={syncingDomains.has('stock_data')}
         />
@@ -485,52 +600,35 @@ export default function AdminSyncPage() {
       {/* Recent Activity Log */}
       <Card>
         <CardHeader>
-          <div className="flex justify-between items-center">
-            <div>
-              <CardTitle>Recent Sync Activity</CardTitle>
-              <CardDescription>Live log of sync operations across all domains</CardDescription>
-            </div>
-            <Badge variant="outline" className="gap-1">
-              <Timer className="h-3 w-3" />
-              Auto-refresh: 5s
-            </Badge>
-          </div>
+          <CardTitle className="text-lg">Recent Activity</CardTitle>
+          <CardDescription>Latest sync events across all domains</CardDescription>
         </CardHeader>
         <CardContent>
           <ScrollArea className="h-64">
             <div className="space-y-2">
-              {recentLogs && recentLogs.length > 0 ? (
-                recentLogs.slice(0, 50).map(log => (
-                  <div 
-                    key={log.id} 
-                    className={cn(
-                      "flex items-start gap-3 p-2 rounded text-sm",
-                      log.level === 'error' && "bg-red-50 dark:bg-red-950",
-                      log.level === 'warn' && "bg-yellow-50 dark:bg-yellow-950",
+              {(recentLogs || []).slice(0, 50).map(log => (
+                <div key={log.id} className="flex items-start gap-3 text-sm py-2 border-b border-border/50 last:border-0">
+                  <span className="text-xs text-muted-foreground shrink-0 w-16">
+                    {format(new Date(log.created_at), 'HH:mm:ss')}
+                  </span>
+                  <Badge 
+                    variant="outline" 
+                    className={cn("text-[10px] px-1.5 py-0 shrink-0",
+                      log.level === 'error' && "border-red-500 text-red-600",
+                      log.level === 'warn' && "border-yellow-500 text-yellow-600",
+                      log.level === 'info' && "border-blue-500 text-blue-600",
                     )}
                   >
-                    <span className="text-muted-foreground text-xs shrink-0 w-16">
-                      {format(new Date(log.created_at), 'HH:mm:ss')}
-                    </span>
-                    <Badge 
-                      variant="outline" 
-                      className={cn("text-xs shrink-0",
-                        log.level === 'error' && "border-red-500 text-red-600",
-                        log.level === 'warn' && "border-yellow-500 text-yellow-600",
-                      )}
-                    >
-                      {log.level}
-                    </Badge>
-                    <Badge variant="secondary" className="text-xs shrink-0">
-                      {DOMAIN_CONFIG[log.domain as Domain]?.label || log.domain}
-                    </Badge>
-                    <span className="flex-1">{log.message}</span>
-                  </div>
-                ))
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  No sync activity yet. Click "Sync Now" to start.
+                    {log.level}
+                  </Badge>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 shrink-0">
+                    {DOMAIN_CONFIG[log.domain as Domain]?.label || log.domain}
+                  </Badge>
+                  <span className="flex-1">{log.message}</span>
                 </div>
+              ))}
+              {(!recentLogs || recentLogs.length === 0) && (
+                <p className="text-muted-foreground text-center py-8">No recent activity</p>
               )}
             </div>
           </ScrollArea>
