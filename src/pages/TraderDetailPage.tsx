@@ -33,7 +33,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow, format } from 'date-fns';
 import { supabase } from '@/lib/supabase';
-import { lovableCloud } from '@/lib/lovableCloud';
 import { toast } from 'sonner';
 
 const countryFlags: Record<string, string> = {
@@ -75,8 +74,8 @@ export default function TraderDetailPage() {
     try {
       toast.info('Refreshing trader data from Bullaware...');
       
-      // Use Lovable Cloud for function invocations (where edge functions are deployed)
-      const { data, error } = await lovableCloud.functions.invoke('sync-worker', {
+      // Use external Supabase project for function invocations
+      const { data, error } = await supabase.functions.invoke('sync-worker', {
         body: { trader_id: traderId }
       });
       

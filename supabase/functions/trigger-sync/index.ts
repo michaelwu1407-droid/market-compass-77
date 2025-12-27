@@ -192,18 +192,18 @@ async function checkBullAwareRateLimit(supabase: any): Promise<{ allowed: boolea
   };
 }
 
-// Helper function to call Lovable Cloud functions via HTTP
-async function invokeLovableFunction(
-  lovableUrl: string, 
-  lovableKey: string, 
+// Helper function to call functions via HTTP (same project - native SUPABASE_URL)
+async function invokeFunction(
+  supabaseUrl: string, 
+  supabaseKey: string, 
   functionName: string, 
   body: any = {}
 ): Promise<{ data: any; error: any }> {
   try {
-    const response = await fetch(`${lovableUrl}/functions/v1/${functionName}`, {
+    const response = await fetch(`${supabaseUrl}/functions/v1/${functionName}`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${lovableKey}`,
+        'Authorization': `Bearer ${supabaseKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
@@ -224,8 +224,8 @@ async function invokeLovableFunction(
 async function runDiscussionFeedSync(
   supabase: any, 
   runId: string,
-  lovableUrl: string,
-  lovableKey: string
+  supabaseUrl: string,
+  supabaseKey: string
 ): Promise<void> {
   const domain: Domain = 'discussion_feed';
   
@@ -237,8 +237,8 @@ async function runDiscussionFeedSync(
     await upsertDatapoint(supabase, runId, domain, 'fetch_etoro', 'Fetch eToro Posts', 0, undefined, 'running');
     await logSync(supabase, runId, domain, 'info', 'Starting eToro feed fetch');
 
-    // Call scrape-posts on Lovable Cloud
-    const { data, error } = await invokeLovableFunction(lovableUrl, lovableKey, 'scrape-posts');
+    // Call scrape-posts on same project
+    const { data, error } = await invokeFunction(supabaseUrl, supabaseKey, 'scrape-posts');
     
     if (error) throw error;
 
@@ -269,8 +269,8 @@ async function runDiscussionFeedSync(
 async function runTraderProfilesSync(
   supabase: any, 
   runId: string,
-  lovableUrl: string,
-  lovableKey: string
+  supabaseUrl: string,
+  supabaseKey: string
 ): Promise<void> {
   const domain: Domain = 'trader_profiles';
   
@@ -322,8 +322,8 @@ async function runTraderProfilesSync(
 
     await logSync(supabase, runId, domain, 'info', `Starting trader sync: ${pendingCount} jobs pending`);
 
-    // Call dispatch-sync-jobs on Lovable Cloud
-    const { data, error } = await invokeLovableFunction(lovableUrl, lovableKey, 'dispatch-sync-jobs');
+    // Call dispatch-sync-jobs on same project
+    const { data, error } = await invokeFunction(supabaseUrl, supabaseKey, 'dispatch-sync-jobs');
     
     if (error) throw error;
 
@@ -360,8 +360,8 @@ async function runTraderProfilesSync(
 async function runStockDataSync(
   supabase: any, 
   runId: string,
-  lovableUrl: string,
-  lovableKey: string
+  supabaseUrl: string,
+  supabaseKey: string
 ): Promise<void> {
   const domain: Domain = 'stock_data';
   
@@ -373,8 +373,8 @@ async function runStockDataSync(
     await upsertDatapoint(supabase, runId, domain, 'sync_bullaware', 'Sync from BullAware', 0, undefined, 'running');
     await logSync(supabase, runId, domain, 'info', 'Starting stock data sync');
 
-    // Call sync-assets on Lovable Cloud
-    const { data: assetsData, error: assetsError } = await invokeLovableFunction(lovableUrl, lovableKey, 'sync-assets');
+    // Call sync-assets on same project
+    const { data: assetsData, error: assetsError } = await invokeFunction(supabaseUrl, supabaseKey, 'sync-assets');
     
     if (assetsError) throw assetsError;
 
@@ -390,8 +390,8 @@ async function runStockDataSync(
 
     await upsertDatapoint(supabase, runId, domain, 'enrich_yahoo', 'Enrich with Yahoo', 0, undefined, 'running');
     
-    // Call enrich-assets-yahoo on Lovable Cloud
-    const { data: enrichData, error: enrichError } = await invokeLovableFunction(lovableUrl, lovableKey, 'enrich-assets-yahoo');
+    // Call enrich-assets-yahoo on same project
+    const { data: enrichData, error: enrichError } = await invokeFunction(supabaseUrl, supabaseKey, 'enrich-assets-yahoo');
     
     if (enrichError) {
       await upsertDatapoint(supabase, runId, domain, 'enrich_yahoo', 'Enrich with Yahoo', 0, undefined, 'error', { error: enrichError.message });
@@ -449,23 +449,15 @@ serve(async (req) => {
   }
 
   try {
-    // Use external Supabase project for DATA operations
-    const externalUrl = Deno.env.get('EXTERNAL_SUPABASE_URL');
-    const externalKey = Deno.env.get('EXTERNAL_SUPABASE_SERVICE_ROLE_KEY');
+    // Use native SUPABASE_URL - functions are deployed on this project
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
     
-    // Use Lovable Cloud for FUNCTION invocations
-    const lovableUrl = Deno.env.get('SUPABASE_URL')!;
-    const lovableKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+    console.log(`[trigger-sync] SUPABASE_URL configured: ${!!supabaseUrl}`);
+    console.log(`[trigger-sync] Using native Supabase project for both data and functions`);
     
-    console.log(`[trigger-sync] EXTERNAL_SUPABASE_URL configured: ${!!externalUrl}`);
-    console.log(`[trigger-sync] EXTERNAL_SUPABASE_SERVICE_ROLE_KEY configured: ${!!externalKey}`);
-    console.log(`[trigger-sync] SUPABASE_URL (Lovable Cloud) configured: ${!!lovableUrl}`);
-    
-    if (!externalUrl || !externalKey) {
-      throw new Error('EXTERNAL_SUPABASE_URL or EXTERNAL_SUPABASE_SERVICE_ROLE_KEY not configured');
-    }
-    
-    const supabase = createClient(externalUrl, externalKey);
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body = await req.json().catch(() => ({}));
     const domains: Domain[] = body.domains || ['discussion_feed', 'trader_profiles', 'stock_data'];
@@ -494,25 +486,21 @@ serve(async (req) => {
 
         results.push({
           domain,
-          status: status?.status === 'running' ? 'blocked' : 'queued',
+          status: status?.status === 'running' ? 'blocked' : 'error',
           message: status?.status === 'running' 
-            ? `Sync already running (${status.lock_holder})` 
-            : 'Another sync is queued',
+            ? `Already running by ${status?.lock_holder || 'unknown'}` 
+            : 'Failed to acquire lock',
         });
         continue;
       }
 
       try {
         const runId = await createRun(supabase, domain, triggeredBy);
-
-        await updateProgress(supabase, domain, {
-          current_run_id: runId,
-          status: 'running',
-          items_completed: 0,
-          items_total: 0,
-          current_stage: 'Starting...',
-          eta_seconds: null,
-        });
+        
+        await supabase
+          .from('sync_domain_status')
+          .update({ current_run_id: runId })
+          .eq('domain', domain);
 
         results.push({
           domain,
@@ -521,44 +509,34 @@ serve(async (req) => {
           run_id: runId,
         });
 
-        // Run sync in background using EdgeRuntime.waitUntil
+        // Run sync in background - use native supabaseUrl and anonKey
         const syncPromise = (async () => {
           try {
             switch (domain) {
               case 'discussion_feed':
-                await runDiscussionFeedSync(supabase, runId, lovableUrl, lovableKey);
+                await runDiscussionFeedSync(supabase, runId, supabaseUrl, supabaseAnonKey);
                 break;
               case 'trader_profiles':
-                await runTraderProfilesSync(supabase, runId, lovableUrl, lovableKey);
+                await runTraderProfilesSync(supabase, runId, supabaseUrl, supabaseAnonKey);
                 break;
               case 'stock_data':
-                await runStockDataSync(supabase, runId, lovableUrl, lovableKey);
+                await runStockDataSync(supabase, runId, supabaseUrl, supabaseAnonKey);
                 break;
             }
-            
             await completeRun(supabase, runId, 'completed');
             await releaseLock(supabase, domain, 'idle');
-            
-            await updateProgress(supabase, domain, {
-              last_successful_run_id: runId,
-              last_successful_at: new Date().toISOString(),
-            });
-            
-            console.log(`Sync completed successfully for ${domain}`);
           } catch (err: any) {
-            console.error(`Sync failed for ${domain}:`, err);
-            await completeRun(supabase, runId, 'error', err.message);
+            console.error(`[trigger-sync] Error in ${domain} sync:`, err);
+            await completeRun(supabase, runId, 'failed', err.message);
             await releaseLock(supabase, domain, 'error', err.message);
           }
         })();
 
-        if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) {
-          EdgeRuntime.waitUntil(syncPromise);
-        } else {
-          syncPromise.catch(console.error);
-        }
+        // Run sync in background (fire and forget)
+        syncPromise.catch(err => console.error(`Background sync error for ${domain}:`, err));
 
       } catch (err: any) {
+        console.error(`[trigger-sync] Error starting ${domain}:`, err);
         await releaseLock(supabase, domain, 'error', err.message);
         results.push({
           domain,
@@ -568,23 +546,22 @@ serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify({
-      success: true,
+    return new Response(JSON.stringify({ 
+      success: true, 
       results,
+      triggered_by: triggeredBy,
     }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
 
   } catch (error: any) {
-    console.error('trigger-sync error:', error);
-    return new Response(JSON.stringify({
-      success: false,
-      error: error.message || 'Unknown error',
+    console.error('[trigger-sync] Fatal error:', error);
+    return new Response(JSON.stringify({ 
+      error: error.message,
+      stack: error.stack 
     }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 500
     });
   }
 });
-
-declare const EdgeRuntime: { waitUntil?: (promise: Promise<any>) => void } | undefined;

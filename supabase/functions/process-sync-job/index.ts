@@ -20,15 +20,12 @@ serve(async (req) => {
         return new Response(JSON.stringify({ error: 'Missing job_id' }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Use external Supabase project for DATA operations
-    const supabase = createClient(
-      Deno.env.get("EXTERNAL_SUPABASE_URL")!,
-      Deno.env.get("EXTERNAL_SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    // Use native SUPABASE_URL - functions are deployed on this project
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     
-    // Use Lovable Cloud for FUNCTION invocations
-    const lovableSupabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const lovableAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     // 1. Fetch the job first (read-only check)
     const { data: jobCheck, error: checkError } = await supabase
@@ -93,11 +90,11 @@ serve(async (req) => {
 
     console.log(`[process-sync-job] Processing ${job_type} for ${trader.etoro_username}`);
     
-    // Call sync-trader-details on Lovable Cloud (where functions are deployed)
-    const syncResponse = await fetch(`${lovableSupabaseUrl}/functions/v1/sync-trader-details`, {
+    // Call sync-trader-details on same project (native SUPABASE_URL)
+    const syncResponse = await fetch(`${supabaseUrl}/functions/v1/sync-trader-details`, {
         method: 'POST',
         headers: {
-            'Authorization': `Bearer ${lovableAnonKey}`,
+            'Authorization': `Bearer ${supabaseAnonKey}`,
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({ username: trader.etoro_username }),

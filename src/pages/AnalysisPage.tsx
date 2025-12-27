@@ -4,7 +4,6 @@ import { AnalysisInput } from '@/components/analysis/AnalysisInput';
 import { AnalysisResult } from '@/components/analysis/AnalysisResult';
 import { toast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase';
-import { lovableCloud } from '@/lib/lovableCloud';
 import { useUpdateReport } from '@/hooks/useReports';
 import { useTrader } from '@/hooks/useTraders';
 import type { Report, ReportType, Horizon } from '@/types';
@@ -36,8 +35,8 @@ export default function AnalysisPage() {
     setResult(null);
     
     try {
-      // Use Lovable Cloud for function invocations (where edge functions are deployed)
-      const { data: response, error } = await lovableCloud.functions.invoke('analyse', {
+      // Use external Supabase project for function invocations
+      const { data: response, error } = await supabase.functions.invoke('analyse', {
         body: {
           reportType: data.reportType,
           assets: data.assets,

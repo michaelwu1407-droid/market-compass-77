@@ -12,23 +12,20 @@ serve(async (req) => {
     }
 
     try {
-        // Use external Supabase project for DATA operations
-        const externalSupabase = createClient(
-            Deno.env.get("EXTERNAL_SUPABASE_URL")!,
-            Deno.env.get("EXTERNAL_SUPABASE_SERVICE_ROLE_KEY")!
-        );
-
-        // Use Lovable Cloud project for FUNCTION invocations
-        const lovableSupabaseUrl = Deno.env.get("SUPABASE_URL")!;
-        const lovableAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-
-        // 1. Invoke dispatch-sync-jobs on Lovable Cloud (where functions are deployed)
-        console.log("Invoking dispatch-sync-jobs on Lovable Cloud...");
+        // Use native SUPABASE_URL - functions are deployed on this project
+        const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+        const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+        const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
         
-        const dispatchResponse = await fetch(`${lovableSupabaseUrl}/functions/v1/dispatch-sync-jobs`, {
+        const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+        // 1. Invoke dispatch-sync-jobs on same project
+        console.log("Invoking dispatch-sync-jobs...");
+        
+        const dispatchResponse = await fetch(`${supabaseUrl}/functions/v1/dispatch-sync-jobs`, {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${lovableAnonKey}`,
+                'Authorization': `Bearer ${supabaseAnonKey}`,
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({}),
@@ -56,14 +53,14 @@ serve(async (req) => {
         console.log("Dispatch result:", dispatchData);
 
         // 2. Check if queue is empty or low, and if so, refill it
-        // Check current pending count (from external DB)
-        const { count: currentPending } = await externalSupabase
+        // Check current pending count
+        const { count: currentPending } = await supabase
             .from('sync_jobs')
             .select('*', { count: 'exact', head: true })
             .eq('status', 'pending');
         
-        // Check trader count (from external DB)
-        const { count: traderCount } = await externalSupabase
+        // Check trader count
+        const { count: traderCount } = await supabase
             .from('traders')
             .select('*', { count: 'exact', head: true });
         
@@ -76,11 +73,11 @@ serve(async (req) => {
         if ((currentPending || 0) < 200) {
             console.log(`Queue is low (${currentPending} pending). NUCLEAR MODE: Enqueuing ALL traders...`);
             try {
-                // Call enqueue-sync-jobs on Lovable Cloud
-                const enqueueResponse = await fetch(`${lovableSupabaseUrl}/functions/v1/enqueue-sync-jobs`, {
+                // Call enqueue-sync-jobs on same project
+                const enqueueResponse = await fetch(`${supabaseUrl}/functions/v1/enqueue-sync-jobs`, {
                     method: 'POST',
                     headers: {
-                        'Authorization': `Bearer ${lovableAnonKey}`,
+                        'Authorization': `Bearer ${supabaseAnonKey}`,
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({}),

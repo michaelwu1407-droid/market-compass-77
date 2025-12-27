@@ -2,7 +2,6 @@ import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RefreshCw, Clock } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { lovableCloud } from '@/lib/lovableCloud';
 import { FeedCard } from '@/components/feed/FeedCard';
 import { TraderMiniCard } from '@/components/feed/TraderMiniCard';
 import { Button } from '@/components/ui/button';
@@ -41,10 +40,10 @@ export default function FeedPage() {
     console.log('REFRESH CLICKED');
     setIsRefreshingLocal(true);
     try {
-      console.log('[FeedPage] Invoking scrape-posts on Lovable Cloud...');
+      console.log('[FeedPage] Invoking scrape-posts on external Supabase...');
       
-      // Use Lovable Cloud for function invocations (where edge functions are deployed)
-      const { data, error } = await lovableCloud.functions.invoke('scrape-posts', {
+      // Use external Supabase project for function invocations
+      const { data, error } = await supabase.functions.invoke('scrape-posts', {
         body: {},
       });
       

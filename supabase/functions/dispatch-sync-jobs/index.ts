@@ -17,15 +17,12 @@ serve(async (req) => {
     }
 
     try {
-        // Use external Supabase project for DATA operations
-        const supabase = createClient(
-            Deno.env.get("EXTERNAL_SUPABASE_URL")!,
-            Deno.env.get("EXTERNAL_SUPABASE_SERVICE_ROLE_KEY")!
-        );
+        // Use native SUPABASE_URL - functions are deployed on this project
+        const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+        const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+        const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
         
-        // Use Lovable Cloud for FUNCTION invocations
-        const lovableSupabaseUrl = Deno.env.get("SUPABASE_URL")!;
-        const lovableAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+        const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
         console.log("Searching for pending jobs...");
 
@@ -98,11 +95,11 @@ serve(async (req) => {
             console.log(`Processing job ${i + 1}/${pendingJobs.length}: ${job.id}`);
             
             try {
-                // Call process-sync-job on Lovable Cloud (where functions are deployed)
-                const processResponse = await fetch(`${lovableSupabaseUrl}/functions/v1/process-sync-job`, {
+                // Call process-sync-job on same project (native SUPABASE_URL)
+                const processResponse = await fetch(`${supabaseUrl}/functions/v1/process-sync-job`, {
                     method: 'POST',
                     headers: {
-                        'Authorization': `Bearer ${lovableAnonKey}`,
+                        'Authorization': `Bearer ${supabaseAnonKey}`,
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({ job_id: job.id }),
