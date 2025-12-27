@@ -23,10 +23,15 @@ serve(async (req) => {
     const maxIterations = body.max_iterations || MAX_ITERATIONS;
     const delayMs = body.delay_ms || DELAY_BETWEEN_BATCHES;
 
+    // Use external Supabase project for DATA operations
     const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+      Deno.env.get("EXTERNAL_SUPABASE_URL")!,
+      Deno.env.get("EXTERNAL_SUPABASE_SERVICE_ROLE_KEY")!
     );
+    
+    // Use Lovable Cloud for FUNCTION invocations
+    const lovableSupabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const lovableAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
     const stats = {
       iterations: 0,
@@ -61,9 +66,18 @@ serve(async (req) => {
     if ((initialPending || 0) === 0 && (initialInProgress || 0) === 0) {
       console.log("No pending or in-progress jobs found. Attempting to enqueue jobs...");
       try {
-        const { data: enqueueResult, error: enqueueError } = await supabase.functions.invoke('enqueue-sync-jobs', {
-          body: { force: true }
+        // Call enqueue-sync-jobs on Lovable Cloud
+        const enqueueResponse = await fetch(`${lovableSupabaseUrl}/functions/v1/enqueue-sync-jobs`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${lovableAnonKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ force: true }),
         });
+        
+        const enqueueResult = enqueueResponse.ok ? await enqueueResponse.json() : null;
+        const enqueueError = enqueueResponse.ok ? null : await enqueueResponse.text();
         if (enqueueError) {
           console.error("Error enqueueing jobs:", enqueueError);
         } else {
@@ -107,9 +121,25 @@ serve(async (req) => {
     for (let i = 0; i < maxIterations; i++) {
       stats.iterations = i + 1;
 
-      // Invoke dispatch-sync-jobs
-      console.log(`Iteration ${i + 1}: Invoking dispatch-sync-jobs...`);
-      const { data: dispatchResult, error: dispatchError } = await supabase.functions.invoke('dispatch-sync-jobs');
+      // Call dispatch-sync-jobs on Lovable Cloud
+      console.log(`Iteration ${i + 1}: Invoking dispatch-sync-jobs on Lovable Cloud...`);
+      const dispatchResponse = await fetch(`${lovableSupabaseUrl}/functions/v1/dispatch-sync-jobs`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${lovableAnonKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      });
+      
+      let dispatchResult = null;
+      let dispatchError = null;
+      
+      if (!dispatchResponse.ok) {
+        dispatchError = { message: `HTTP ${dispatchResponse.status}: ${await dispatchResponse.text()}` };
+      } else {
+        dispatchResult = await dispatchResponse.json();
+      }
 
       if (dispatchError) {
         console.error(`Error in iteration ${i + 1}:`, dispatchError);
@@ -160,8 +190,14 @@ serve(async (req) => {
         // If we have pending jobs but dispatch returned 0, try enqueueing more
         if (debugPending && debugPending > 0 && i < 3) {
           console.log(`[DEBUG] Attempting to enqueue more jobs since we have ${debugPending} pending but dispatch returned 0...`);
-          await supabase.functions.invoke('enqueue-sync-jobs', {
-            body: { force: true }
+          // Call enqueue-sync-jobs on Lovable Cloud
+          await fetch(`${lovableSupabaseUrl}/functions/v1/enqueue-sync-jobs`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${lovableAnonKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ force: true }),
           });
         }
       }
