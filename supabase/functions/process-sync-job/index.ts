@@ -20,11 +20,15 @@ serve(async (req) => {
         return new Response(JSON.stringify({ error: 'Missing job_id' }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Use external Supabase project
+    // Use external Supabase project for DATA operations
     const supabase = createClient(
       Deno.env.get("EXTERNAL_SUPABASE_URL")!,
       Deno.env.get("EXTERNAL_SUPABASE_SERVICE_ROLE_KEY")!
     );
+    
+    // Use Lovable Cloud for FUNCTION invocations
+    const lovableSupabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const lovableAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
     // 1. Fetch the job first (read-only check)
     const { data: jobCheck, error: checkError } = await supabase
@@ -89,10 +93,24 @@ serve(async (req) => {
 
     console.log(`[process-sync-job] Processing ${job_type} for ${trader.etoro_username}`);
     
-    // Invoke sync-trader-details
-    const { data: syncData, error: syncError } = await supabase.functions.invoke('sync-trader-details', {
-        body: { username: trader.etoro_username }
+    // Call sync-trader-details on Lovable Cloud (where functions are deployed)
+    const syncResponse = await fetch(`${lovableSupabaseUrl}/functions/v1/sync-trader-details`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${lovableAnonKey}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ username: trader.etoro_username }),
     });
+    
+    let syncData = null;
+    let syncError = null;
+    
+    if (!syncResponse.ok) {
+        syncError = { message: `HTTP ${syncResponse.status}: ${await syncResponse.text()}` };
+    } else {
+        syncData = await syncResponse.json();
+    }
 
     if (syncError) {
         console.error(`[process-sync-job] Error syncing details for ${trader.etoro_username}:`, syncError);

@@ -119,7 +119,6 @@ async function upsertDatapoint(
   status: string = 'running',
   details?: any
 ): Promise<void> {
-  // Try to update existing, if not found insert
   const { data: existing } = await supabase
     .from('sync_datapoints')
     .select('id')
@@ -193,11 +192,44 @@ async function checkBullAwareRateLimit(supabase: any): Promise<{ allowed: boolea
   };
 }
 
-async function runDiscussionFeedSync(supabase: any, runId: string): Promise<void> {
+// Helper function to call Lovable Cloud functions via HTTP
+async function invokeLovableFunction(
+  lovableUrl: string, 
+  lovableKey: string, 
+  functionName: string, 
+  body: any = {}
+): Promise<{ data: any; error: any }> {
+  try {
+    const response = await fetch(`${lovableUrl}/functions/v1/${functionName}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${lovableKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      return { data: null, error: { message: `HTTP ${response.status}: ${errorText}` } };
+    }
+    
+    const data = await response.json();
+    return { data, error: null };
+  } catch (e: any) {
+    return { data: null, error: { message: e.message || 'Unknown error' } };
+  }
+}
+
+async function runDiscussionFeedSync(
+  supabase: any, 
+  runId: string,
+  lovableUrl: string,
+  lovableKey: string
+): Promise<void> {
   const domain: Domain = 'discussion_feed';
   
   try {
-    // Stage 1: Fetch eToro data
     await updateProgress(supabase, domain, { 
       current_stage: 'Fetching eToro feed',
       items_completed: 0,
@@ -205,7 +237,8 @@ async function runDiscussionFeedSync(supabase: any, runId: string): Promise<void
     await upsertDatapoint(supabase, runId, domain, 'fetch_etoro', 'Fetch eToro Posts', 0, undefined, 'running');
     await logSync(supabase, runId, domain, 'info', 'Starting eToro feed fetch');
 
-    const { data, error } = await supabase.functions.invoke('scrape-posts');
+    // Call scrape-posts on Lovable Cloud
+    const { data, error } = await invokeLovableFunction(lovableUrl, lovableKey, 'scrape-posts');
     
     if (error) throw error;
 
@@ -213,7 +246,6 @@ async function runDiscussionFeedSync(supabase: any, runId: string): Promise<void
     const postsProcessed = data?.posts_processed || 0;
     const postsInserted = data?.posts_inserted || 0;
 
-    // Update datapoints
     await upsertDatapoint(supabase, runId, domain, 'fetch_etoro', 'Fetch eToro Posts', postsScraped, postsScraped, 'completed');
     await upsertDatapoint(supabase, runId, domain, 'parse_posts', 'Parse & Transform', postsProcessed, postsScraped, 'completed');
     await upsertDatapoint(supabase, runId, domain, 'write_db', 'Write to Database', postsInserted, postsProcessed, 'completed');
@@ -234,11 +266,15 @@ async function runDiscussionFeedSync(supabase: any, runId: string): Promise<void
   }
 }
 
-async function runTraderProfilesSync(supabase: any, runId: string): Promise<void> {
+async function runTraderProfilesSync(
+  supabase: any, 
+  runId: string,
+  lovableUrl: string,
+  lovableKey: string
+): Promise<void> {
   const domain: Domain = 'trader_profiles';
   
   try {
-    // Check rate limit first
     const rateLimit = await checkBullAwareRateLimit(supabase);
     
     if (!rateLimit.allowed) {
@@ -252,7 +288,6 @@ async function runTraderProfilesSync(supabase: any, runId: string): Promise<void
       return;
     }
 
-    // Get queue stats
     const { count: pendingCount } = await supabase
       .from('sync_jobs')
       .select('*', { count: 'exact', head: true })
@@ -273,7 +308,6 @@ async function runTraderProfilesSync(supabase: any, runId: string): Promise<void
       .select('*', { count: 'exact', head: true })
       .eq('status', 'failed');
 
-    // Update datapoints with queue status
     await upsertDatapoint(supabase, runId, domain, 'jobs_pending', 'Jobs Pending', pendingCount || 0, undefined, 'info');
     await upsertDatapoint(supabase, runId, domain, 'jobs_in_progress', 'Jobs In Progress', inProgressCount || 0, undefined, 'running');
     await upsertDatapoint(supabase, runId, domain, 'jobs_completed', 'Jobs Completed', completedCount || 0, undefined, 'completed');
@@ -288,15 +322,14 @@ async function runTraderProfilesSync(supabase: any, runId: string): Promise<void
 
     await logSync(supabase, runId, domain, 'info', `Starting trader sync: ${pendingCount} jobs pending`);
 
-    // Invoke dispatch-sync-jobs
-    const { data, error } = await supabase.functions.invoke('dispatch-sync-jobs');
+    // Call dispatch-sync-jobs on Lovable Cloud
+    const { data, error } = await invokeLovableFunction(lovableUrl, lovableKey, 'dispatch-sync-jobs');
     
     if (error) throw error;
 
     const processed = data?.dispatched_jobs || 0;
     const errors = data?.errors || [];
     
-    // Update datapoints after processing
     await upsertDatapoint(supabase, runId, domain, 'batch_processed', 'Batch Processed', processed, data?.attempted || processed, 'completed');
     
     if (errors.length > 0) {
@@ -308,7 +341,6 @@ async function runTraderProfilesSync(supabase: any, runId: string): Promise<void
       items_completed: processed,
     });
 
-    // Update rate limit info
     const newRateLimit = await checkBullAwareRateLimit(supabase);
     await upsertDatapoint(supabase, runId, domain, 'rate_limit', 'API Requests (last min)', 10 - newRateLimit.remaining, 10, 'info');
     
@@ -325,11 +357,15 @@ async function runTraderProfilesSync(supabase: any, runId: string): Promise<void
   }
 }
 
-async function runStockDataSync(supabase: any, runId: string): Promise<void> {
+async function runStockDataSync(
+  supabase: any, 
+  runId: string,
+  lovableUrl: string,
+  lovableKey: string
+): Promise<void> {
   const domain: Domain = 'stock_data';
   
   try {
-    // Stage 1: Sync from BullAware
     await updateProgress(supabase, domain, {
       current_stage: 'Syncing assets from BullAware',
       items_completed: 0,
@@ -337,7 +373,8 @@ async function runStockDataSync(supabase: any, runId: string): Promise<void> {
     await upsertDatapoint(supabase, runId, domain, 'sync_bullaware', 'Sync from BullAware', 0, undefined, 'running');
     await logSync(supabase, runId, domain, 'info', 'Starting stock data sync');
 
-    const { data: assetsData, error: assetsError } = await supabase.functions.invoke('sync-assets');
+    // Call sync-assets on Lovable Cloud
+    const { data: assetsData, error: assetsError } = await invokeLovableFunction(lovableUrl, lovableKey, 'sync-assets');
     
     if (assetsError) throw assetsError;
 
@@ -351,10 +388,10 @@ async function runStockDataSync(supabase: any, runId: string): Promise<void> {
 
     await logSync(supabase, runId, domain, 'info', `Synced ${syncedCount} assets`, assetsData);
 
-    // Stage 2: Enrich with Yahoo Finance
     await upsertDatapoint(supabase, runId, domain, 'enrich_yahoo', 'Enrich with Yahoo', 0, undefined, 'running');
     
-    const { data: enrichData, error: enrichError } = await supabase.functions.invoke('enrich-assets-yahoo');
+    // Call enrich-assets-yahoo on Lovable Cloud
+    const { data: enrichData, error: enrichError } = await invokeLovableFunction(lovableUrl, lovableKey, 'enrich-assets-yahoo');
     
     if (enrichError) {
       await upsertDatapoint(supabase, runId, domain, 'enrich_yahoo', 'Enrich with Yahoo', 0, undefined, 'error', { error: enrichError.message });
@@ -369,7 +406,6 @@ async function runStockDataSync(supabase: any, runId: string): Promise<void> {
       await logSync(supabase, runId, domain, 'info', `Enriched ${enrichedCount} assets`, enrichData);
     }
 
-    // Get overall stats
     const { count: totalAssets } = await supabase
       .from('assets')
       .select('*', { count: 'exact', head: true });
@@ -413,12 +449,17 @@ serve(async (req) => {
   }
 
   try {
-    // Use external Supabase project
+    // Use external Supabase project for DATA operations
     const externalUrl = Deno.env.get('EXTERNAL_SUPABASE_URL');
     const externalKey = Deno.env.get('EXTERNAL_SUPABASE_SERVICE_ROLE_KEY');
     
+    // Use Lovable Cloud for FUNCTION invocations
+    const lovableUrl = Deno.env.get('SUPABASE_URL')!;
+    const lovableKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+    
     console.log(`[trigger-sync] EXTERNAL_SUPABASE_URL configured: ${!!externalUrl}`);
     console.log(`[trigger-sync] EXTERNAL_SUPABASE_SERVICE_ROLE_KEY configured: ${!!externalKey}`);
+    console.log(`[trigger-sync] SUPABASE_URL (Lovable Cloud) configured: ${!!lovableUrl}`);
     
     if (!externalUrl || !externalKey) {
       throw new Error('EXTERNAL_SUPABASE_URL or EXTERNAL_SUPABASE_SERVICE_ROLE_KEY not configured');
@@ -433,7 +474,6 @@ serve(async (req) => {
 
     console.log(`trigger-sync called for domains: ${domains.join(', ')} by ${triggeredBy}`);
     
-    // Debug: Check if we can read the domain status
     const { data: debugStatus, error: debugError } = await supabase
       .from('sync_domain_status')
       .select('*')
@@ -443,7 +483,6 @@ serve(async (req) => {
     const results: TriggerResult[] = [];
 
     for (const domain of domains) {
-      // Try to acquire lock
       const lockAcquired = await acquireLock(supabase, domain, lockHolder);
 
       if (!lockAcquired) {
@@ -487,13 +526,13 @@ serve(async (req) => {
           try {
             switch (domain) {
               case 'discussion_feed':
-                await runDiscussionFeedSync(supabase, runId);
+                await runDiscussionFeedSync(supabase, runId, lovableUrl, lovableKey);
                 break;
               case 'trader_profiles':
-                await runTraderProfilesSync(supabase, runId);
+                await runTraderProfilesSync(supabase, runId, lovableUrl, lovableKey);
                 break;
               case 'stock_data':
-                await runStockDataSync(supabase, runId);
+                await runStockDataSync(supabase, runId, lovableUrl, lovableKey);
                 break;
             }
             
@@ -513,11 +552,9 @@ serve(async (req) => {
           }
         })();
 
-        // Use EdgeRuntime.waitUntil if available for true background processing
         if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) {
           EdgeRuntime.waitUntil(syncPromise);
         } else {
-          // Fallback: don't await, let it run
           syncPromise.catch(console.error);
         }
 
@@ -550,5 +587,4 @@ serve(async (req) => {
   }
 });
 
-// Declare EdgeRuntime type for TypeScript
 declare const EdgeRuntime: { waitUntil?: (promise: Promise<any>) => void } | undefined;

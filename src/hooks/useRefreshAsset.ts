@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { lovableCloud } from '@/lib/lovableCloud';
 import { toast } from 'sonner';
 
 interface RefreshAssetParams {
@@ -12,7 +12,8 @@ export function useRefreshAsset() {
   
   return useMutation({
     mutationFn: async ({ assetId, symbol }: RefreshAssetParams) => {
-      const { data, error } = await supabase.functions.invoke('refresh-asset', {
+      // Use Lovable Cloud for function invocations (where edge functions are deployed)
+      const { data, error } = await lovableCloud.functions.invoke('refresh-asset', {
         body: { assetId, symbol }
       });
       

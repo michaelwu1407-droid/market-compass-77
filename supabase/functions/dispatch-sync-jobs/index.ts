@@ -17,11 +17,15 @@ serve(async (req) => {
     }
 
     try {
-        // Use external Supabase project
+        // Use external Supabase project for DATA operations
         const supabase = createClient(
             Deno.env.get("EXTERNAL_SUPABASE_URL")!,
             Deno.env.get("EXTERNAL_SUPABASE_SERVICE_ROLE_KEY")!
         );
+        
+        // Use Lovable Cloud for FUNCTION invocations
+        const lovableSupabaseUrl = Deno.env.get("SUPABASE_URL")!;
+        const lovableAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
         console.log("Searching for pending jobs...");
 
@@ -94,9 +98,24 @@ serve(async (req) => {
             console.log(`Processing job ${i + 1}/${pendingJobs.length}: ${job.id}`);
             
             try {
-                const { data: result, error: invokeError } = await supabase.functions.invoke('process-sync-job', {
-                    body: { job_id: job.id },
+                // Call process-sync-job on Lovable Cloud (where functions are deployed)
+                const processResponse = await fetch(`${lovableSupabaseUrl}/functions/v1/process-sync-job`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${lovableAnonKey}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ job_id: job.id }),
                 });
+                
+                let result = null;
+                let invokeError = null;
+                
+                if (!processResponse.ok) {
+                    invokeError = { message: `HTTP ${processResponse.status}: ${await processResponse.text()}` };
+                } else {
+                    result = await processResponse.json();
+                }
                 
                 if (invokeError) {
                     // Supabase function invocation error (network, auth, etc.)

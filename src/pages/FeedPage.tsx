@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RefreshCw, Clock } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { lovableCloud } from '@/lib/lovableCloud';
 import { FeedCard } from '@/components/feed/FeedCard';
 import { TraderMiniCard } from '@/components/feed/TraderMiniCard';
 import { Button } from '@/components/ui/button';
@@ -40,25 +41,16 @@ export default function FeedPage() {
     console.log('REFRESH CLICKED');
     setIsRefreshingLocal(true);
     try {
-      const PROJECT_URL = 'https://xgvaibxxiwfraklfbwey.supabase.co';
-      const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      console.log('[FeedPage] Invoking scrape-posts on Lovable Cloud...');
       
-      console.log(`[FeedPage] Invoking scrape-posts at ${PROJECT_URL}...`);
-      
-      const res = await fetch(`${PROJECT_URL}/functions/v1/scrape-posts`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${ANON_KEY}` 
-        },
-        body: JSON.stringify({}),
+      // Use Lovable Cloud for function invocations (where edge functions are deployed)
+      const { data, error } = await lovableCloud.functions.invoke('scrape-posts', {
+        body: {},
       });
       
-      if (!res.ok) {
-        const body = await res.text();
-        throw new Error(`Function error: ${res.status} ${body}`);
+      if (error) {
+        throw new Error(`Function error: ${error.message}`);
       }
-      await res.json();
 
       const [postsRes] = await Promise.all([refetchPosts(), refetchTraders()]) as any;
       const refreshedPosts = postsRes?.data || posts || [];

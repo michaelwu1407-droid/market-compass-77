@@ -14,37 +14,61 @@ serve(async (req) => {
   try {
     const { sync_traders = false, trader_ids: specific_trader_ids, force = false, hours_stale = 6, hours_active = 7 * 24 } = await req.json().catch(() => ({}));
     
-    // Use external Supabase project
+    // Use external Supabase project for DATA operations
     const supabase = createClient(
       Deno.env.get("EXTERNAL_SUPABASE_URL")!,
       Deno.env.get("EXTERNAL_SUPABASE_SERVICE_ROLE_KEY")!
     );
+    
+    // Use Lovable Cloud for FUNCTION invocations
+    const lovableSupabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const lovableAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
     if (sync_traders) {
-        console.log('sync_traders is true, invoking sync-traders function');
-        const { data: syncResult, error: syncError } = await supabase.functions.invoke('sync-traders');
+        console.log('sync_traders is true, invoking sync-traders function on Lovable Cloud');
         
-        if (syncError) {
-            console.error("Error invoking sync-traders:", syncError);
+        // Call sync-traders on Lovable Cloud (where functions are deployed)
+        const syncResponse = await fetch(`${lovableSupabaseUrl}/functions/v1/sync-traders`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${lovableAnonKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({}),
+        });
+        
+        if (!syncResponse.ok) {
+            const syncErrorText = await syncResponse.text();
+            console.error("Error invoking sync-traders:", syncErrorText);
             return new Response(JSON.stringify({ 
                 error: "Failed to invoke sync-traders", 
-                details: syncError 
+                details: syncErrorText 
             }), {
                 headers: { ...corsHeaders, "Content-Type": "application/json" },
                 status: 500,
             });
         }
         
+        const syncResult = await syncResponse.json();
         console.log("sync-traders completed:", syncResult);
         await new Promise(resolve => setTimeout(resolve, 2000));
         
         console.log("Enqueuing jobs for all traders after sync...");
-        const { data: enqueueResult, error: enqueueError } = await supabase.functions.invoke('enqueue-sync-jobs', {
-            body: { force: true }
+        // Call enqueue-sync-jobs recursively on Lovable Cloud
+        const enqueueResponse = await fetch(`${lovableSupabaseUrl}/functions/v1/enqueue-sync-jobs`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${lovableAnonKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ force: true }),
         });
         
-        if (enqueueError) {
-            console.error("Error enqueuing jobs after sync:", enqueueError);
+        let enqueueResult = null;
+        if (!enqueueResponse.ok) {
+            console.error("Error enqueuing jobs after sync:", await enqueueResponse.text());
+        } else {
+            enqueueResult = await enqueueResponse.json();
         }
         
         return new Response(JSON.stringify({ 
