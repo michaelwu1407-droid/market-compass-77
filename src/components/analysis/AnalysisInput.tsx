@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Search, Sparkles, Check, ChevronsUpDown, User, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -89,8 +89,11 @@ export function AnalysisInput({ onSubmit, isLoading, preselectedTrader, preselec
     });
   };
 
+  // Flatten InfiniteData pages into a single array
+  const allTraders = useMemo(() => traders?.pages?.flatMap(p => p.data) ?? [], [traders]);
+
   const handleTraderSelect = (traderId: string) => {
-    const trader = traders?.find(t => t.id === traderId);
+    const trader = allTraders.find(t => t.id === traderId);
     if (trader) {
       setSelectedTraders([traderId]);
       setSelectedTraderDisplay(trader.display_name);
@@ -99,7 +102,7 @@ export function AnalysisInput({ onSubmit, isLoading, preselectedTrader, preselec
     setTraderSearchOpen(false);
   };
 
-  const filteredTraders = traders?.filter(trader => {
+  const filteredTraders = allTraders.filter(trader => {
     if (!traderSearchQuery) return true;
     const query = traderSearchQuery.toLowerCase();
     return (

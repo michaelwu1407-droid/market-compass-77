@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
       console.error('Error deleting old market movers:', deleteError)
     }
 
-    const { data: upsertedData, error: upsertError } = await supabaseAdmin
+    const { error: upsertError } = await supabaseAdmin
       .from('market_movers')
       .upsert(marketMovers, { onConflict: 'ticker' })
 
@@ -51,12 +51,13 @@ Deno.serve(async (req) => {
       throw upsertError
     }
 
-    return new Response(JSON.stringify({ success: true, upserted: upsertedData?.length }), {
+    return new Response(JSON.stringify({ success: true, upserted: marketMovers.length }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     })
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return new Response(JSON.stringify({ error: errorMessage }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 400,
     })

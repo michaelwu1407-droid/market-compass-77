@@ -81,7 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       return { error: error as Error | null };
     },
-    signOut: () => supabase.auth.signOut(),
+    signOut: async () => { await supabase.auth.signOut(); },
   };
   
   // Full screen loader

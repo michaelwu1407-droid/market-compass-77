@@ -50,14 +50,15 @@ serve(async (req) => {
 
     // Mark old pending/in_progress jobs as completed
     const oldThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const { count: markedCount } = await supabase
+    const { data: markedData, error: markError } = await supabase
       .from('sync_jobs')
       .update({ status: 'completed', finished_at: new Date().toISOString() })
       .in('status', ['pending', 'in_progress'])
       .lt('created_at', oldThreshold)
-      .select('id', { count: 'exact', head: true });
+      .select('id');
     
-    if (markedCount && markedCount > 0) {
+    const markedCount = markedData?.length ?? 0;
+    if (markedCount > 0) {
       console.log(`Marked ${markedCount} old jobs as completed.`);
     }
 

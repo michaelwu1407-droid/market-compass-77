@@ -164,21 +164,27 @@ export default function FeedPage() {
   const filteredFeedItems = useMemo(() => {
     switch (filter) {
       case 'following':
-        return deduplicatedFeedItems.filter(item => 
-          item.type === 'post' && item.data.trader_id && followedTraderIds.includes(item.data.trader_id)
-        );
+        return deduplicatedFeedItems.filter(item => {
+          if (item.type !== 'post') return false;
+          const data = item.data as FeedPost;
+          return data.trader_id && followedTraderIds.includes(data.trader_id);
+        });
       case 'assets':
-        return deduplicatedFeedItems.filter(item =>
-          item.type === 'post' && /\$[A-Z]{1,5}\b/.test(item.data.text || '')
-        );
+        return deduplicatedFeedItems.filter(item => {
+          if (item.type !== 'post') return false;
+          const data = item.data as FeedPost;
+          return /\$[A-Z]{1,5}\b/.test(data.text || '');
+        });
       case 'traders':
         const topTraderIds = allTraders
           .sort((a, b) => (b.copiers || 0) - (a.copiers || 0))
           .slice(0, 20)
           .map(t => t.id);
-        return deduplicatedFeedItems.filter(item =>
-          item.type === 'post' && item.data.trader_id && topTraderIds.includes(item.data.trader_id)
-        );
+        return deduplicatedFeedItems.filter(item => {
+          if (item.type !== 'post') return false;
+          const data = item.data as FeedPost;
+          return data.trader_id && topTraderIds.includes(data.trader_id);
+        });
       case 'saved':
         return deduplicatedFeedItems.filter(item => 
           item.type === 'post' && savedPostIds.has(item.id)
