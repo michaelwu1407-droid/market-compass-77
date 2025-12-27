@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RefreshCw, Clock } from 'lucide-react';
 import { useInView } from 'react-intersection-observer';
@@ -41,7 +41,7 @@ export default function TradersPage() {
   const allTraders = useMemo(() => data?.pages.flatMap(page => page.data) ?? [], [data]);
 
   // Effect to fetch next page when user scrolls to the bottom
-  useState(() => {
+  React.useEffect(() => {
     if (inView && hasNextPage) {
       fetchNextPage();
     }
