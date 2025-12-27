@@ -71,22 +71,28 @@ serve(async (req) => {
     const traderMap = new Map((traders || []).map(t => [t.etoro_username.toLowerCase(), t.id]));
 
     const postsToInsert = [];
+    let trackedTraderPosts = 0;
+    let unknownTraderPosts = 0;
     
     for (const item of discussions) {
       const post = item.post;
       if (!post) continue;
 
-      const username = post.owner?.username?.toLowerCase();
-      const traderId = traderMap.get(username);
+      const username = post.owner?.username;
+      const usernameLower = username?.toLowerCase();
+      const traderId = usernameLower ? traderMap.get(usernameLower) : null;
       
-      // We only care about posts from traders in our database
-      if (!traderId) {
-        console.log(`Skipping post from unknown trader: ${username}`);
-        continue;
+      // Track stats
+      if (traderId) {
+        trackedTraderPosts++;
+      } else {
+        unknownTraderPosts++;
       }
 
+      // Include ALL posts - set trader_id if known, null if unknown
       postsToInsert.push({
-        trader_id: traderId,
+        trader_id: traderId || null,
+        etoro_username: username || 'unknown',
         content: post.content,
         posted_at: post.published,
         likes: item.reactionsCount || 0,
@@ -94,11 +100,11 @@ serve(async (req) => {
         mentioned_symbols: extractSymbols(post.content),
         sentiment: analyzeSentiment(post.content),
         source: 'etoro',
-        etoro_post_id: item.id, // Using the discussion ID as the unique eToro post ID
+        etoro_post_id: item.id,
       });
     }
 
-    console.log(`Prepared ${postsToInsert.length} posts for insertion`);
+    console.log(`Prepared ${postsToInsert.length} posts: ${trackedTraderPosts} from tracked traders, ${unknownTraderPosts} from unknown traders`);
 
     let insertedCount = 0;
     if (postsToInsert.length > 0) {
@@ -125,6 +131,8 @@ serve(async (req) => {
         success: true,
         posts_scraped: discussions.length,
         posts_processed: postsToInsert.length,
+        posts_from_tracked_traders: trackedTraderPosts,
+        posts_from_unknown_traders: unknownTraderPosts,
         posts_inserted: insertedCount,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
