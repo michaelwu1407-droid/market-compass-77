@@ -1,5 +1,5 @@
 import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 import type { Tables } from '@/integrations/supabase/types';
 import { useEffect } from 'react';
 

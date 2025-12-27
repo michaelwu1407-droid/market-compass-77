@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AnalysisInput } from '@/components/analysis/AnalysisInput';
 import { AnalysisResult } from '@/components/analysis/AnalysisResult';
 import { toast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 import { useUpdateReport } from '@/hooks/useReports';
 import { useTrader } from '@/hooks/useTraders';
 import type { Report, ReportType, Horizon } from '@/types';

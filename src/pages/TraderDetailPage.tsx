@@ -32,7 +32,7 @@ import { useFollowedTraders } from '@/hooks/useFollowedTraders';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow, format } from 'date-fns';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 
 const countryFlags: Record<string, string> = {

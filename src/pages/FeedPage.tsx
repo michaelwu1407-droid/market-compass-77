@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RefreshCw, Clock } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 import { FeedCard } from '@/components/feed/FeedCard';
 import { TraderMiniCard } from '@/components/feed/TraderMiniCard';
 import { Button } from '@/components/ui/button';
