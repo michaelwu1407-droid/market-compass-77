@@ -6,13 +6,15 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-function extractSymbols(text: string): string[] {
+function extractSymbols(text: string | undefined | null): string[] {
+  if (!text) return [];
   const dollarSymbols = text.match(/\$([A-Z]{1,5})/g) || [];
   const symbols = dollarSymbols.map(s => s.replace('$', ''));
   return [...new Set(symbols)];
 }
 
-function analyzeSentiment(text: string): string {
+function analyzeSentiment(text: string | undefined | null): string {
+  if (!text) return 'neutral';
   const lowerText = text.toLowerCase();
   const bullishWords = ['buy', 'long', 'bullish', 'moon', 'pump', 'growth', 'profit', 'gains', 'up', 'rally'];
   const bearishWords = ['sell', 'short', 'bearish', 'dump', 'crash', 'loss', 'down', 'drop', 'correction'];
