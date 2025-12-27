@@ -211,22 +211,35 @@ async function upsertDatapoint(
   status: string = 'running',
   details?: any
 ): Promise<void> {
+  // Deduplicate by (domain, datapoint_key). Keep a single canonical row per datapoint.
+  const now = new Date().toISOString();
   const { data: existing } = await supabase
     .from('sync_datapoints')
-    .select('id')
-    .eq('run_id', runId)
+    .select('*')
+    .eq('domain', domain)
     .eq('datapoint_key', key)
     .maybeSingle();
 
   if (existing) {
+    const attemptsTotal = (existing.attempts_total || 0) + 1;
+    const attemptsFailed = (existing.attempts_failed || 0) + (status === 'error' ? 1 : 0);
+    const lastSuccessAt = (status === 'completed' || status === 'success') ? now : existing.last_success_at;
+
     await supabase
       .from('sync_datapoints')
-      .update({ 
-        value_current: valueCurrent, 
+      .update({
+        run_id: runId,
+        datapoint_label: label,
+        value_current: valueCurrent,
         value_total: valueTotal,
         status,
         details,
-        updated_at: new Date().toISOString()
+        last_attempt_at: now,
+        last_error: status === 'error' ? (details?.error || details || null) : null,
+        last_success_at: lastSuccessAt,
+        attempts_total: attemptsTotal,
+        attempts_failed: attemptsFailed,
+        updated_at: now
       })
       .eq('id', existing.id);
   } else {
@@ -241,6 +254,11 @@ async function upsertDatapoint(
         value_total: valueTotal,
         status,
         details,
+        last_attempt_at: now,
+        last_error: status === 'error' ? (details?.error || details || null) : null,
+        last_success_at: (status === 'completed' || status === 'success') ? now : null,
+        attempts_total: 1,
+        attempts_failed: status === 'error' ? 1 : 0,
       });
   }
 }
@@ -332,7 +350,7 @@ async function runDiscussionFeedSync(
     // Call scrape-posts on same project
     const { data, error } = await invokeFunction(supabaseUrl, supabaseKey, 'scrape-posts');
     
-    if (error) throw error;
+    if (error) throw new Error(error?.message || JSON.stringify(error) || 'Unknown error');
 
     const postsScraped = data?.posts_scraped || 0;
     const postsProcessed = data?.posts_processed || 0;
@@ -417,7 +435,7 @@ async function runTraderProfilesSync(
     // Call dispatch-sync-jobs on same project
     const { data, error } = await invokeFunction(supabaseUrl, supabaseKey, 'dispatch-sync-jobs');
     
-    if (error) throw error;
+    if (error) throw new Error(error?.message || JSON.stringify(error) || 'Unknown error');
 
     const processed = data?.dispatched_jobs || 0;
     const errors = data?.errors || [];
@@ -468,7 +486,7 @@ async function runStockDataSync(
     // Call sync-assets on same project
     const { data: assetsData, error: assetsError } = await invokeFunction(supabaseUrl, supabaseKey, 'sync-assets');
     
-    if (assetsError) throw assetsError;
+    if (assetsError) throw new Error(assetsError?.message || JSON.stringify(assetsError) || 'Unknown error');
 
     const syncedCount = assetsData?.synced || 0;
     await upsertDatapoint(supabase, runId, domain, 'sync_bullaware', 'Sync from BullAware', syncedCount, syncedCount, 'completed');
@@ -551,9 +569,51 @@ serve(async (req) => {
     
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const body = await req.json().catch(() => ({}));
-    const domains: Domain[] = body.domains || ['discussion_feed', 'trader_profiles', 'stock_data'];
-    const triggeredBy = body.triggered_by || 'manual';
+    let body: any = {};
+    let triggeredBy = 'manual';
+
+    try {
+      body = await req.json().catch(() => ({}));
+    } catch (e) {
+      console.log('[trigger-sync] req.json() threw:', e?.message || e);
+      body = {};
+    }
+
+    // If body is empty, try to parse raw text (some clients may send non-JSON)
+    if (!body || Object.keys(body).length === 0) {
+      try {
+        const raw = await req.text();
+        if (raw) {
+          try { body = JSON.parse(raw); } catch (e) { /* ignore non-JSON raw body */ }
+        }
+      } catch (e) {
+        console.log('[trigger-sync] req.text() failed:', e?.message || e);
+      }
+    }
+
+    triggeredBy = body?.triggered_by || 'manual';
+
+    // Instrumentation & request shape logging
+    console.log('[trigger-sync] incoming request method:', req.method);
+    console.log('[trigger-sync] body keys:', Object.keys(body || {}));
+    console.log('[trigger-sync] auth present:', !!req.headers.get('authorization'));
+    console.log('[trigger-sync] body.domain type:', typeof body?.domain);
+    console.log('[trigger-sync] body.domains isArray:', Array.isArray(body?.domains));
+    console.log('[trigger-sync] body.datapoint type:', typeof body?.datapoint);
+
+    const hasDomainsArray = Array.isArray(body?.domains);
+    const hasDomainString = typeof body?.domain === 'string';
+
+    if (hasDomainsArray && hasDomainString) {
+      return new Response(JSON.stringify({
+        success: false,
+        error: 'Both body.domains and body.domain provided; supply exactly one',
+        context: { domain: null, missing: 'exclusive_choice' }
+      }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // If neither present, fall back to default (all domains) to preserve existing callers
+    const domains: Domain[] = hasDomainsArray ? body.domains : (hasDomainString ? [body.domain] : ['discussion_feed', 'trader_profiles', 'stock_data']);
     const lockHolder = `trigger-${Date.now()}`;
 
     console.log(`trigger-sync called for domains: ${domains.join(', ')} by ${triggeredBy}`);

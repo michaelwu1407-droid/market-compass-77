@@ -229,37 +229,56 @@ function StaleLockWarning({
 }
 
 function DomainPanel({
-  domain, 
-  status, 
+  domain,
+  status,
   rateLimit,
   logs,
   datapoints,
+  diagnostics,
   onTriggerSync,
   onClearLock,
   onClearData,
   isSyncing,
   isClearing,
   isClearingData,
+  lastManualRuns = {},
 }: {
   domain: Domain;
   status: DomainStatus | undefined;
   rateLimit: RateLimitInfo | undefined;
   logs: SyncLog[];
   datapoints: SyncDatapoint[];
+  diagnostics?: any;
   onTriggerSync: (domain: Domain) => void;
   onClearLock: (domain: Domain) => void;
   onClearData: (domain: Domain) => void;
   isSyncing: boolean;
   isClearing: boolean;
   isClearingData: boolean;
+  lastManualRuns?: Record<string, string>;
 }) {
   const [logsOpen, setLogsOpen] = useState(false);
+  // ...existing code...
   const config = DOMAIN_CONFIG[domain];
   const Icon = config.icon;
   const currentStatus = status?.status || 'idle';
-  const statusConfig = STATUS_CONFIG[currentStatus];
-  const StatusIcon = statusConfig.icon;
-  
+  let statusLabel = STATUS_CONFIG[currentStatus]?.label;
+  let statusColor = STATUS_CONFIG[currentStatus]?.color;
+  let StatusIcon = STATUS_CONFIG[currentStatus]?.icon;
+
+  if (domain === 'discussion_feed' && currentStatus === 'idle' && status?.last_successful_at) {
+    const minutesAgo = Math.round((Date.now() - new Date(status.last_successful_at).getTime()) / 60000);
+    if (minutesAgo < 1) {
+      statusLabel = 'Last Sync: just now';
+    } else if (minutesAgo === 1) {
+      statusLabel = 'Last Sync: 1 min ago';
+    } else {
+      statusLabel = `Last Sync: ${minutesAgo} min ago`;
+    }
+    statusColor = 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300';
+    StatusIcon = Clock;
+  }
+
   const progress = status?.items_total && status.items_total > 0 
     ? (status.items_completed / status.items_total) * 100 
     : 0;
@@ -276,6 +295,12 @@ function DomainPanel({
     (status?.status === 'idle' && datapoints.length > 0)
   );
 
+  const statusConfig = {
+    label: statusLabel,
+    color: statusColor,
+    icon: StatusIcon,
+  };
+
   return (
     <Card className={cn("border-t-4 shadow-sm relative overflow-hidden", borderColor)}>
       <div className="absolute top-0 right-0 p-4 opacity-5">
@@ -289,6 +314,7 @@ function DomainPanel({
             {config.label}
           </CardTitle>
           <Badge className={cn("gap-1", statusConfig.color)}>
+        {/* Health/Cumulative Metrics Summary (moved to datapoints table location) */}
             <StatusIcon className={cn("h-3 w-3", currentStatus === 'running' && "animate-spin")} />
             {statusConfig.label}
           </Badge>
@@ -325,8 +351,45 @@ function DomainPanel({
           </div>
         )}
 
-        {/* Granular Datapoints */}
-        {currentDatapoints.length > 0 && (
+        {/* Granular Datapoints or Health Summary */}
+        {domain === 'discussion_feed' && diagnostics && (
+          <div className="border rounded-lg overflow-hidden mb-4 bg-white dark:bg-zinc-900">
+            <div className="bg-muted/50 px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider border-b">
+              Discussion Feed Health Summary
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1 p-3 text-sm">
+              <div className="flex flex-col">
+                <span className="text-xs text-muted-foreground">Total Posts in DB</span>
+                <span className="font-semibold">{diagnostics.total_posts ?? '-'}</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs text-muted-foreground">Latest Post</span>
+                <span className="font-semibold">{diagnostics.latest_post ? formatDistanceToNow(new Date(diagnostics.latest_post), { addSuffix: true }) : '-'}</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs text-muted-foreground">Sync Lag</span>
+                <span className="font-semibold">{diagnostics.sync_lag_minutes != null ? `${diagnostics.sync_lag_minutes} min` : '-'}</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs text-muted-foreground">New Posts (Last Sync)</span>
+                <span className="font-semibold">{diagnostics.last_sync?.new_posts ?? '-'}</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs text-muted-foreground">Updated Posts (Last Sync)</span>
+                <span className="font-semibold">{diagnostics.last_sync?.updated_posts ?? '-'}</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs text-muted-foreground">Failed Posts (Last Sync)</span>
+                <span className="font-semibold">{diagnostics.last_sync?.failed_posts ?? '-'}</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs text-muted-foreground">Error Count</span>
+                <span className="font-semibold">{diagnostics.error_count ?? '-'}</span>
+              </div>
+            </div>
+          </div>
+        )}
+        {domain !== 'discussion_feed' && currentDatapoints.length > 0 && (
           <div className="border rounded-lg overflow-hidden">
             <div className="bg-muted/50 px-3 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">
               Datapoints
@@ -342,10 +405,10 @@ function DomainPanel({
         {/* Stats Grid */}
         <div className="grid grid-cols-2 gap-3 text-sm">
           <div className="space-y-1">
-            <p className="text-xs text-muted-foreground uppercase tracking-wider">Last Refresh</p>
+            <p className="text-xs text-muted-foreground uppercase tracking-wider">Last Manual Refresh</p>
             <p className="font-medium">
-              {status?.last_successful_at 
-                ? formatDistanceToNow(new Date(status.last_successful_at), { addSuffix: true })
+              {lastManualRuns && lastManualRuns[domain]
+                ? formatDistanceToNow(new Date(lastManualRuns[domain]), { addSuffix: true })
                 : 'Never'}
             </p>
           </div>
@@ -362,11 +425,13 @@ function DomainPanel({
             </p>
           </div>
           <div className="space-y-1">
-            <p className="text-xs text-muted-foreground uppercase tracking-wider">Updated</p>
+            <p className="text-xs text-muted-foreground uppercase tracking-wider">Last Updated</p>
             <p className="font-medium">
-              {status?.updated_at 
-                ? formatDistanceToNow(new Date(status.updated_at), { addSuffix: true })
-                : '-'}
+              {status?.last_successful_at
+                ? formatDistanceToNow(new Date(status.last_successful_at), { addSuffix: true })
+                : status?.updated_at
+                  ? formatDistanceToNow(new Date(status.updated_at), { addSuffix: true })
+                  : '-'}
             </p>
           </div>
         </div>
@@ -409,17 +474,28 @@ function DomainPanel({
 
         {/* Last Error */}
         {status?.last_error_message && (
-          <div className="p-3 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg">
+          <div
+            className={cn(
+              "p-3 border rounded-lg",
+              status.status === 'error'
+                ? "bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800"
+                : "bg-muted/50 border-muted"
+            )}
+          >
             <div className="flex items-center gap-2 mb-1">
-              <AlertCircle className="h-4 w-4 text-red-600" />
-              <span className="text-sm font-medium text-red-700 dark:text-red-300">Last Error</span>
+              <AlertCircle className={status.status === 'error' ? "h-4 w-4 text-red-600" : "h-4 w-4 text-muted-foreground"} />
+              <span className={status.status === 'error' ? "text-sm font-medium text-red-700 dark:text-red-300" : "text-sm font-medium text-muted-foreground"}>
+                Last Error
+              </span>
               {status.last_error_at && (
-                <span className="text-xs text-red-500">
+                <span className={status.status === 'error' ? "text-xs text-red-500" : "text-xs text-muted-foreground"}>
                   {formatDistanceToNow(new Date(status.last_error_at), { addSuffix: true })}
                 </span>
               )}
             </div>
-            <p className="text-xs text-red-600 dark:text-red-400 line-clamp-2">{status.last_error_message}</p>
+            <p className={status.status === 'error' ? "text-xs text-red-600 dark:text-red-400 line-clamp-2" : "text-xs text-muted-foreground line-clamp-2"}>
+              {status.last_error_message}
+            </p>
           </div>
         )}
 
@@ -497,24 +573,52 @@ function DomainPanel({
 }
 
 export default function AdminSyncPage() {
+          const [clearingDataDomains, setClearingDataDomains] = useState<Set<Domain>>(new Set());
+        const [isSyncingAll, setIsSyncingAll] = useState(false);
+      // Fetch domain statuses
+      const { data: domainStatuses } = useQuery({
+        queryKey: ['sync-domain-status'],
+        queryFn: async () => {
+          const { data, error } = await supabase
+            .from('sync_domain_status')
+            .select('*');
+          if (error) throw error;
+          return data as DomainStatus[];
+        },
+        refetchInterval: 3000,
+      });
+    // Fetch diagnostics (cumulative/health metrics)
+    const { data: diagnostics } = useQuery({
+      queryKey: ['sync-diagnostics'],
+      queryFn: async () => {
+        const res = await fetch('https://xgvaibxxiwfraklfbwey.functions.supabase.co/sync-diagnostics');
+        if (!res.ok) throw new Error('Failed to fetch diagnostics');
+        return await res.json();
+      },
+      refetchInterval: 10000,
+    });
   const [syncingDomains, setSyncingDomains] = useState<Set<Domain>>(new Set());
   const [clearingDomains, setClearingDomains] = useState<Set<Domain>>(new Set());
-  const [clearingDataDomains, setClearingDataDomains] = useState<Set<Domain>>(new Set());
-  const [isSyncingAll, setIsSyncingAll] = useState(false);
-  const queryClient = useQueryClient();
-
-  // Fetch domain statuses
-  const { data: domainStatuses } = useQuery({
-    queryKey: ['sync-domain-status'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('sync_domain_status')
-        .select('*');
-      if (error) throw error;
-      return data as DomainStatus[];
-    },
-    refetchInterval: 3000,
-  });
+    // Fetch last manual sync run for each domain
+    const { data: lastManualRuns } = useQuery({
+      queryKey: ['sync-last-manual-runs'],
+      queryFn: async () => {
+        const { data, error } = await supabase
+          .from('sync_runs')
+          .select('domain, finished_at')
+          .eq('triggered_by', 'manual')
+          .order('finished_at', { ascending: false })
+          .limit(30); // get recent manual runs for all domains
+        if (error) throw error;
+        // Map: { [domain]: finished_at }
+        const map: Record<string, string> = {};
+        for (const row of data || []) {
+          if (!map[row.domain]) map[row.domain] = row.finished_at;
+        }
+        return map;
+      },
+      refetchInterval: 10000,
+    });
 
   // Fetch rate limits
   const { data: rateLimits } = useQuery({
@@ -545,14 +649,15 @@ export default function AdminSyncPage() {
   });
 
   // Fetch datapoints
+  // Fetch datapoints for all domains, but filter by domain in SQL for accuracy and live updates
   const { data: datapoints } = useQuery({
     queryKey: ['sync-datapoints'],
     queryFn: async () => {
+      // Fetch all datapoints for all domains (remove .limit(100)), or add pagination if needed
       const { data, error } = await supabase
         .from('sync_datapoints')
         .select('*')
-        .order('created_at', { ascending: false })
-        .limit(100);
+        .order('created_at', { ascending: false });
       if (error) throw error;
       return data as SyncDatapoint[];
     },
@@ -761,12 +866,14 @@ export default function AdminSyncPage() {
           rateLimit={undefined}
           logs={getLogsForDomain('discussion_feed')}
           datapoints={getDatapointsForDomain('discussion_feed')}
+          diagnostics={diagnostics?.domains?.discussion_feed}
           onTriggerSync={handleSyncDomain}
           onClearLock={handleClearLock}
           onClearData={handleClearData}
           isSyncing={syncingDomains.has('discussion_feed')}
           isClearing={clearingDomains.has('discussion_feed')}
           isClearingData={clearingDataDomains.has('discussion_feed')}
+          lastManualRuns={lastManualRuns}
         />
         <DomainPanel
           domain="trader_profiles"
@@ -780,6 +887,7 @@ export default function AdminSyncPage() {
           isSyncing={syncingDomains.has('trader_profiles')}
           isClearing={clearingDomains.has('trader_profiles')}
           isClearingData={clearingDataDomains.has('trader_profiles')}
+          lastManualRuns={lastManualRuns}
         />
         <DomainPanel
           domain="stock_data"
@@ -793,6 +901,7 @@ export default function AdminSyncPage() {
           isSyncing={syncingDomains.has('stock_data')}
           isClearing={clearingDomains.has('stock_data')}
           isClearingData={clearingDataDomains.has('stock_data')}
+          lastManualRuns={lastManualRuns}
         />
       </div>
 

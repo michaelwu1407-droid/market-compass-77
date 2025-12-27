@@ -1,0 +1,6 @@
+# Supabase Edge Function config for fix-posts
+name: fix-posts
+version: 0.0.1
+description: One-time migration to reclassify and reformat all existing posts
+runtime: deno
+entrypoint: index.ts

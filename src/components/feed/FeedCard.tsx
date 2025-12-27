@@ -47,8 +47,8 @@ export function FeedCard({ item, onAnalyse, onStarForIC, onSave, onUnsave, isSav
             className="h-10 w-10 cursor-pointer hover:ring-2 hover:ring-primary transition-all" 
             onClick={() => post.trader && handleViewTrader(post.trader.id)}
           >
-            <AvatarImage src={post.trader?.avatar_url} />
-            <AvatarFallback>{post.trader?.display_name?.[0] ?? 'T'}</AvatarFallback>
+            <AvatarImage src={post.poster_avatar || post.trader?.avatar_url} />
+            <AvatarFallback>{(post.poster_first?.[0] || post.poster_last?.[0] || post.trader?.display_name?.[0] || 'T')}</AvatarFallback>
           </Avatar>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
@@ -56,7 +56,9 @@ export function FeedCard({ item, onAnalyse, onStarForIC, onSave, onUnsave, isSav
                 className="font-semibold text-sm cursor-pointer hover:text-primary transition-colors"
                 onClick={() => post.trader && handleViewTrader(post.trader.id)}
               >
-                {post.trader?.display_name}
+                {post.poster_first || post.poster_last
+                  ? `${post.poster_first || ''} ${post.poster_last || ''}`.trim()
+                  : post.trader?.display_name}
               </span>
               {post.trader && (
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -64,6 +66,10 @@ export function FeedCard({ item, onAnalyse, onStarForIC, onSave, onUnsave, isSav
                   <span>·</span>
                   <span>Risk {post.trader.risk_score}</span>
                 </div>
+              )}
+              {/* Show classification if present */}
+              {post._classif && (
+                <Badge variant="outline" className="ml-2 text-xs">{post._classif}</Badge>
               )}
             </div>
             <span className="text-xs text-muted-foreground">{timeAgo}</span>
@@ -90,12 +96,19 @@ export function FeedCard({ item, onAnalyse, onStarForIC, onSave, onUnsave, isSav
         <div className="flex items-center gap-4 text-xs text-muted-foreground mb-3">
           <span className="flex items-center gap-1">
             <Heart className="h-3.5 w-3.5" />
-            {post.like_count}
+            {post.likes ?? post.like_count ?? 0}
           </span>
           <span className="flex items-center gap-1">
             <MessageCircle className="h-3.5 w-3.5" />
-            {post.comment_count}
+            {post.comments ?? post.comment_count ?? 0}
           </span>
+          {/* Show content source/length if present */}
+          {post._content_source && (
+            <span className="ml-2 text-xs">src: {post._content_source}</span>
+          )}
+          {typeof post._content_len === 'number' && (
+            <span className="ml-2 text-xs">len: {post._content_len}</span>
+          )}
         </div>
 
         {/* Actions */}

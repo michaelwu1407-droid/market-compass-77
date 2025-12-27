@@ -83,11 +83,18 @@ export interface Post {
   like_count: number;
   comment_count: number;
   raw_json: Record<string, unknown>;
+  // New poster/engagement fields
+  poster_id?: string | null;
+  poster_first?: string;
+  poster_last?: string;
+  poster_avatar?: string;
+  likes?: number;
+  comments?: number;
   // Joined data
   trader?: Trader;
   asset?: Asset;
   // Extended fields
-  comments?: { id: string; author: string; text: string; created_at: string }[];
+  comments_list?: { id: string; author: string; text: string; created_at: string }[];
   images?: string[];
   is_pinned?: boolean;
 }

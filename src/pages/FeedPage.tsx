@@ -119,8 +119,8 @@ export default function FeedPage() {
         asset_id: null,
         text: post.content,
         created_at: post.posted_at || post.created_at || '',
-        like_count: post.likes || 0,
-        comment_count: post.comments || 0,
+        like_count: post.likes ?? post.like_count ?? 0,
+        comment_count: post.comments ?? post.comment_count ?? 0,
         raw_json: {},
         trader: mappedTrader,
       };
@@ -200,23 +200,17 @@ export default function FeedPage() {
           <div>
             <h1 className="text-2xl font-bold mb-1">Discussion Feed</h1>
             <p className="text-muted-foreground text-sm">Posts and trades from your network</p>
+            <span>{lastRefreshed ? formatDistanceToNow(lastRefreshed, { addSuffix: true }) : 'Never'}</span>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-              <Clock className="h-3 w-3" />
-              <span className="hidden sm:inline">Last refreshed:</span>
-              <span>{lastRefreshed ? formatDistanceToNow(lastRefreshed, { addSuffix: true }) : 'Never'}</span>
-            </div>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={handleRefresh}
-              disabled={isFetching || isRefreshingLocal}
-            >
-              <RefreshCw className={`h-4 w-4 mr-2 ${(isFetching || isRefreshingLocal) ? 'animate-spin' : ''}`} />
-              {isRefreshingLocal ? 'Refreshing...' : 'Refresh'}
-            </Button>
-          </div>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={handleRefresh}
+            disabled={isFetching || isRefreshingLocal}
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${(isFetching || isRefreshingLocal) ? 'animate-spin' : ''}`} />
+            {isRefreshingLocal ? 'Refreshing...' : 'Refresh'}
+          </Button>
         </div>
       </div>
 

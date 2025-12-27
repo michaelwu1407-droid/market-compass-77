@@ -1,97 +1,10 @@
-project_id = "vzqwhqgpurkylqfwiowa"
+project_id = "xgvaibxxiwfraklfbwey"
 
-[functions.sync-traders]
+[functions.hello-public]
 verify_jwt = false
 
-[functions.sync-assets]
-verify_jwt = false
-
-[functions.sync-trader-details]
-verify_jwt = false
-
-[functions.analyse]
-verify_jwt = false
-
-[functions.scrape-posts]
-verify_jwt = false
-
-[functions.scrape-daily-movers]
-verify_jwt = false
-
-[functions.sync-worker]
-verify_jwt = false
-
-[functions.enrich-assets-yahoo]
-verify_jwt = false
-
-[functions.fetch-daily-prices]
-verify_jwt = false
-
-[functions.report-qa]
-verify_jwt = false
-
-[functions.refresh-asset]
-verify_jwt = false
-
-[functions.discover-traders]
-verify_jwt = false
-
-[functions.process-queue]
-verify_jwt = false
-
-[functions.run-migration]
-verify_jwt = false
-
-[functions.enqueue-sync-jobs]
-verify_jwt = false
-
-[functions.verify-deployment]
-verify_jwt = false
-
-[functions.force-process-queue]
+[functions.sync-diagnostics-v2]
 verify_jwt = false
 
 [functions.sync-diagnostics]
-verify_jwt = false
-
-[functions.run-cron-migration]
-verify_jwt = false
-
-[functions.inspect-sync-jobs]
-verify_jwt = false
-
-[functions.trigger-sync]
-verify_jwt = false
-
-[functions.dispatch-sync-jobs]
-verify_jwt = false
-
-[functions.process-sync-job]
-verify_jwt = false
-
-[functions.force-enqueue-all]
-verify_jwt = false
-
-[functions.aum-calculation]
-verify_jwt = false
-
-[functions.check-system-health]
-verify_jwt = false
-
-[functions.fetch-market-movers]
-verify_jwt = false
-
-[functions.inspect-db]
-verify_jwt = false
-
-[functions.investigate-root-cause]
-verify_jwt = false
-
-[functions.reset-all-traders]
-verify_jwt = false
-
-[functions.test-sync-flow]
-verify_jwt = false
-
-[functions.clear-stale-locks]
 verify_jwt = false

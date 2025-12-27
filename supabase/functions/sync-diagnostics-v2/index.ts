@@ -1,12 +1,11 @@
+// This file has been removed as part of the cleanup process.
 
-// @ts-ignore: Deno runtime import (ignore in VS Code, works in Supabase Edge Functions)
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-// @ts-ignore: Deno runtime import (ignore in VS Code, works in Supabase Edge Functions)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // Unique build fingerprint for deployment verification
-const BUILD_ID = "BUILD_2025_12_28_0209_SYD";
-console.log("SYNC_DIAGNOSTICS_BUILD_ID", BUILD_ID);
+const BUILD_ID = "2025-12-28T00:37Z-a1b2c3-v2";
+console.log("BUILD_ID", BUILD_ID);
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -14,39 +13,20 @@ const corsHeaders = {
 };
 
 // Enhanced diagnostics function to help debug sync issues
-// The following function is for Supabase Edge Functions (Deno runtime)
-serve(async (req: Request) => {
+serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Defensive guard for required env vars
-  // @ts-ignore: Deno global for Edge Functions
-  const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
-  const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    console.error("MISSING_ENV", { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY });
-    return new Response(
-      JSON.stringify({
-        success: false,
-        error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env var",
-        _debug_type: "missing_env",
-        SUPABASE_URL,
-        SUPABASE_SERVICE_ROLE_KEY
-      }),
-      { status: 500, headers: corsHeaders }
-    );
-  }
   const supabase = createClient(
-    SUPABASE_URL,
-    SUPABASE_SERVICE_ROLE_KEY
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
   );
 
   const diagnostics: any = {
-    debug: 'deployed-2025-12-28-0159-debug-test',
+    debug: 'deployed-2025-12-28-v2',
     build_id: BUILD_ID,
     timestamp: new Date().toISOString(),
-    debug_marker: 'SYNC_DIAGNOSTICS_LIVE_2025-12-28-0159',
     traders: {},
     sync_jobs: {},
     worker_status: {},
@@ -55,16 +35,16 @@ serve(async (req: Request) => {
   };
 
   // 2b. Per-domain health/cumulative metrics
-  // Discussion Feed (use posts table)
+  // Discussion Feed
   const { count: feedCount, error: feedCountError } = await supabase
-    .from('posts')
+    .from('discussion_feed')
     .select('*', { count: 'exact', head: true });
   diagnostics.domains.discussion_feed = { total_posts: feedCount || 0 };
   if (feedCountError) diagnostics.domains.discussion_feed.error = feedCountError.message;
 
   // Latest post timestamp
   const { data: latestFeed } = await supabase
-    .from('posts')
+    .from('discussion_feed')
     .select('created_at')
     .order('created_at', { ascending: false })
     .limit(1);
