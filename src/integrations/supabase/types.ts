@@ -498,6 +498,200 @@ export type Database = {
           },
         ]
       }
+      sync_domain_status: {
+        Row: {
+          created_at: string | null
+          current_run_id: string | null
+          current_stage: string | null
+          domain: string
+          eta_seconds: number | null
+          items_completed: number | null
+          items_total: number | null
+          last_error_at: string | null
+          last_error_message: string | null
+          last_successful_at: string | null
+          last_successful_run_id: string | null
+          lock_acquired_at: string | null
+          lock_holder: string | null
+          next_scheduled_at: string | null
+          status: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          current_run_id?: string | null
+          current_stage?: string | null
+          domain: string
+          eta_seconds?: number | null
+          items_completed?: number | null
+          items_total?: number | null
+          last_error_at?: string | null
+          last_error_message?: string | null
+          last_successful_at?: string | null
+          last_successful_run_id?: string | null
+          lock_acquired_at?: string | null
+          lock_holder?: string | null
+          next_scheduled_at?: string | null
+          status?: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          current_run_id?: string | null
+          current_stage?: string | null
+          domain?: string
+          eta_seconds?: number | null
+          items_completed?: number | null
+          items_total?: number | null
+          last_error_at?: string | null
+          last_error_message?: string | null
+          last_successful_at?: string | null
+          last_successful_run_id?: string | null
+          lock_acquired_at?: string | null
+          lock_holder?: string | null
+          next_scheduled_at?: string | null
+          status?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sync_domain_status_current_run_id_fkey"
+            columns: ["current_run_id"]
+            isOneToOne: false
+            referencedRelation: "sync_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sync_domain_status_last_successful_run_id_fkey"
+            columns: ["last_successful_run_id"]
+            isOneToOne: false
+            referencedRelation: "sync_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sync_logs: {
+        Row: {
+          created_at: string | null
+          details: Json | null
+          domain: string
+          id: string
+          level: string | null
+          message: string
+          run_id: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          details?: Json | null
+          domain: string
+          id?: string
+          level?: string | null
+          message: string
+          run_id?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          details?: Json | null
+          domain?: string
+          id?: string
+          level?: string | null
+          message?: string
+          run_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sync_logs_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "sync_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sync_rate_limits: {
+        Row: {
+          created_at: string | null
+          day_started_at: string | null
+          id: string
+          max_per_minute: number | null
+          minute_started_at: string | null
+          next_reset_at: string | null
+          requests_this_minute: number | null
+          total_requests_today: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          day_started_at?: string | null
+          id?: string
+          max_per_minute?: number | null
+          minute_started_at?: string | null
+          next_reset_at?: string | null
+          requests_this_minute?: number | null
+          total_requests_today?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          day_started_at?: string | null
+          id?: string
+          max_per_minute?: number | null
+          minute_started_at?: string | null
+          next_reset_at?: string | null
+          requests_this_minute?: number | null
+          total_requests_today?: number | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      sync_runs: {
+        Row: {
+          created_at: string | null
+          current_stage: string | null
+          domain: string
+          error_details: Json | null
+          error_message: string | null
+          finished_at: string | null
+          id: string
+          items_completed: number | null
+          items_total: number | null
+          started_at: string | null
+          status: string
+          triggered_by: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          current_stage?: string | null
+          domain: string
+          error_details?: Json | null
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          items_completed?: number | null
+          items_total?: number | null
+          started_at?: string | null
+          status?: string
+          triggered_by?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          current_stage?: string | null
+          domain?: string
+          error_details?: Json | null
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          items_completed?: number | null
+          items_total?: number | null
+          started_at?: string | null
+          status?: string
+          triggered_by?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       sync_state: {
         Row: {
           created_at: string | null

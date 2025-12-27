@@ -3,518 +3,539 @@ import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { toast } from '@/hooks/use-toast';
-import { Loader2, Play, RotateCcw, CheckCircle2, XCircle, Clock, AlertCircle, Zap, FileText, TrendingUp, Package, Users } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { 
+  Loader2, Play, RotateCcw, CheckCircle2, XCircle, Clock, AlertCircle, 
+  Zap, MessageSquare, Users, TrendingUp, RefreshCw, ChevronDown, ChevronUp,
+  Gauge, Timer, AlertTriangle
+} from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow, format } from 'date-fns';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { cn } from '@/lib/utils';
 
-// Matches the status strings in the 'sync_jobs' table
-type SyncStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+type Domain = 'discussion_feed' | 'trader_profiles' | 'stock_data';
+type SyncStatus = 'idle' | 'running' | 'queued' | 'error' | 'rate_limited' | 'completed';
 
-interface QueueItem {
-  id: string;
-  trader_id: string;
+interface DomainStatus {
+  domain: Domain;
   status: SyncStatus;
-  last_attempted_at: string;
-  error_message: string;
-  retry_count: number;
-}
-
-interface SyncState {
-  id: string;
-  last_run: string;
-  status: string;
+  current_run_id: string | null;
+  last_successful_at: string | null;
+  next_scheduled_at: string | null;
+  items_total: number;
+  items_completed: number;
+  current_stage: string | null;
+  eta_seconds: number | null;
+  last_error_message: string | null;
+  last_error_at: string | null;
+  lock_holder: string | null;
   updated_at: string;
 }
 
+interface RateLimitInfo {
+  id: string;
+  requests_this_minute: number;
+  max_per_minute: number;
+  minute_started_at: string;
+  next_reset_at: string | null;
+}
+
+interface SyncLog {
+  id: string;
+  run_id: string | null;
+  domain: string;
+  level: string;
+  message: string;
+  details: any;
+  created_at: string;
+}
+
+const DOMAIN_CONFIG: Record<Domain, { label: string; icon: React.ElementType; color: string; description: string }> = {
+  discussion_feed: {
+    label: 'Discussion Feed',
+    icon: MessageSquare,
+    color: 'pink',
+    description: 'eToro Popular Investors feed posts',
+  },
+  trader_profiles: {
+    label: 'Trader Profiles',
+    icon: Users,
+    color: 'blue',
+    description: 'BullAware API - Deep profile & portfolio sync',
+  },
+  stock_data: {
+    label: 'Stock Data',
+    icon: TrendingUp,
+    color: 'green',
+    description: 'Yahoo Finance & other sources',
+  },
+};
+
+const STATUS_CONFIG: Record<SyncStatus, { label: string; color: string; icon: React.ElementType }> = {
+  idle: { label: 'Idle', color: 'bg-muted text-muted-foreground', icon: Clock },
+  running: { label: 'Running', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300', icon: Loader2 },
+  queued: { label: 'Queued', color: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300', icon: Clock },
+  completed: { label: 'Completed', color: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300', icon: CheckCircle2 },
+  error: { label: 'Error', color: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300', icon: XCircle },
+  rate_limited: { label: 'Rate Limited', color: 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300', icon: AlertTriangle },
+};
+
+function formatEta(seconds: number | null): string {
+  if (!seconds || seconds <= 0) return '-';
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.ceil(seconds / 60)}m`;
+  return `${(seconds / 3600).toFixed(1)}h`;
+}
+
+function DomainPanel({ 
+  domain, 
+  status, 
+  rateLimit,
+  logs,
+  onTriggerSync,
+  isSyncing,
+}: {
+  domain: Domain;
+  status: DomainStatus | undefined;
+  rateLimit: RateLimitInfo | undefined;
+  logs: SyncLog[];
+  onTriggerSync: (domain: Domain) => void;
+  isSyncing: boolean;
+}) {
+  const [logsOpen, setLogsOpen] = useState(false);
+  const config = DOMAIN_CONFIG[domain];
+  const Icon = config.icon;
+  const currentStatus = status?.status || 'idle';
+  const statusConfig = STATUS_CONFIG[currentStatus];
+  const StatusIcon = statusConfig.icon;
+  
+  const progress = status?.items_total && status.items_total > 0 
+    ? (status.items_completed / status.items_total) * 100 
+    : 0;
+
+  const borderColor = {
+    pink: 'border-t-pink-500',
+    blue: 'border-t-blue-500',
+    green: 'border-t-green-500',
+  }[config.color];
+
+  return (
+    <Card className={cn("border-t-4 shadow-sm relative overflow-hidden", borderColor)}>
+      <div className="absolute top-0 right-0 p-4 opacity-10">
+        <Icon className="w-24 h-24" />
+      </div>
+      
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="flex items-center gap-2">
+            <Icon className="h-5 w-5" />
+            {config.label}
+          </CardTitle>
+          <Badge className={cn("gap-1", statusConfig.color)}>
+            <StatusIcon className={cn("h-3 w-3", currentStatus === 'running' && "animate-spin")} />
+            {statusConfig.label}
+          </Badge>
+        </div>
+        <CardDescription>{config.description}</CardDescription>
+      </CardHeader>
+
+      <CardContent className="space-y-4">
+        {/* Progress */}
+        {(currentStatus === 'running' || status?.items_total) && status?.items_total > 0 && (
+          <div className="space-y-2">
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Progress</span>
+              <span className="font-medium">{status?.items_completed || 0} / {status?.items_total || 0}</span>
+            </div>
+            <Progress value={progress} className="h-2" />
+          </div>
+        )}
+
+        {/* Current Stage */}
+        {status?.current_stage && (
+          <div className="text-sm">
+            <span className="text-muted-foreground">Stage: </span>
+            <span className="font-medium">{status.current_stage}</span>
+          </div>
+        )}
+
+        {/* Stats Grid */}
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground uppercase tracking-wider">Last Refresh</p>
+            <p className="font-medium">
+              {status?.last_successful_at 
+                ? formatDistanceToNow(new Date(status.last_successful_at), { addSuffix: true })
+                : 'Never'}
+            </p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground uppercase tracking-wider">ETA</p>
+            <p className="font-medium">{formatEta(status?.eta_seconds || null)}</p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground uppercase tracking-wider">Next Scheduled</p>
+            <p className="font-medium">
+              {status?.next_scheduled_at 
+                ? format(new Date(status.next_scheduled_at), 'HH:mm')
+                : 'Continuous'}
+            </p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground uppercase tracking-wider">Updated</p>
+            <p className="font-medium">
+              {status?.updated_at 
+                ? formatDistanceToNow(new Date(status.updated_at), { addSuffix: true })
+                : '-'}
+            </p>
+          </div>
+        </div>
+
+        {/* Rate Limit Info (only for trader_profiles) */}
+        {domain === 'trader_profiles' && rateLimit && (
+          <div className="p-3 bg-muted/50 rounded-lg">
+            <div className="flex items-center gap-2 mb-2">
+              <Gauge className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium">BullAware Rate Limit</span>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div>
+                <span className="text-muted-foreground">Used: </span>
+                <span className="font-medium">{rateLimit.requests_this_minute}/{rateLimit.max_per_minute}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Remaining: </span>
+                <span className={cn("font-medium", 
+                  rateLimit.max_per_minute - rateLimit.requests_this_minute <= 2 ? "text-orange-600" : "text-green-600"
+                )}>
+                  {rateLimit.max_per_minute - rateLimit.requests_this_minute}
+                </span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Resets: </span>
+                <span className="font-medium">
+                  {rateLimit.next_reset_at 
+                    ? formatDistanceToNow(new Date(rateLimit.next_reset_at), { addSuffix: true })
+                    : '~1m'}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Last Error */}
+        {status?.last_error_message && (
+          <div className="p-3 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg">
+            <div className="flex items-center gap-2 mb-1">
+              <AlertCircle className="h-4 w-4 text-red-600" />
+              <span className="text-sm font-medium text-red-700 dark:text-red-300">Last Error</span>
+              {status.last_error_at && (
+                <span className="text-xs text-red-500">
+                  {formatDistanceToNow(new Date(status.last_error_at), { addSuffix: true })}
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-red-600 dark:text-red-400 line-clamp-2">{status.last_error_message}</p>
+          </div>
+        )}
+
+        {/* Logs Collapsible */}
+        {logs.length > 0 && (
+          <Collapsible open={logsOpen} onOpenChange={setLogsOpen}>
+            <CollapsibleTrigger asChild>
+              <Button variant="ghost" size="sm" className="w-full justify-between">
+                <span>View Logs ({logs.length})</span>
+                {logsOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <ScrollArea className="h-40 mt-2 rounded border p-2">
+                <div className="space-y-1">
+                  {logs.map(log => (
+                    <div key={log.id} className="text-xs flex gap-2">
+                      <span className="text-muted-foreground shrink-0">
+                        {format(new Date(log.created_at), 'HH:mm:ss')}
+                      </span>
+                      <Badge 
+                        variant="outline" 
+                        className={cn("text-[10px] px-1 py-0 shrink-0",
+                          log.level === 'error' && "border-red-500 text-red-600",
+                          log.level === 'warn' && "border-yellow-500 text-yellow-600",
+                        )}
+                      >
+                        {log.level}
+                      </Badge>
+                      <span className="truncate">{log.message}</span>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            </CollapsibleContent>
+          </Collapsible>
+        )}
+      </CardContent>
+
+      <CardFooter className="bg-muted/30 p-3 px-6">
+        <Button 
+          onClick={() => onTriggerSync(domain)} 
+          disabled={isSyncing || currentStatus === 'running'}
+          size="sm"
+          className="w-full"
+        >
+          {isSyncing || currentStatus === 'running' ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              {currentStatus === 'running' ? 'Syncing...' : 'Starting...'}
+            </>
+          ) : (
+            <>
+              <Play className="h-4 w-4 mr-2" />
+              Sync Now
+            </>
+          )}
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+}
+
 export default function AdminSyncPage() {
-  const [isDiscovering, setIsDiscovering] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isForceProcessing, setIsForceProcessing] = useState(false);
-  const [isVerifying, setIsVerifying] = useState(false);
-  const [isSyncingAssets, setIsSyncingAssets] = useState(false);
-  const [isSyncingMovers, setIsSyncingMovers] = useState(false);
-  const [isSyncingPosts, setIsSyncingPosts] = useState(false);
-  const [isInvestigating, setIsInvestigating] = useState(false);
-  const [isResetting, setIsResetting] = useState(false);
+  const [syncingDomains, setSyncingDomains] = useState<Set<Domain>>(new Set());
+  const [isSyncingAll, setIsSyncingAll] = useState(false);
+  const queryClient = useQueryClient();
 
-  const PROJECT_URL = 'https://xgvaibxxiwfraklfbwey.supabase.co';
-  const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-
-  const invokeFunction = async (functionName: string, body = {}) => {
-    if (!ANON_KEY) {
-        throw new Error("Missing VITE_SUPABASE_ANON_KEY in environment variables");
-    }
-    console.log(`[AdminSyncPage] Invoking ${functionName} with body:`, body);
-    
-    // Use Supabase client's function invocation which handles CORS better
-    try {
-      const { data, error } = await supabase.functions.invoke(functionName, {
-        body: body
-      });
-      
-      if (error) {
-        console.error(`[AdminSyncPage] Function error:`, error);
-        throw error;
-      }
-      
-      console.log(`[AdminSyncPage] Function result:`, data);
-      // Log errors if present
-      if (data?.summary?.errors && data.summary.errors.length > 0) {
-        console.error(`[AdminSyncPage] Errors in result:`, data.summary.errors);
-        data.summary.errors.forEach((err: any, idx: number) => {
-          console.error(`[AdminSyncPage] Error ${idx + 1}:`, JSON.stringify(err, null, 2));
-        });
-      }
-      return data;
-    } catch (e: any) {
-      // Fallback to direct fetch if Supabase client fails
-      console.log(`[AdminSyncPage] Supabase client failed, trying direct fetch:`, e.message);
-      const res = await fetch(`${PROJECT_URL}/functions/v1/${functionName}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ANON_KEY}` },
-        body: JSON.stringify(body),
-      });
-      console.log(`[AdminSyncPage] Response status: ${res.status} ${res.statusText}`);
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error(`[AdminSyncPage] Function error:`, errorText);
-        throw new Error(errorText);
-      }
-      const result = await res.json();
-      console.log(`[AdminSyncPage] Function result:`, result);
-      return result;
-    }
-  };
-
-  const { data: syncStates } = useQuery({
-    queryKey: ['sync-states'],
+  // Fetch domain statuses
+  const { data: domainStatuses } = useQuery({
+    queryKey: ['sync-domain-status'],
     queryFn: async () => {
-      const { data } = await supabase.from('sync_state').select('*');
-      return data as SyncState[];
-    },
-    refetchInterval: 5000,
-  });
-
-  const { data: stats, refetch: refetchStats } = useQuery({
-    queryKey: ['job-stats'], // Changed queryKey to reflect new source
-    queryFn: async () => {
-      const { data, error } = await supabase.from('sync_jobs').select('status');
+      const { data, error } = await supabase
+        .from('sync_domain_status')
+        .select('*');
       if (error) throw error;
-      
-      const counts = { pending: 0, in_progress: 0, completed: 0, failed: 0, total: 0 };
-      data.forEach(item => {
-        if (item.status === 'pending') counts.pending++;
-        else if (item.status === 'in_progress') counts.in_progress++;
-        else if (item.status === 'completed') counts.completed++;
-        else if (item.status === 'failed') counts.failed++;
-      });
-      counts.total = data.length;
-      return counts;
+      return data as DomainStatus[];
+    },
+    refetchInterval: 3000,
+  });
+
+  // Fetch rate limits
+  const { data: rateLimits } = useQuery({
+    queryKey: ['sync-rate-limits'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('sync_rate_limits')
+        .select('*');
+      if (error) throw error;
+      return data as RateLimitInfo[];
     },
     refetchInterval: 5000,
   });
 
-  const { data: queueItems, refetch: refetchQueue } = useQuery({
-    queryKey: ['job-items'], // Changed queryKey to reflect new source
+  // Fetch recent logs
+  const { data: recentLogs } = useQuery({
+    queryKey: ['sync-logs-recent'],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('sync_jobs')
+      const { data, error } = await supabase
+        .from('sync_logs')
         .select('*')
-        .order('last_attempted_at', { ascending: false, nullsFirst: true })
-        .limit(20);
-      return data as QueueItem[];
+        .order('created_at', { ascending: false })
+        .limit(100);
+      if (error) throw error;
+      return data as SyncLog[];
     },
     refetchInterval: 5000,
   });
 
-  // Get actual trader count from database
-  const { data: traderCount } = useQuery({
-    queryKey: ['trader-count'],
-    queryFn: async () => {
-      const { count, error } = await supabase
-        .from('traders')
-        .select('*', { count: 'exact', head: true });
+  const getStatusForDomain = (domain: Domain) => 
+    domainStatuses?.find(s => s.domain === domain);
+
+  const getRateLimitForDomain = (domain: Domain) => 
+    domain === 'trader_profiles' ? rateLimits?.find(r => r.id === 'bullaware') : undefined;
+
+  const getLogsForDomain = (domain: Domain) => 
+    (recentLogs || []).filter(l => l.domain === domain).slice(0, 20);
+
+  const triggerSync = async (domains: Domain[]) => {
+    const newSyncing = new Set(syncingDomains);
+    domains.forEach(d => newSyncing.add(d));
+    setSyncingDomains(newSyncing);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('trigger-sync', {
+        body: { domains, triggered_by: 'manual' },
+      });
+
       if (error) throw error;
-      return count || 0;
-    },
-    refetchInterval: 10000,
-  });
 
-  // Get diagnostics - refresh more frequently to see updates
-  const { data: diagnostics, refetch: refetchDiagnostics } = useQuery({
-    queryKey: ['sync-diagnostics'],
-    queryFn: async () => {
-      return await invokeFunction('sync-diagnostics');
-    },
-    refetchInterval: 10000, // Refresh every 10 seconds
-  });
+      const results = data?.results || [];
+      for (const result of results) {
+        const statusMsg = {
+          started: 'Sync started',
+          queued: 'Sync queued (another sync in progress)',
+          blocked: result.message,
+          error: result.message,
+        }[result.status] || result.message;
 
-  const ITEMS_PER_HOUR = 60;
-  const estimatedHoursLeft = stats ? (stats.pending / ITEMS_PER_HOUR).toFixed(1) : 0;
-  const progressPct = stats && stats.total > 0 ? ((stats.completed / stats.total) * 100) : 0;
-
-  const getState = (id: string) => syncStates?.find(s => s.id === id);
-
-  const runDiscovery = async () => {
-    setIsDiscovering(true);
-    try {
-      // Corrected: calling 'enqueue-sync-jobs' with correct parameters
-      await invokeFunction('enqueue-sync-jobs', { sync_traders: true, force: true }); 
-      toast({ title: 'Full Sync Started', description: 'Populating sync jobs for all traders.' }); 
-      refetchStats(); 
-    } 
-    catch (e) { toast({ title: 'Error', description: String(e), variant: 'destructive' }); }
-    finally { setIsDiscovering(false); }
-  };
-
-  const runProcessing = async () => {
-    setIsProcessing(true);
-    try {
-      // Corrected to call the function that processes the queue
-      await invokeFunction('dispatch-sync-jobs'); 
-      toast({ title: 'Processing Batch Started' }); 
-      refetchStats(); 
-    }
-    catch (e) { toast({ title: 'Error', description: String(e), variant: 'destructive' }); }
-    finally { setIsProcessing(false); }
-  };
-
-  const runForceProcessing = async () => {
-    setIsForceProcessing(true);
-    try {
-      console.log('[AdminSyncPage] Starting force-process-queue...');
-      const result = await invokeFunction('force-process-queue', { max_iterations: 100 });
-      console.log('[AdminSyncPage] Force processing result:', result);
-      toast({ 
-        title: 'Force Processing Complete', 
-        description: `Processed ${result.summary?.jobs_cleared || 0} jobs in ${result.summary?.iterations || 0} iterations` 
-      }); 
-      refetchStats();
-      refetchQueue();
-      refetchDiagnostics();
-    }
-    catch (e) { 
-      console.error('[AdminSyncPage] Force processing error:', e);
-      toast({ title: 'Error', description: String(e), variant: 'destructive' }); 
-    }
-    finally { setIsForceProcessing(false); }
-  };
-
-  const runVerification = async () => {
-    setIsVerifying(true);
-    try {
-      const result = await invokeFunction('verify-deployment');
-      console.log('Verification result:', result);
-      toast({ 
-        title: 'Deployment Verification', 
-        description: 'Check console for detailed results',
-        duration: 10000
-      }); 
-    }
-    catch (e) { toast({ title: 'Error', description: String(e), variant: 'destructive' }); }
-    finally { setIsVerifying(false); }
-  };
-
-  const inspectJobs = async () => {
-    try {
-      const result = await invokeFunction('inspect-sync-jobs');
-      console.log('Job inspection result:', result);
-      toast({ 
-        title: 'Job Inspection', 
-        description: `Found ${result.total_jobs} total jobs. Check console for details.`,
-        duration: 10000
-      }); 
-    }
-    catch (e) { 
-      console.error('Inspect jobs error:', e);
-      toast({ title: 'Error', description: String(e), variant: 'destructive' }); 
-    }
-  };
-
-  const runCronMigration = async () => {
-    setIsVerifying(true);
-    try {
-      const result = await invokeFunction('run-cron-migration');
-      if (result.success) {
-        toast({ 
-          title: 'Cron Migration Successful!', 
-          description: 'Sync-worker will now run every 2 minutes automatically',
-          duration: 10000
+        toast({
+          title: `${DOMAIN_CONFIG[result.domain as Domain].label}`,
+          description: statusMsg,
+          variant: result.status === 'error' ? 'destructive' : 'default',
         });
-      } else {
-        toast({ 
-          title: 'Migration Needs Manual Step', 
-          description: result.message || 'Please run the SQL manually in Supabase SQL Editor',
-          variant: 'default',
-          duration: 15000
-        });
-        console.log('Migration SQL:', result.sql || 'See migration file');
       }
-      refetchDiagnostics();
-    }
-    catch (e) { 
-      toast({ 
-        title: 'Migration Failed', 
-        description: 'Please run the migration manually in Supabase SQL Editor. Check console for SQL.',
+
+      // Refresh data
+      queryClient.invalidateQueries({ queryKey: ['sync-domain-status'] });
+      queryClient.invalidateQueries({ queryKey: ['sync-logs-recent'] });
+
+    } catch (err: any) {
+      toast({
+        title: 'Sync Failed',
+        description: err.message || 'Unknown error',
         variant: 'destructive',
-        duration: 15000
       });
-      console.error('Migration error:', e);
-    }
-    finally { setIsVerifying(false); }
-  };
-
-  // These functions remain as they are, assuming they are correct
-  const syncAssets = async () => { setIsSyncingAssets(true); try { await invokeFunction('sync-assets'); toast({ title: 'Assets Sync Started' }); } catch(e) { toast({ title: 'Error', description: String(e), variant: 'destructive' }); } finally { setIsSyncingAssets(false); } };
-  const syncDailyMovers = async () => { setIsSyncingMovers(true); try { await invokeFunction('scrape-daily-movers'); toast({ title: 'Movers Sync Started' }); } catch(e) { toast({ title: 'Error', description: String(e), variant: 'destructive' }); } finally { setIsSyncingMovers(false); } };
-  const syncPosts = async () => { setIsSyncingPosts(true); try { await invokeFunction('scrape-posts'); toast({ title: 'Feed Sync Started' }); } catch(e) { toast({ title: 'Error', description: String(e), variant: 'destructive' }); } finally { setIsSyncingPosts(false); } };
-
-  const resetFailed = async () => {
-    try {
-      const { error } = await supabase
-        .from('sync_jobs') // Corrected table name
-        .update({ status: 'pending', error_message: null, retry_count: 0 })
-        .eq('status', 'failed');
-      
-      if (error) throw error;
-      toast({ title: 'Reset Successful', description: 'Failed jobs marked as pending' });
-      refetchStats();
-      refetchQueue();
-    } catch (error) {
-      toast({ title: 'Reset Failed', description: error instanceof Error ? error.message : 'Unknown error', variant: 'destructive' });
-    }
-  };
-
-  const investigateRootCause = async () => {
-    setIsInvestigating(true);
-    try {
-      const result = await invokeFunction('investigate-root-cause');
-      console.log('Root Cause Investigation:', result);
-      toast({ 
-        title: 'Investigation Complete', 
-        description: `Found ${result.database?.total_traders || 0} traders. Check console for full report.`,
-        duration: 15000
-      });
-      
-      // Log full investigation to console
-      console.group('🔍 Root Cause Investigation Report');
-      console.log('Database:', result.database);
-      console.log('Bullaware API:', result.bullaware_api);
-      console.log('Functions:', result.functions);
-      console.log('Recommendations:', result.recommendations);
-      console.groupEnd();
-    } catch (e) {
-      console.error('Investigation error:', e);
-      toast({ title: 'Investigation Failed', description: String(e), variant: 'destructive' });
     } finally {
-      setIsInvestigating(false);
+      setSyncingDomains(new Set());
     }
   };
 
-  const resetAllTraders = async () => {
-    if (!confirm('⚠️ WARNING: This will DELETE ALL traders, jobs, and holdings. Are you sure?')) {
-      return;
-    }
-    
-    setIsResetting(true);
-    try {
-      const result = await invokeFunction('reset-all-traders', { confirm: 'DELETE_ALL_TRADERS' });
-      console.log('Reset result:', result);
-      toast({ 
-        title: 'Reset Complete', 
-        description: `Deleted ${result.deleted?.traders || 0} traders. System will discover new traders automatically.`,
-        duration: 10000
-      });
-      
-      // Refresh all data
-      refetchStats();
-      refetchQueue();
-      refetchDiagnostics();
-      
-      // Trigger discovery immediately
-      setTimeout(async () => {
-        try {
-          await invokeFunction('enqueue-sync-jobs', { sync_traders: true });
-          toast({ title: 'Discovery Started', description: 'Fetching new traders from Bullaware API...' });
-        } catch (e) {
-          console.error('Auto-discovery error:', e);
-        }
-      }, 2000);
-    } catch (e) {
-      console.error('Reset error:', e);
-      toast({ title: 'Reset Failed', description: String(e), variant: 'destructive' });
-    } finally {
-      setIsResetting(false);
-    }
+  const handleSyncDomain = (domain: Domain) => {
+    triggerSync([domain]);
   };
+
+  const handleSyncAll = async () => {
+    setIsSyncingAll(true);
+    await triggerSync(['discussion_feed', 'trader_profiles', 'stock_data']);
+    setIsSyncingAll(false);
+  };
+
+  const anyRunning = domainStatuses?.some(s => s.status === 'running');
 
   return (
     <div className="max-w-7xl mx-auto space-y-8 p-6">
-      
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Sync Status</h1>
-          <p className="text-muted-foreground mt-1">Continuous trader discovery and profile synchronization</p>
+          <h1 className="text-3xl font-bold tracking-tight">Sync Dashboard</h1>
+          <p className="text-muted-foreground mt-1">
+            Monitor and control data synchronization across all domains
+          </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={investigateRootCause} disabled={isInvestigating}>
-            {isInvestigating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileText className="h-4 w-4 mr-2" />}
-            Investigate Issue
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => {
+              queryClient.invalidateQueries({ queryKey: ['sync-domain-status'] });
+              queryClient.invalidateQueries({ queryKey: ['sync-rate-limits'] });
+              queryClient.invalidateQueries({ queryKey: ['sync-logs-recent'] });
+            }}
+          >
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
           </Button>
-          <Button variant="outline" size="sm" onClick={resetAllTraders} disabled={isResetting} className="text-red-600 hover:text-red-700">
-            {isResetting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RotateCcw className="h-4 w-4 mr-2" />}
-            Reset All Data
+          <Button 
+            onClick={handleSyncAll} 
+            disabled={isSyncingAll || anyRunning}
+          >
+            {isSyncingAll ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Syncing All...
+              </>
+            ) : (
+              <>
+                <Zap className="h-4 w-4 mr-2" />
+                Sync All Now
+              </>
+            )}
           </Button>
-          {(stats?.pending ?? 0) > 100 && (
-            <Button variant="default" size="sm" onClick={runForceProcessing} disabled={isForceProcessing}>
-              {isForceProcessing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Zap className="h-4 w-4 mr-2" />}
-              Clear Backlog
-            </Button>
-          )}
         </div>
       </div>
 
+      {/* Domain Panels */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        
-        <Card className="border-t-4 border-t-blue-500 shadow-sm relative overflow-hidden">
-            <div className="absolute top-0 right-0 p-4 opacity-10"><Users className="w-24 h-24" /></div>
-            <CardHeader>
-                <CardTitle className="flex justify-between items-center">
-                    <span>Trader Profiles</span>
-                    {(isProcessing || (stats?.in_progress ?? 0) > 0) && <Loader2 className="animate-spin h-4 w-4 text-blue-500" />}
-                </CardTitle>
-                <CardDescription>Deep profile & portfolio sync</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-                <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">Queue Progress</span>
-                        <span className="font-medium">{stats?.completed || 0} / {stats?.total || 0}</span>
-                    </div>
-                    <Progress value={progressPct} className="h-2" />
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4 pt-2">
-                    <div className="space-y-1">
-                        <p className="text-xs text-muted-foreground uppercase tracking-wider">Pending</p>
-                        <p className="text-2xl font-bold text-yellow-600">{stats?.pending || 0}</p>
-                    </div>
-                    <div className="space-y-1">
-                        <p className="text-xs text-muted-foreground uppercase tracking-wider">Total Traders</p>
-                        <p className="text-2xl font-bold text-blue-600">{traderCount || 0}</p>
-                    </div>
-                </div>
-                
-                {diagnostics?.recommendations && diagnostics.recommendations.length > 0 && (
-                  <div className="pt-2 border-t">
-                    {diagnostics.recommendations.map((rec: any, idx: number) => (
-                      <div key={idx} className={`text-xs p-2 rounded mb-1 ${
-                        rec.severity === 'high' ? 'bg-red-50 text-red-700' :
-                        rec.severity === 'medium' ? 'bg-yellow-50 text-yellow-700' :
-                        'bg-blue-50 text-blue-700'
-                      }`}>
-                        <AlertCircle className="h-3 w-3 inline mr-1" />
-                        {rec.message}
-                      </div>
-                    ))}
-                  </div>
-                )}
-            </CardContent>
-            <CardFooter className="bg-muted/30 p-3 px-6">
-                <div className="text-xs text-muted-foreground w-full">
-                    <div className="flex justify-between items-center">
-                        <span>Last sync: {getState('trader_details')?.last_run ? formatDistanceToNow(new Date(getState('trader_details')!.last_run), { addSuffix: true }) : 'Never'}</span>
-                        <span className={diagnostics?.worker_status?.appears_active ? 'text-green-600' : 'text-yellow-600'}>
-                            {diagnostics?.worker_status?.appears_active ? '● Active' : '○ Idle'}
-                        </span>
-                    </div>
-                    <div className="mt-1 text-xs">
-                        System automatically discovers new traders and syncs profiles every 2 minutes
-                    </div>
-                </div>
-            </CardFooter>
-        </Card>
-
-        {/* These cards remain unchanged for now */}
-        <Card className="border-t-4 border-t-green-500 shadow-sm relative overflow-hidden">
-           {/* ... content ... */}
-        </Card>
-        <Card className="border-t-4 border-t-pink-500 shadow-sm relative overflow-hidden">
-           {/* ... content ... */}
-        </Card>
+        <DomainPanel
+          domain="discussion_feed"
+          status={getStatusForDomain('discussion_feed')}
+          rateLimit={undefined}
+          logs={getLogsForDomain('discussion_feed')}
+          onTriggerSync={handleSyncDomain}
+          isSyncing={syncingDomains.has('discussion_feed')}
+        />
+        <DomainPanel
+          domain="trader_profiles"
+          status={getStatusForDomain('trader_profiles')}
+          rateLimit={getRateLimitForDomain('trader_profiles')}
+          logs={getLogsForDomain('trader_profiles')}
+          onTriggerSync={handleSyncDomain}
+          isSyncing={syncingDomains.has('trader_profiles')}
+        />
+        <DomainPanel
+          domain="stock_data"
+          status={getStatusForDomain('stock_data')}
+          rateLimit={undefined}
+          logs={getLogsForDomain('stock_data')}
+          onTriggerSync={handleSyncDomain}
+          isSyncing={syncingDomains.has('stock_data')}
+        />
       </div>
 
+      {/* Recent Activity Log */}
       <Card>
         <CardHeader>
           <div className="flex justify-between items-center">
             <div>
-                <CardTitle>Active Sync Jobs</CardTitle>
-                <CardDescription>Live view of the trader synchronization jobs</CardDescription>
+              <CardTitle>Recent Sync Activity</CardTitle>
+              <CardDescription>Live log of sync operations across all domains</CardDescription>
             </div>
-            {(stats?.failed ?? 0) > 0 && (
-                <Button variant="outline" size="sm" onClick={resetFailed} className="text-red-500 hover:text-red-600">
-                  <RotateCcw className="h-3 w-3 mr-2" /> Retry {stats?.failed} Failed
-                </Button>
-            )}
+            <Badge variant="outline" className="gap-1">
+              <Timer className="h-3 w-3" />
+              Auto-refresh: 5s
+            </Badge>
           </div>
         </CardHeader>
-        <div className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Trader ID</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Retries</TableHead>
-                  <TableHead>Last Attempted</TableHead>
-                  <TableHead>Error</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {queueItems && queueItems.length > 0 ? (
-                  queueItems.map((item) => (
-                    <TableRow key={item.id}>
-                      <TableCell className="font-mono font-medium">{item.trader_id}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={
-                            item.status === 'completed' ? 'bg-green-100 text-green-700 border-green-200' :
-                            item.status === 'in_progress' ? 'bg-blue-100 text-blue-700 border-blue-200' :
-                            item.status === 'failed' ? 'bg-red-100 text-red-700 border-red-200' :
-                            'bg-gray-100 text-gray-700'
-                        }>
-                          {item.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>{item.retry_count}</TableCell>
-                      <TableCell className="text-muted-foreground text-xs">
-                        {item.last_attempted_at ? formatDistanceToNow(new Date(item.last_attempted_at), { addSuffix: true }) : '-'}
-                      </TableCell>
-                      <TableCell className="text-red-500 text-xs max-w-[300px] truncate" title={item.error_message}>
-                        {item.error_message || '-'}
-                      </TableCell>
-                    </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
-                      No active jobs. Run the 'Full Sync' to begin.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-        </div>
+        <CardContent>
+          <ScrollArea className="h-64">
+            <div className="space-y-2">
+              {recentLogs && recentLogs.length > 0 ? (
+                recentLogs.slice(0, 50).map(log => (
+                  <div 
+                    key={log.id} 
+                    className={cn(
+                      "flex items-start gap-3 p-2 rounded text-sm",
+                      log.level === 'error' && "bg-red-50 dark:bg-red-950",
+                      log.level === 'warn' && "bg-yellow-50 dark:bg-yellow-950",
+                    )}
+                  >
+                    <span className="text-muted-foreground text-xs shrink-0 w-16">
+                      {format(new Date(log.created_at), 'HH:mm:ss')}
+                    </span>
+                    <Badge 
+                      variant="outline" 
+                      className={cn("text-xs shrink-0",
+                        log.level === 'error' && "border-red-500 text-red-600",
+                        log.level === 'warn' && "border-yellow-500 text-yellow-600",
+                      )}
+                    >
+                      {log.level}
+                    </Badge>
+                    <Badge variant="secondary" className="text-xs shrink-0">
+                      {DOMAIN_CONFIG[log.domain as Domain]?.label || log.domain}
+                    </Badge>
+                    <span className="flex-1">{log.message}</span>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  No sync activity yet. Click "Sync Now" to start.
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+        </CardContent>
       </Card>
     </div>
   );
 }
-
