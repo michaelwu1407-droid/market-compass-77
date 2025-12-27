@@ -6,16 +6,12 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const MAX_ITERATIONS = 100; // Safety limit to prevent infinite loops
-const DELAY_BETWEEN_BATCHES = 2000; // 2 seconds between batches
+const MAX_ITERATIONS = 100;
+const DELAY_BETWEEN_BATCHES = 2000;
 
 serve(async (req) => {
-  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
-    return new Response(null, { 
-      status: 200,
-      headers: corsHeaders 
-    });
+    return new Response(null, { status: 200, headers: corsHeaders });
   }
 
   try {
@@ -23,15 +19,12 @@ serve(async (req) => {
     const maxIterations = body.max_iterations || MAX_ITERATIONS;
     const delayMs = body.delay_ms || DELAY_BETWEEN_BATCHES;
 
-    // Use external Supabase project for DATA operations
-    const supabase = createClient(
-      Deno.env.get("EXTERNAL_SUPABASE_URL")!,
-      Deno.env.get("EXTERNAL_SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    // Use native SUPABASE_URL - functions are deployed on this project
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     
-    // Use Lovable Cloud for FUNCTION invocations
-    const lovableSupabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const lovableAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const stats = {
       iterations: 0,
@@ -44,229 +37,68 @@ serve(async (req) => {
 
     console.log("Starting force-process-queue...");
 
-    // Get initial counts for all statuses
-    const { count: initialPending } = await supabase
-      .from('sync_jobs')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'pending');
-    
-    const { count: initialInProgress } = await supabase
-      .from('sync_jobs')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'in_progress');
-    
-    const { count: initialFailed } = await supabase
-      .from('sync_jobs')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'failed');
+    const { count: initialPending } = await supabase.from('sync_jobs').select('*', { count: 'exact', head: true }).eq('status', 'pending');
+    const { count: initialInProgress } = await supabase.from('sync_jobs').select('*', { count: 'exact', head: true }).eq('status', 'in_progress');
+    const { count: initialFailed } = await supabase.from('sync_jobs').select('*', { count: 'exact', head: true }).eq('status', 'failed');
 
     console.log(`Found ${initialPending} pending, ${initialInProgress} in_progress, ${initialFailed} failed jobs initially.`);
     
-    // If no pending jobs, try to enqueue some first
     if ((initialPending || 0) === 0 && (initialInProgress || 0) === 0) {
       console.log("No pending or in-progress jobs found. Attempting to enqueue jobs...");
       try {
-        // Call enqueue-sync-jobs on Lovable Cloud
-        const enqueueResponse = await fetch(`${lovableSupabaseUrl}/functions/v1/enqueue-sync-jobs`, {
+        const enqueueResponse = await fetch(`${supabaseUrl}/functions/v1/enqueue-sync-jobs`, {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${lovableAnonKey}`,
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Authorization': `Bearer ${supabaseAnonKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ force: true }),
         });
-        
-        const enqueueResult = enqueueResponse.ok ? await enqueueResponse.json() : null;
-        const enqueueError = enqueueResponse.ok ? null : await enqueueResponse.text();
-        if (enqueueError) {
-          console.error("Error enqueueing jobs:", enqueueError);
-        } else {
+        if (enqueueResponse.ok) {
+          const enqueueResult = await enqueueResponse.json();
           console.log("Enqueued jobs result:", enqueueResult);
-          // Re-check pending count after enqueueing
-          const { count: newPending } = await supabase
-            .from('sync_jobs')
-            .select('*', { count: 'exact', head: true })
-            .eq('status', 'pending');
-          console.log(`After enqueueing, found ${newPending} pending jobs.`);
         }
       } catch (e) {
         console.error("Exception while enqueueing:", e);
       }
     }
     
-    // Reset stuck in_progress jobs (older than 10 minutes) back to pending
     const stuckThreshold = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    const { count: resetCount } = await supabase
-      .from('sync_jobs')
-      .update({ status: 'pending', started_at: null })
-      .eq('status', 'in_progress')
-      .lt('started_at', stuckThreshold);
-    
-    if (resetCount && resetCount > 0) {
-      console.log(`Reset ${resetCount} stuck in_progress jobs back to pending`);
-    }
-    
-    // Also reset failed jobs with low retry count
-    const { count: retryCount } = await supabase
-      .from('sync_jobs')
-      .update({ status: 'pending', error_message: null, retry_count: 0 })
-      .eq('status', 'failed')
-      .lte('retry_count', 3);
-    
-    if (retryCount && retryCount > 0) {
-      console.log(`Reset ${retryCount} failed jobs back to pending for retry`);
-    }
+    await supabase.from('sync_jobs').update({ status: 'pending', started_at: null }).eq('status', 'in_progress').lt('started_at', stuckThreshold);
+    await supabase.from('sync_jobs').update({ status: 'pending', error_message: null, retry_count: 0 }).eq('status', 'failed').lte('retry_count', 3);
 
-    // Process in batches until no more pending jobs
     for (let i = 0; i < maxIterations; i++) {
       stats.iterations = i + 1;
-
-      // Call dispatch-sync-jobs on Lovable Cloud
-      console.log(`Iteration ${i + 1}: Invoking dispatch-sync-jobs on Lovable Cloud...`);
-      const dispatchResponse = await fetch(`${lovableSupabaseUrl}/functions/v1/dispatch-sync-jobs`, {
+      console.log(`Iteration ${i + 1}: Invoking dispatch-sync-jobs...`);
+      
+      const dispatchResponse = await fetch(`${supabaseUrl}/functions/v1/dispatch-sync-jobs`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${lovableAnonKey}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Authorization': `Bearer ${supabaseAnonKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
       
-      let dispatchResult = null;
-      let dispatchError = null;
-      
+      const dispatchResult = dispatchResponse.ok ? await dispatchResponse.json() : null;
       if (!dispatchResponse.ok) {
-        dispatchError = { message: `HTTP ${dispatchResponse.status}: ${await dispatchResponse.text()}` };
-      } else {
-        dispatchResult = await dispatchResponse.json();
-      }
-
-      if (dispatchError) {
-        console.error(`Error in iteration ${i + 1}:`, dispatchError);
-        const errorMessage = typeof dispatchError === 'string' ? dispatchError : (dispatchError.message || JSON.stringify(dispatchError));
-        stats.errors.push({
-          iteration: i + 1,
-          error: `dispatch-sync-jobs failed: ${errorMessage}`
-        });
-        // Stop after 3 consecutive errors to avoid wasting iterations
-        const recentErrors = stats.errors.filter(e => e.iteration > i - 2);
-        if (recentErrors.length >= 3) {
-          console.log("Too many consecutive errors, stopping to avoid wasting iterations.");
-          break;
-        }
-        // Wait a bit before retrying
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        stats.errors.push({ iteration: i + 1, error: 'dispatch failed' });
         continue;
       }
 
       const dispatched = dispatchResult?.dispatched_jobs || 0;
-      const attempted = dispatchResult?.attempted || 0;
-      const errors = dispatchResult?.errors || [];
-      const dispatchResultError = dispatchResult?.error;
-
       stats.total_dispatched += dispatched;
-      stats.total_processed += attempted;
-      
-      if (errors.length > 0) {
-        stats.errors.push(...errors);
-        console.error(`Iteration ${i + 1} errors:`, errors);
-      }
-      
-      if (dispatchResultError) {
-        stats.errors.push({ iteration: i + 1, error: dispatchResultError });
-        console.error(`Iteration ${i + 1} dispatch error:`, dispatchResultError);
-      }
+      stats.total_processed += dispatchResult?.attempted || 0;
 
-      console.log(`Iteration ${i + 1}: Dispatched ${dispatched} jobs (attempted ${attempted})${errors.length > 0 ? `, ${errors.length} errors` : ''}${dispatchResultError ? `, dispatch error: ${dispatchResultError}` : ''}`);
+      const { count: currentPending } = await supabase.from('sync_jobs').select('*', { count: 'exact', head: true }).eq('status', 'pending');
       
-      // Debug: Check why no jobs were dispatched
-      if (dispatched === 0 && attempted === 0) {
-        const { count: debugPending } = await supabase
-          .from('sync_jobs')
-          .select('*', { count: 'exact', head: true })
-          .eq('status', 'pending');
-        console.log(`[DEBUG] Iteration ${i + 1}: Found ${debugPending} pending jobs but dispatch returned 0. Dispatch result:`, JSON.stringify(dispatchResult));
-        
-        // If we have pending jobs but dispatch returned 0, try enqueueing more
-        if (debugPending && debugPending > 0 && i < 3) {
-          console.log(`[DEBUG] Attempting to enqueue more jobs since we have ${debugPending} pending but dispatch returned 0...`);
-          // Call enqueue-sync-jobs on Lovable Cloud
-          await fetch(`${lovableSupabaseUrl}/functions/v1/enqueue-sync-jobs`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${lovableAnonKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ force: true }),
-          });
-        }
-      }
-
-      // Check if there are still pending jobs
-      const { count: currentPending } = await supabase
-        .from('sync_jobs')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'pending');
-      
-      // If no jobs were dispatched AND no pending jobs remain, we're done
-      if ((dispatched === 0 || attempted === 0) && (currentPending || 0) === 0) {
-        console.log("No more pending jobs to process.");
-        break;
-      }
-      
-      // If we got errors but still have pending jobs, continue trying
-      if (dispatched === 0 && (currentPending || 0) > 0) {
-        console.log(`Still have ${currentPending} pending jobs but dispatch returned 0. Continuing...`);
-        // Don't break - keep trying
-      }
-
-      // Wait before next batch (except on last iteration)
-      if (i < maxIterations - 1 && dispatched > 0) {
-        console.log(`Waiting ${delayMs}ms before next batch...`);
-        await new Promise(resolve => setTimeout(resolve, delayMs));
-      }
+      if (dispatched === 0 && (currentPending || 0) === 0) break;
+      if (i < maxIterations - 1 && dispatched > 0) await new Promise(r => setTimeout(r, delayMs));
     }
 
-    // Get final pending count
-    const { count: finalPending } = await supabase
-      .from('sync_jobs')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'pending');
-
+    const { count: finalPending } = await supabase.from('sync_jobs').select('*', { count: 'exact', head: true }).eq('status', 'pending');
     stats.end_time = new Date().toISOString();
-
-    const summary = {
-      ...stats,
-      initial_pending: initialPending || 0,
-      initial_in_progress: initialInProgress || 0,
-      initial_failed: initialFailed || 0,
-      final_pending: finalPending || 0,
-      jobs_cleared: (initialPending || 0) - (finalPending || 0),
-      jobs_dispatched: stats.total_dispatched,
-      jobs_processed: stats.total_processed,
-      success: stats.errors.length === 0,
-      message: stats.total_dispatched === 0 
-        ? "No jobs were dispatched. This usually means there are no pending jobs in the database. Try clicking 'Discover New Traders' first to create jobs."
-        : `Processed ${stats.total_dispatched} jobs across ${stats.iterations} iterations.`
-    };
-
-    console.log("Force processing complete:", summary);
 
     return new Response(JSON.stringify({
       message: "Force processing complete",
-      summary
-    }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" }
-    });
+      summary: { ...stats, initial_pending: initialPending || 0, final_pending: finalPending || 0 }
+    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (error: any) {
-    return new Response(JSON.stringify({ 
-      error: error.message,
-      stack: error.stack 
-    }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-      status: 500
-    });
+    return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 });
   }
 });
-

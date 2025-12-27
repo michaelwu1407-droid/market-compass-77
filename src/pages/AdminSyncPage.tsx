@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { lovableCloud } from '@/lib/lovableCloud';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { toast } from '@/hooks/use-toast';
@@ -474,8 +473,8 @@ export default function AdminSyncPage() {
     setSyncingDomains(newSyncing);
 
     try {
-      // Use Lovable Cloud for function calls (edge functions are deployed there)
-      const { data, error } = await lovableCloud.functions.invoke('trigger-sync', {
+      // Use external Supabase project (edge functions are deployed there)
+      const { data, error } = await supabase.functions.invoke('trigger-sync', {
         body: { domains, triggered_by: 'manual' },
       });
 

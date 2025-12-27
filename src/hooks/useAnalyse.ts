@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query';
-import { lovableCloud } from '@/lib/lovableCloud';
+import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
 
 interface AnalyseParams {
@@ -21,8 +21,8 @@ export function useAnalyse() {
 
   return useMutation({
     mutationFn: async (params: AnalyseParams): Promise<AnalyseResult> => {
-      // Use Lovable Cloud for function invocations (where edge functions are deployed)
-      const { data, error } = await lovableCloud.functions.invoke('analyse', {
+      // Use external Supabase project for function invocations
+      const { data, error } = await supabase.functions.invoke('analyse', {
         body: params,
       });
 
