@@ -15,7 +15,6 @@ type TriggerResult = {
 };
 
 async function acquireLock(supabase: any, domain: Domain, lockHolder: string): Promise<boolean> {
-  // Try to acquire lock - only if status is idle or error, or lock is stale (> 30 min)
   const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
   
   const { data, error } = await supabase
@@ -101,11 +100,56 @@ async function logSync(supabase: any, runId: string | null, domain: Domain, leve
     });
 }
 
+async function upsertDatapoint(
+  supabase: any, 
+  runId: string, 
+  domain: Domain, 
+  key: string, 
+  label: string, 
+  valueCurrent: number, 
+  valueTotal: number | undefined = undefined,
+  status: string = 'running',
+  details?: any
+): Promise<void> {
+  // Try to update existing, if not found insert
+  const { data: existing } = await supabase
+    .from('sync_datapoints')
+    .select('id')
+    .eq('run_id', runId)
+    .eq('datapoint_key', key)
+    .single();
+
+  if (existing) {
+    await supabase
+      .from('sync_datapoints')
+      .update({ 
+        value_current: valueCurrent, 
+        value_total: valueTotal,
+        status,
+        details,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', existing.id);
+  } else {
+    await supabase
+      .from('sync_datapoints')
+      .insert({
+        run_id: runId,
+        domain,
+        datapoint_key: key,
+        datapoint_label: label,
+        value_current: valueCurrent,
+        value_total: valueTotal,
+        status,
+        details,
+      });
+  }
+}
+
 async function checkBullAwareRateLimit(supabase: any): Promise<{ allowed: boolean; remaining: number; resetAt: Date }> {
   const now = new Date();
   const oneMinuteAgo = new Date(now.getTime() - 60 * 1000);
 
-  // Get current rate limit state
   const { data } = await supabase
     .from('sync_rate_limits')
     .select('*')
@@ -118,7 +162,6 @@ async function checkBullAwareRateLimit(supabase: any): Promise<{ allowed: boolea
 
   const minuteStart = new Date(data.minute_started_at);
   
-  // Reset counter if minute has passed
   if (minuteStart < oneMinuteAgo) {
     await supabase
       .from('sync_rate_limits')
@@ -142,54 +185,42 @@ async function checkBullAwareRateLimit(supabase: any): Promise<{ allowed: boolea
   };
 }
 
-async function incrementBullAwareCounter(supabase: any): Promise<void> {
-  await supabase.rpc('increment_rate_limit', { limit_id: 'bullaware' }).catch(() => {
-    // Fallback if RPC doesn't exist
-    supabase
-      .from('sync_rate_limits')
-      .update({ requests_this_minute: supabase.sql`requests_this_minute + 1` })
-      .eq('id', 'bullaware');
-  });
-  
-  // Direct update as fallback
-  const { data } = await supabase
-    .from('sync_rate_limits')
-    .select('requests_this_minute')
-    .eq('id', 'bullaware')
-    .single();
-  
-  if (data) {
-    await supabase
-      .from('sync_rate_limits')
-      .update({ requests_this_minute: (data.requests_this_minute || 0) + 1 })
-      .eq('id', 'bullaware');
-  }
-}
-
 async function runDiscussionFeedSync(supabase: any, runId: string): Promise<void> {
   const domain: Domain = 'discussion_feed';
   
   try {
+    // Stage 1: Fetch eToro data
     await updateProgress(supabase, domain, { 
       current_stage: 'Fetching eToro feed',
       items_completed: 0,
     });
+    await upsertDatapoint(supabase, runId, domain, 'fetch_etoro', 'Fetch eToro Posts', 0, undefined, 'running');
     await logSync(supabase, runId, domain, 'info', 'Starting eToro feed fetch');
 
-    // Invoke scrape-posts function
     const { data, error } = await supabase.functions.invoke('scrape-posts');
     
     if (error) throw error;
 
+    const postsScraped = data?.posts_scraped || 0;
+    const postsProcessed = data?.posts_processed || 0;
+    const postsInserted = data?.posts_inserted || 0;
+
+    // Update datapoints
+    await upsertDatapoint(supabase, runId, domain, 'fetch_etoro', 'Fetch eToro Posts', postsScraped, postsScraped, 'completed');
+    await upsertDatapoint(supabase, runId, domain, 'parse_posts', 'Parse & Transform', postsProcessed, postsScraped, 'completed');
+    await upsertDatapoint(supabase, runId, domain, 'write_db', 'Write to Database', postsInserted, postsProcessed, 'completed');
+    await upsertDatapoint(supabase, runId, domain, 'deduped', 'Duplicates Skipped', postsProcessed - postsInserted, postsProcessed - postsInserted, 'completed');
+
     await updateProgress(supabase, domain, {
-      current_stage: 'Processing complete',
-      items_completed: data?.posts_inserted || 0,
-      items_total: data?.posts_scraped || 0,
+      current_stage: 'Complete',
+      items_completed: postsInserted,
+      items_total: postsScraped,
     });
     
-    await logSync(supabase, runId, domain, 'info', `Completed: ${data?.posts_inserted || 0} posts inserted`, data);
+    await logSync(supabase, runId, domain, 'info', `Completed: ${postsInserted} posts inserted`, data);
 
   } catch (err: any) {
+    await upsertDatapoint(supabase, runId, domain, 'fetch_etoro', 'Fetch eToro Posts', 0, undefined, 'error', { error: err.message });
     await logSync(supabase, runId, domain, 'error', err.message || 'Unknown error');
     throw err;
   }
@@ -208,35 +239,62 @@ async function runTraderProfilesSync(supabase: any, runId: string): Promise<void
         current_stage: `Rate limited - resets at ${rateLimit.resetAt.toISOString()}`,
         eta_seconds: Math.ceil((rateLimit.resetAt.getTime() - Date.now()) / 1000),
       });
+      await upsertDatapoint(supabase, runId, domain, 'rate_limit', 'Rate Limit Status', 0, rateLimit.remaining, 'rate_limited');
       await logSync(supabase, runId, domain, 'warn', 'Rate limited by BullAware API');
       return;
     }
 
-    await updateProgress(supabase, domain, {
-      current_stage: 'Processing sync queue',
-      items_completed: 0,
-    });
-
-    // Get pending job count
+    // Get queue stats
     const { count: pendingCount } = await supabase
       .from('sync_jobs')
       .select('*', { count: 'exact', head: true })
       .eq('status', 'pending');
 
+    const { count: inProgressCount } = await supabase
+      .from('sync_jobs')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'in_progress');
+
+    const { count: completedCount } = await supabase
+      .from('sync_jobs')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'completed');
+
+    const { count: failedCount } = await supabase
+      .from('sync_jobs')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'failed');
+
+    // Update datapoints with queue status
+    await upsertDatapoint(supabase, runId, domain, 'jobs_pending', 'Jobs Pending', pendingCount || 0, undefined, 'info');
+    await upsertDatapoint(supabase, runId, domain, 'jobs_in_progress', 'Jobs In Progress', inProgressCount || 0, undefined, 'running');
+    await upsertDatapoint(supabase, runId, domain, 'jobs_completed', 'Jobs Completed', completedCount || 0, undefined, 'completed');
+    await upsertDatapoint(supabase, runId, domain, 'jobs_failed', 'Jobs Failed', failedCount || 0, undefined, failedCount > 0 ? 'error' : 'completed');
+    await upsertDatapoint(supabase, runId, domain, 'rate_limit', 'API Requests (last min)', 10 - rateLimit.remaining, 10, 'info');
+
     await updateProgress(supabase, domain, {
+      current_stage: 'Processing sync queue',
       items_total: pendingCount || 0,
+      items_completed: 0,
     });
 
     await logSync(supabase, runId, domain, 'info', `Starting trader sync: ${pendingCount} jobs pending`);
 
-    // Invoke dispatch-sync-jobs (processes batch respecting rate limits)
-    await incrementBullAwareCounter(supabase);
+    // Invoke dispatch-sync-jobs
     const { data, error } = await supabase.functions.invoke('dispatch-sync-jobs');
     
     if (error) throw error;
 
     const processed = data?.dispatched_jobs || 0;
+    const errors = data?.errors || [];
     
+    // Update datapoints after processing
+    await upsertDatapoint(supabase, runId, domain, 'batch_processed', 'Batch Processed', processed, data?.attempted || processed, 'completed');
+    
+    if (errors.length > 0) {
+      await upsertDatapoint(supabase, runId, domain, 'batch_errors', 'Batch Errors', errors.length, undefined, 'error', { errors });
+    }
+
     await updateProgress(supabase, domain, {
       current_stage: 'Batch complete',
       items_completed: processed,
@@ -244,6 +302,8 @@ async function runTraderProfilesSync(supabase: any, runId: string): Promise<void
 
     // Update rate limit info
     const newRateLimit = await checkBullAwareRateLimit(supabase);
+    await upsertDatapoint(supabase, runId, domain, 'rate_limit', 'API Requests (last min)', 10 - newRateLimit.remaining, 10, 'info');
+    
     await updateProgress(supabase, domain, {
       eta_seconds: newRateLimit.remaining > 0 ? null : Math.ceil((newRateLimit.resetAt.getTime() - Date.now()) / 1000),
     });
@@ -251,6 +311,7 @@ async function runTraderProfilesSync(supabase: any, runId: string): Promise<void
     await logSync(supabase, runId, domain, 'info', `Processed ${processed} trader jobs`, data);
 
   } catch (err: any) {
+    await upsertDatapoint(supabase, runId, domain, 'dispatch', 'Dispatch Jobs', 0, undefined, 'error', { error: err.message });
     await logSync(supabase, runId, domain, 'error', err.message || 'Unknown error');
     throw err;
   }
@@ -260,40 +321,79 @@ async function runStockDataSync(supabase: any, runId: string): Promise<void> {
   const domain: Domain = 'stock_data';
   
   try {
+    // Stage 1: Sync from BullAware
     await updateProgress(supabase, domain, {
       current_stage: 'Syncing assets from BullAware',
       items_completed: 0,
     });
+    await upsertDatapoint(supabase, runId, domain, 'sync_bullaware', 'Sync from BullAware', 0, undefined, 'running');
     await logSync(supabase, runId, domain, 'info', 'Starting stock data sync');
 
-    // Invoke sync-assets
     const { data: assetsData, error: assetsError } = await supabase.functions.invoke('sync-assets');
     
     if (assetsError) throw assetsError;
 
+    const syncedCount = assetsData?.synced || 0;
+    await upsertDatapoint(supabase, runId, domain, 'sync_bullaware', 'Sync from BullAware', syncedCount, syncedCount, 'completed');
+    
     await updateProgress(supabase, domain, {
       current_stage: 'Enriching with Yahoo Finance',
-      items_completed: assetsData?.synced || 0,
+      items_completed: syncedCount,
     });
 
-    await logSync(supabase, runId, domain, 'info', `Synced ${assetsData?.synced || 0} assets`, assetsData);
+    await logSync(supabase, runId, domain, 'info', `Synced ${syncedCount} assets`, assetsData);
 
-    // Invoke enrich-assets-yahoo
+    // Stage 2: Enrich with Yahoo Finance
+    await upsertDatapoint(supabase, runId, domain, 'enrich_yahoo', 'Enrich with Yahoo', 0, undefined, 'running');
+    
     const { data: enrichData, error: enrichError } = await supabase.functions.invoke('enrich-assets-yahoo');
     
     if (enrichError) {
+      await upsertDatapoint(supabase, runId, domain, 'enrich_yahoo', 'Enrich with Yahoo', 0, undefined, 'error', { error: enrichError.message });
       await logSync(supabase, runId, domain, 'warn', 'Yahoo enrichment failed', enrichError);
     } else {
-      await logSync(supabase, runId, domain, 'info', `Enriched ${enrichData?.enriched || 0} assets`, enrichData);
+      const enrichedCount = enrichData?.enriched || 0;
+      const remainingCount = enrichData?.remaining || 0;
+      
+      await upsertDatapoint(supabase, runId, domain, 'enrich_yahoo', 'Enrich with Yahoo', enrichedCount, enrichedCount + remainingCount, 'completed');
+      await upsertDatapoint(supabase, runId, domain, 'yahoo_remaining', 'Yahoo Remaining', remainingCount, undefined, remainingCount > 0 ? 'pending' : 'completed');
+      
+      await logSync(supabase, runId, domain, 'info', `Enriched ${enrichedCount} assets`, enrichData);
     }
+
+    // Get overall stats
+    const { count: totalAssets } = await supabase
+      .from('assets')
+      .select('*', { count: 'exact', head: true });
+
+    const { count: stocksCount } = await supabase
+      .from('assets')
+      .select('*', { count: 'exact', head: true })
+      .eq('asset_type', 'stock');
+
+    const { count: cryptoCount } = await supabase
+      .from('assets')
+      .select('*', { count: 'exact', head: true })
+      .eq('asset_type', 'crypto');
+
+    const { count: etfCount } = await supabase
+      .from('assets')
+      .select('*', { count: 'exact', head: true })
+      .eq('asset_type', 'etf');
+
+    await upsertDatapoint(supabase, runId, domain, 'total_assets', 'Total Assets', totalAssets || 0, undefined, 'info');
+    await upsertDatapoint(supabase, runId, domain, 'stocks', 'Stocks', stocksCount || 0, undefined, 'info');
+    await upsertDatapoint(supabase, runId, domain, 'crypto', 'Crypto', cryptoCount || 0, undefined, 'info');
+    await upsertDatapoint(supabase, runId, domain, 'etfs', 'ETFs', etfCount || 0, undefined, 'info');
 
     await updateProgress(supabase, domain, {
       current_stage: 'Complete',
-      items_completed: (assetsData?.synced || 0) + (enrichData?.enriched || 0),
-      items_total: (assetsData?.synced || 0) + (enrichData?.remaining || 0) + (enrichData?.enriched || 0),
+      items_completed: syncedCount + (enrichData?.enriched || 0),
+      items_total: totalAssets || 0,
     });
 
   } catch (err: any) {
+    await upsertDatapoint(supabase, runId, domain, 'sync_bullaware', 'Sync from BullAware', 0, undefined, 'error', { error: err.message });
     await logSync(supabase, runId, domain, 'error', err.message || 'Unknown error');
     throw err;
   }
@@ -315,6 +415,8 @@ serve(async (req) => {
     const triggeredBy = body.triggered_by || 'manual';
     const lockHolder = `trigger-${Date.now()}`;
 
+    console.log(`trigger-sync called for domains: ${domains.join(', ')} by ${triggeredBy}`);
+
     const results: TriggerResult[] = [];
 
     for (const domain of domains) {
@@ -322,7 +424,6 @@ serve(async (req) => {
       const lockAcquired = await acquireLock(supabase, domain, lockHolder);
 
       if (!lockAcquired) {
-        // Check if already running or queued
         const { data: status } = await supabase
           .from('sync_domain_status')
           .select('status, lock_holder')
@@ -340,7 +441,6 @@ serve(async (req) => {
       }
 
       try {
-        // Create run record
         const runId = await createRun(supabase, domain, triggeredBy);
 
         await updateProgress(supabase, domain, {
@@ -359,8 +459,8 @@ serve(async (req) => {
           run_id: runId,
         });
 
-        // Run the sync in background
-        (async () => {
+        // Run sync in background using EdgeRuntime.waitUntil
+        const syncPromise = (async () => {
           try {
             switch (domain) {
               case 'discussion_feed':
@@ -381,11 +481,22 @@ serve(async (req) => {
               last_successful_run_id: runId,
               last_successful_at: new Date().toISOString(),
             });
+            
+            console.log(`Sync completed successfully for ${domain}`);
           } catch (err: any) {
+            console.error(`Sync failed for ${domain}:`, err);
             await completeRun(supabase, runId, 'error', err.message);
             await releaseLock(supabase, domain, 'error', err.message);
           }
         })();
+
+        // Use EdgeRuntime.waitUntil if available for true background processing
+        if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) {
+          EdgeRuntime.waitUntil(syncPromise);
+        } else {
+          // Fallback: don't await, let it run
+          syncPromise.catch(console.error);
+        }
 
       } catch (err: any) {
         await releaseLock(supabase, domain, 'error', err.message);
@@ -415,3 +526,6 @@ serve(async (req) => {
     });
   }
 });
+
+// Declare EdgeRuntime type for TypeScript
+declare const EdgeRuntime: { waitUntil?: (promise: Promise<any>) => void } | undefined;

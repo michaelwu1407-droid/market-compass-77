@@ -59,3 +59,36 @@ verify_jwt = false
 
 [functions.inspect-sync-jobs]
 verify_jwt = false
+
+[functions.trigger-sync]
+verify_jwt = false
+
+[functions.dispatch-sync-jobs]
+verify_jwt = false
+
+[functions.process-sync-job]
+verify_jwt = false
+
+[functions.force-enqueue-all]
+verify_jwt = false
+
+[functions.aum-calculation]
+verify_jwt = false
+
+[functions.check-system-health]
+verify_jwt = false
+
+[functions.fetch-market-movers]
+verify_jwt = false
+
+[functions.inspect-db]
+verify_jwt = false
+
+[functions.investigate-root-cause]
+verify_jwt = false
+
+[functions.reset-all-traders]
+verify_jwt = false
+
+[functions.test-sync-flow]
+verify_jwt = false

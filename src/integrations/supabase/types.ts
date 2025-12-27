@@ -498,6 +498,56 @@ export type Database = {
           },
         ]
       }
+      sync_datapoints: {
+        Row: {
+          created_at: string | null
+          datapoint_key: string
+          datapoint_label: string
+          details: Json | null
+          domain: string
+          id: string
+          run_id: string | null
+          status: string | null
+          updated_at: string | null
+          value_current: number | null
+          value_total: number | null
+        }
+        Insert: {
+          created_at?: string | null
+          datapoint_key: string
+          datapoint_label: string
+          details?: Json | null
+          domain: string
+          id?: string
+          run_id?: string | null
+          status?: string | null
+          updated_at?: string | null
+          value_current?: number | null
+          value_total?: number | null
+        }
+        Update: {
+          created_at?: string | null
+          datapoint_key?: string
+          datapoint_label?: string
+          details?: Json | null
+          domain?: string
+          id?: string
+          run_id?: string | null
+          status?: string | null
+          updated_at?: string | null
+          value_current?: number | null
+          value_total?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sync_datapoints_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "sync_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sync_domain_status: {
         Row: {
           created_at: string | null
@@ -1111,6 +1161,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      increment_rate_limit: { Args: { limit_id: string }; Returns: undefined }
     }
     Enums: {
       app_role: "admin" | "user"
