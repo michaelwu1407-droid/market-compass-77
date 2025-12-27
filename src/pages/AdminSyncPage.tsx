@@ -6,7 +6,7 @@ import { toast } from '@/hooks/use-toast';
 import { 
   Loader2, Play, CheckCircle2, XCircle, Clock, AlertCircle, 
   Zap, MessageSquare, Users, TrendingUp, RefreshCw, ChevronDown, ChevronUp,
-  Gauge, AlertTriangle, Circle, Pause
+  Gauge, AlertTriangle, Circle, Pause, Trash2
 } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Badge } from "@/components/ui/badge";
@@ -236,8 +236,10 @@ function DomainPanel({
   datapoints,
   onTriggerSync,
   onClearLock,
+  onClearData,
   isSyncing,
   isClearing,
+  isClearingData,
 }: {
   domain: Domain;
   status: DomainStatus | undefined;
@@ -246,8 +248,10 @@ function DomainPanel({
   datapoints: SyncDatapoint[];
   onTriggerSync: (domain: Domain) => void;
   onClearLock: (domain: Domain) => void;
+  onClearData: (domain: Domain) => void;
   isSyncing: boolean;
   isClearing: boolean;
+  isClearingData: boolean;
 }) {
   const [logsOpen, setLogsOpen] = useState(false);
   const config = DOMAIN_CONFIG[domain];
@@ -455,12 +459,12 @@ function DomainPanel({
         )}
       </CardContent>
 
-      <CardFooter className="bg-muted/30 p-3 px-6">
+      <CardFooter className="bg-muted/30 p-3 px-6 flex gap-2">
         <Button 
           onClick={() => onTriggerSync(domain)} 
           disabled={isSyncing || currentStatus === 'running'}
           size="sm"
-          className="w-full"
+          className="flex-1"
         >
           {isSyncing || currentStatus === 'running' ? (
             <>
@@ -474,6 +478,19 @@ function DomainPanel({
             </>
           )}
         </Button>
+        <Button 
+          onClick={() => onClearData(domain)} 
+          disabled={isClearingData || currentStatus === 'running'}
+          size="sm"
+          variant="outline"
+          className="shrink-0"
+        >
+          {isClearingData ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Trash2 className="h-4 w-4" />
+          )}
+        </Button>
       </CardFooter>
     </Card>
   );
@@ -482,6 +499,7 @@ function DomainPanel({
 export default function AdminSyncPage() {
   const [syncingDomains, setSyncingDomains] = useState<Set<Domain>>(new Set());
   const [clearingDomains, setClearingDomains] = useState<Set<Domain>>(new Set());
+  const [clearingDataDomains, setClearingDataDomains] = useState<Set<Domain>>(new Set());
   const [isSyncingAll, setIsSyncingAll] = useState(false);
   const queryClient = useQueryClient();
 
@@ -654,6 +672,42 @@ export default function AdminSyncPage() {
     }
   };
 
+  // Handle clearing sync data
+  const handleClearData = async (domain: Domain) => {
+    const newClearing = new Set(clearingDataDomains);
+    newClearing.add(domain);
+    setClearingDataDomains(newClearing);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('clear-sync-data', {
+        body: { domain },
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: `Cleared sync data for ${DOMAIN_CONFIG[domain].label}`,
+        description: 'All datapoints, runs, and logs have been cleared',
+      });
+
+      // Refresh data
+      queryClient.invalidateQueries({ queryKey: ['sync-domain-status'] });
+      queryClient.invalidateQueries({ queryKey: ['sync-logs-recent'] });
+      queryClient.invalidateQueries({ queryKey: ['sync-datapoints'] });
+
+    } catch (err: any) {
+      toast({
+        title: 'Failed to clear sync data',
+        description: err.message || 'Unknown error',
+        variant: 'destructive',
+      });
+    } finally {
+      const updated = new Set(clearingDataDomains);
+      updated.delete(domain);
+      setClearingDataDomains(updated);
+    }
+  };
+
   const anyRunning = domainStatuses?.some(s => s.status === 'running');
 
   return (
@@ -709,8 +763,10 @@ export default function AdminSyncPage() {
           datapoints={getDatapointsForDomain('discussion_feed')}
           onTriggerSync={handleSyncDomain}
           onClearLock={handleClearLock}
+          onClearData={handleClearData}
           isSyncing={syncingDomains.has('discussion_feed')}
           isClearing={clearingDomains.has('discussion_feed')}
+          isClearingData={clearingDataDomains.has('discussion_feed')}
         />
         <DomainPanel
           domain="trader_profiles"
@@ -720,8 +776,10 @@ export default function AdminSyncPage() {
           datapoints={getDatapointsForDomain('trader_profiles')}
           onTriggerSync={handleSyncDomain}
           onClearLock={handleClearLock}
+          onClearData={handleClearData}
           isSyncing={syncingDomains.has('trader_profiles')}
           isClearing={clearingDomains.has('trader_profiles')}
+          isClearingData={clearingDataDomains.has('trader_profiles')}
         />
         <DomainPanel
           domain="stock_data"
@@ -731,8 +789,10 @@ export default function AdminSyncPage() {
           datapoints={getDatapointsForDomain('stock_data')}
           onTriggerSync={handleSyncDomain}
           onClearLock={handleClearLock}
+          onClearData={handleClearData}
           isSyncing={syncingDomains.has('stock_data')}
           isClearing={clearingDomains.has('stock_data')}
+          isClearingData={clearingDataDomains.has('stock_data')}
         />
       </div>
 
