@@ -32,8 +32,11 @@ interface DomainStatus {
   last_error_message: string | null;
   last_error_at: string | null;
   lock_holder: string | null;
+  lock_acquired_at: string | null; // Added for stale lock detection
   updated_at: string;
 }
+
+const LOCK_TTL_MINUTES = 5; // Must match backend
 
 interface RateLimitInfo {
   id: string;
@@ -156,14 +159,85 @@ function DatapointRow({ datapoint }: { datapoint: SyncDatapoint }) {
   );
 }
 
-function DomainPanel({ 
+// Stale Lock Warning Component
+function StaleLockWarning({ 
+  status, 
+  onClearLock, 
+  isClearing 
+}: { 
+  status: DomainStatus; 
+  onClearLock: () => void; 
+  isClearing: boolean;
+}) {
+  if (status.status !== 'running') return null;
+  
+  const lockAcquiredAt = status.lock_acquired_at;
+  const lockAgeMinutes = lockAcquiredAt 
+    ? Math.floor((Date.now() - new Date(lockAcquiredAt).getTime()) / 60000)
+    : 0;
+  const isStale = lockAgeMinutes > LOCK_TTL_MINUTES;
+  
+  if (!isStale) {
+    // Fresh lock - just show info
+    return (
+      <div className="p-3 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg">
+        <div className="flex items-center gap-2">
+          <Loader2 className="h-4 w-4 text-blue-600 animate-spin" />
+          <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+            Running by {status.lock_holder || 'unknown'}
+          </span>
+          <span className="text-xs text-blue-500">
+            ({lockAgeMinutes} min ago)
+          </span>
+        </div>
+      </div>
+    );
+  }
+  
+  // Stale lock - show warning with clear button
+  return (
+    <div className="p-3 bg-yellow-50 dark:bg-yellow-950 border border-yellow-400 dark:border-yellow-700 rounded-lg">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 text-yellow-600" />
+          <div>
+            <span className="text-sm font-medium text-yellow-700 dark:text-yellow-300">
+              Stale lock detected
+            </span>
+            <p className="text-xs text-yellow-600 dark:text-yellow-400">
+              Held by {status.lock_holder || 'unknown'} for {lockAgeMinutes} min (TTL: {LOCK_TTL_MINUTES} min)
+            </p>
+          </div>
+        </div>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          onClick={onClearLock}
+          disabled={isClearing}
+          className="shrink-0 border-yellow-500 text-yellow-700 hover:bg-yellow-100 dark:hover:bg-yellow-900"
+        >
+          {isClearing ? (
+            <Loader2 className="h-3 w-3 animate-spin mr-1" />
+          ) : (
+            <XCircle className="h-3 w-3 mr-1" />
+          )}
+          Clear Lock
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function DomainPanel({
   domain, 
   status, 
   rateLimit,
   logs,
   datapoints,
   onTriggerSync,
+  onClearLock,
   isSyncing,
+  isClearing,
 }: {
   domain: Domain;
   status: DomainStatus | undefined;
@@ -171,7 +245,9 @@ function DomainPanel({
   logs: SyncLog[];
   datapoints: SyncDatapoint[];
   onTriggerSync: (domain: Domain) => void;
+  onClearLock: (domain: Domain) => void;
   isSyncing: boolean;
+  isClearing: boolean;
 }) {
   const [logsOpen, setLogsOpen] = useState(false);
   const config = DOMAIN_CONFIG[domain];
@@ -217,6 +293,15 @@ function DomainPanel({
       </CardHeader>
 
       <CardContent className="space-y-4">
+        {/* Stale Lock Warning */}
+        {status && (
+          <StaleLockWarning 
+            status={status} 
+            onClearLock={() => onClearLock(domain)} 
+            isClearing={isClearing} 
+          />
+        )}
+
         {/* Progress bar for running status */}
         {currentStatus === 'running' && status?.items_total && status.items_total > 0 && (
           <div className="space-y-2">
@@ -396,6 +481,7 @@ function DomainPanel({
 
 export default function AdminSyncPage() {
   const [syncingDomains, setSyncingDomains] = useState<Set<Domain>>(new Set());
+  const [clearingDomains, setClearingDomains] = useState<Set<Domain>>(new Set());
   const [isSyncingAll, setIsSyncingAll] = useState(false);
   const queryClient = useQueryClient();
 
@@ -522,6 +608,52 @@ export default function AdminSyncPage() {
     setIsSyncingAll(false);
   };
 
+  // Handle clearing stale locks
+  const handleClearLock = async (domain: Domain) => {
+    const newClearing = new Set(clearingDomains);
+    newClearing.add(domain);
+    setClearingDomains(newClearing);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('clear-stale-locks', {
+        body: { domains: [domain], cleared_by: 'admin' },
+      });
+
+      if (error) throw error;
+
+      const cleared = data?.cleared || [];
+      const skipped = data?.skipped || [];
+
+      if (cleared.length > 0) {
+        toast({
+          title: `Lock cleared for ${DOMAIN_CONFIG[domain].label}`,
+          description: `Was held by ${cleared[0].lock_holder} for ${cleared[0].age_minutes} min`,
+        });
+      } else if (skipped.length > 0) {
+        toast({
+          title: 'Lock not cleared',
+          description: skipped[0].reason,
+          variant: 'destructive',
+        });
+      }
+
+      // Refresh data
+      queryClient.invalidateQueries({ queryKey: ['sync-domain-status'] });
+      queryClient.invalidateQueries({ queryKey: ['sync-logs-recent'] });
+
+    } catch (err: any) {
+      toast({
+        title: 'Failed to clear lock',
+        description: err.message || 'Unknown error',
+        variant: 'destructive',
+      });
+    } finally {
+      const updated = new Set(clearingDomains);
+      updated.delete(domain);
+      setClearingDomains(updated);
+    }
+  };
+
   const anyRunning = domainStatuses?.some(s => s.status === 'running');
 
   return (
@@ -576,7 +708,9 @@ export default function AdminSyncPage() {
           logs={getLogsForDomain('discussion_feed')}
           datapoints={getDatapointsForDomain('discussion_feed')}
           onTriggerSync={handleSyncDomain}
+          onClearLock={handleClearLock}
           isSyncing={syncingDomains.has('discussion_feed')}
+          isClearing={clearingDomains.has('discussion_feed')}
         />
         <DomainPanel
           domain="trader_profiles"
@@ -585,7 +719,9 @@ export default function AdminSyncPage() {
           logs={getLogsForDomain('trader_profiles')}
           datapoints={getDatapointsForDomain('trader_profiles')}
           onTriggerSync={handleSyncDomain}
+          onClearLock={handleClearLock}
           isSyncing={syncingDomains.has('trader_profiles')}
+          isClearing={clearingDomains.has('trader_profiles')}
         />
         <DomainPanel
           domain="stock_data"
@@ -594,7 +730,9 @@ export default function AdminSyncPage() {
           logs={getLogsForDomain('stock_data')}
           datapoints={getDatapointsForDomain('stock_data')}
           onTriggerSync={handleSyncDomain}
+          onClearLock={handleClearLock}
           isSyncing={syncingDomains.has('stock_data')}
+          isClearing={clearingDomains.has('stock_data')}
         />
       </div>
 

@@ -92,3 +92,6 @@ verify_jwt = false
 
 [functions.test-sync-flow]
 verify_jwt = false
+
+[functions.clear-stale-locks]
+verify_jwt = false
