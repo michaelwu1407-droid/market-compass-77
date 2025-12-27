@@ -227,6 +227,7 @@ export type Database = {
           content: string
           created_at: string | null
           etoro_post_id: string | null
+          etoro_username: string | null
           id: string
           likes: number | null
           mentioned_symbols: string[] | null
@@ -242,6 +243,7 @@ export type Database = {
           content: string
           created_at?: string | null
           etoro_post_id?: string | null
+          etoro_username?: string | null
           id?: string
           likes?: number | null
           mentioned_symbols?: string[] | null
@@ -257,6 +259,7 @@ export type Database = {
           content?: string
           created_at?: string | null
           etoro_post_id?: string | null
+          etoro_username?: string | null
           id?: string
           likes?: number | null
           mentioned_symbols?: string[] | null
@@ -616,6 +619,50 @@ export type Database = {
             columns: ["last_successful_run_id"]
             isOneToOne: false
             referencedRelation: "sync_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sync_jobs: {
+        Row: {
+          completed_at: string | null
+          created_at: string | null
+          error_message: string | null
+          id: string
+          result: Json | null
+          retry_count: number | null
+          started_at: string | null
+          status: string
+          trader_id: string | null
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          result?: Json | null
+          retry_count?: number | null
+          started_at?: string | null
+          status?: string
+          trader_id?: string | null
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          result?: Json | null
+          retry_count?: number | null
+          started_at?: string | null
+          status?: string
+          trader_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sync_jobs_trader_id_fkey"
+            columns: ["trader_id"]
+            isOneToOne: false
+            referencedRelation: "traders"
             referencedColumns: ["id"]
           },
         ]

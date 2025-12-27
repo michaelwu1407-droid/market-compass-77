@@ -216,7 +216,7 @@ async function upsertDatapoint(
     .select('id')
     .eq('run_id', runId)
     .eq('datapoint_key', key)
-    .single();
+    .maybeSingle();
 
   if (existing) {
     await supabase
