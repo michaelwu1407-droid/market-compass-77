@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-      console.log('[trigger-sync] req.json() threw:', (e as Error)?.message || e);
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
 type Domain = 'discussion_feed' | 'trader_profiles' | 'stock_data';
@@ -14,7 +14,6 @@ type LockResult = {
   acquired: boolean;
   reason: 'success' | 'already_running' | 'stale_cleared' | 'row_initialized' | 'error';
   lockHolder?: string;
-        console.log('[trigger-sync] req.text() failed:', (e as Error)?.message || e);
   lockAgeMinutes?: number;
   message?: string;
 };
@@ -590,7 +589,7 @@ serve(async (req) => {
 
   try {
     // Use native SUPABASE_URL - functions are deployed on this project
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? new URL(req.url).origin;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
     

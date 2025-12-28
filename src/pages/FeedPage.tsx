@@ -78,6 +78,12 @@ export default function FeedPage() {
   const feedItems: FeedItem[] = useMemo(() => (posts || [])
     .filter(post => isValidPostContent(post.content))
     .map((post) => {
+      const displayName = post.traders?.display_name || '';
+      const nameParts = displayName.split(' ').filter(Boolean);
+      const poster_first = nameParts[0] || '';
+      const poster_last = nameParts.slice(1).join(' ');
+      const poster_avatar = post.traders?.avatar_url || '';
+
       const mappedTrader: FeedTrader | undefined = post.traders ? {
         id: post.traders.id,
         etoro_trader_id: post.traders.etoro_username,
@@ -124,10 +130,10 @@ export default function FeedPage() {
         comment_count: post.comments ?? 0,
         likes: post.likes,
         comments: post.comments,
-        poster_id: post.poster_id,
-        poster_first: post.poster_first,
-        poster_last: post.poster_last,
-        poster_avatar: post.poster_avatar,
+        poster_id: post.traders?.id ?? post.trader_id ?? null,
+        poster_first,
+        poster_last,
+        poster_avatar,
         raw_json: {},
         trader: mappedTrader,
       };

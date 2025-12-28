@@ -76,6 +76,16 @@ export interface Post {
   id: string;
   source: 'etoro';
   source_post_id: string;
+  // DB-aligned fields (optional; the feed maps DB rows into this UI shape)
+  content?: string;
+  asset_ids?: string[] | null;
+  mentioned_symbols?: string[] | null;
+  shares?: number | null;
+  sentiment?: string | null;
+  etoro_post_id?: string | null;
+  posted_at?: string | null;
+  etoro_username?: string | null;
+
   trader_id: string | null;
   asset_id: string | null;
   text: string;

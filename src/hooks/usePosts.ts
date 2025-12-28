@@ -13,10 +13,9 @@ export function usePosts() {
       const { data, error } = await supabase
         .from('posts')
         .select(
-          `id, content, posted_at, created_at, trader_id,
-           poster_id, poster_first, poster_last, poster_avatar,
-           likes, comments,
-           etoro_post_id, etoro_username,
+          `id, trader_id, content, asset_ids, mentioned_symbols,
+           likes, comments, shares, sentiment, source,
+           etoro_post_id, posted_at, created_at, etoro_username,
            traders(*)`
         )
         .order('posted_at', { ascending: false })
