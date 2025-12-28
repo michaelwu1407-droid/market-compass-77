@@ -32,6 +32,13 @@ function firstNumber(candidates: any[]): number {
     if (typeof v === 'number' && Number.isFinite(v)) {
       return v;
     }
+    if (typeof v === 'string') {
+      const trimmed = v.trim();
+      if (trimmed.length > 0 && /^-?\d+(\.\d+)?$/.test(trimmed)) {
+        const parsed = Number(trimmed);
+        if (Number.isFinite(parsed)) return parsed;
+      }
+    }
   }
   return 0;
 }
@@ -172,9 +179,22 @@ serve(async (req) => {
       // Poster info (if available)
       let poster_username = row.etoro_username || postObj?.post?.owner?.username || 'unknown';
       let poster_id = postObj?.post?.owner?.id || null;
-      let poster_first = postObj?.post?.owner?.firstName || '';
-      let poster_last = postObj?.post?.owner?.lastName || '';
-      let poster_avatar = postObj?.post?.owner?.avatar?.large || postObj?.post?.owner?.avatar?.medium || postObj?.post?.owner?.avatar?.small || '';
+      let poster_first = postObj?.post?.owner?.firstName
+        || postObj?.post?.owner?.first_name
+        || postObj?.post?.owner?.firstname
+        || poster_username
+        || '';
+      let poster_last = postObj?.post?.owner?.lastName
+        || postObj?.post?.owner?.last_name
+        || postObj?.post?.owner?.lastname
+        || '';
+      let poster_avatar = postObj?.post?.owner?.avatar?.large
+        || postObj?.post?.owner?.avatar?.medium
+        || postObj?.post?.owner?.avatar?.small
+        || postObj?.post?.owner?.avatarUrl
+        || postObj?.post?.owner?.pictureUrl
+        || postObj?.post?.owner?.imageUrl
+        || '';
 
       // Time
       let postedAt = row.posted_at

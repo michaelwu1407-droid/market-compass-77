@@ -11,6 +11,13 @@ function firstNumber(candidates: any[]): number {
     if (typeof v === 'number' && Number.isFinite(v)) {
       return v;
     }
+    if (typeof v === 'string') {
+      const trimmed = v.trim();
+      if (trimmed.length > 0 && /^-?\d+(\.\d+)?$/.test(trimmed)) {
+        const parsed = Number(trimmed);
+        if (Number.isFinite(parsed)) return parsed;
+      }
+    }
   }
   return 0;
 }
@@ -235,9 +242,16 @@ serve(async (req) => {
       const poster = post.owner || {};
       const poster_username = poster.username || 'unknown';
       const poster_id = poster.id || null;
-      const poster_first = poster.firstName || '';
-      const poster_last = poster.lastName || '';
-      const poster_avatar = poster.avatar?.large || poster.avatar?.medium || poster.avatar?.small || '';
+      const poster_first = poster.firstName || poster.first_name || poster.firstname || poster_username || '';
+      const poster_last = poster.lastName || poster.last_name || poster.lastname || '';
+      const poster_avatar =
+        poster.avatar?.large
+        || poster.avatar?.medium
+        || poster.avatar?.small
+        || poster.avatarUrl
+        || poster.pictureUrl
+        || poster.imageUrl
+        || '';
       // Time: prefer explicit timestamps, fall back to now
       const postedAt = post.published
         || post.createdAt
