@@ -6,6 +6,55 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+function firstNumber(candidates: any[]): number {
+  for (const v of candidates) {
+    if (typeof v === 'number' && Number.isFinite(v)) {
+      return v;
+    }
+  }
+  return 0;
+}
+
+function extractEngagement(item: any) {
+  const post = item?.post || {};
+  const metadata = post?.metadata || {};
+  const stats = post?.stats || post?.statistics || metadata?.stats || metadata?.statistics || {};
+  const reactions = post?.reactions || metadata?.reactions || stats?.reactions || {};
+  const commentsObj = post?.comments || metadata?.comments || stats?.comments || {};
+
+  const likes = firstNumber([
+    item?.reactionsCount,
+    item?.reactions?.count,
+    item?.reactions?.totalCount,
+    post?.reactionsCount,
+    metadata?.reactionsCount,
+    stats?.reactionsCount,
+    reactions?.count,
+    reactions?.total,
+    reactions?.totalCount,
+    reactions?.likes,
+    reactions?.likesCount,
+    reactions?.totalLikes,
+  ]);
+
+  const comments = firstNumber([
+    item?.commentsCount,
+    item?.comments?.count,
+    item?.comments?.totalCount,
+    post?.commentsCount,
+    metadata?.commentsCount,
+    stats?.commentsCount,
+    commentsObj?.count,
+    commentsObj?.total,
+    commentsObj?.totalCount,
+  ]);
+
+  return {
+    likes: Math.max(0, likes),
+    comments: Math.max(0, comments),
+  };
+}
+
 function extractSymbols(text: string | undefined | null): string[] {
   if (typeof text !== 'string' || text.length === 0) return [];
   const dollarSymbols = text.match(/\$([A-Z]{1,5})/g) || [];
@@ -188,12 +237,22 @@ serve(async (req) => {
       const poster_id = poster.id || null;
       const poster_first = poster.firstName || '';
       const poster_last = poster.lastName || '';
-      const poster_avatar = poster.avatar?.medium || poster.avatar?.small || '';
-      // Time
-      const postedAt = post.published || post.createdAt || post.created || post.date || new Date().toISOString();
+      const poster_avatar = poster.avatar?.large || poster.avatar?.medium || poster.avatar?.small || '';
+      // Time: prefer explicit timestamps, fall back to now
+      const postedAt = post.published
+        || post.createdAt
+        || post.created
+        || post.date
+        || post.timePublished
+        || post.metadata?.published
+        || post.metadata?.timePublished
+        || item.published
+        || item.createdAt
+        || item.created
+        || item.date
+        || new Date().toISOString();
       // Likes/comments
-      const likes = item.reactionsCount ?? post.reactionsCount ?? 0;
-      const comments = item.commentsCount ?? post.commentsCount ?? 0;
+      const { likes, comments } = extractEngagement(item);
 
       // (Optional) Detail fetch for missing text
       if (ext.classif === 'missing') {
@@ -220,7 +279,8 @@ serve(async (req) => {
         etoro_post_id: item.id,
         _classif: ext.classif,
         _content_source: ext.source,
-        _content_len: ext.len
+        _content_len: ext.len,
+        raw_json: item
       });
     }
     console.log(`[summary] counts: ${JSON.stringify(summary)}`);
@@ -245,12 +305,11 @@ serve(async (req) => {
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     } else if (postsToInsert.length > 0) {
-      // Upsert to avoid duplicates based on etoro_post_id
+      // Upsert and update existing rows based on etoro_post_id so likes/comments/avatars stay fresh
       const { data: inserted, error } = await supabase
         .from('posts')
         .upsert(postsToInsert, { 
-          onConflict: 'etoro_post_id',
-          ignoreDuplicates: true 
+          onConflict: 'etoro_post_id'
         })
         .select();
 

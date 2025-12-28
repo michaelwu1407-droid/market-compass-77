@@ -111,6 +111,7 @@ export default function FeedPage() {
         copier_history: [],
       } : undefined;
 
+      // Pass through all author and engagement fields
       const feedPost: FeedPost = {
         id: post.id,
         source: 'etoro',
@@ -121,6 +122,12 @@ export default function FeedPage() {
         created_at: post.posted_at || post.created_at || '',
         like_count: post.likes ?? post.like_count ?? 0,
         comment_count: post.comments ?? post.comment_count ?? 0,
+        likes: post.likes,
+        comments: post.comments,
+        poster_id: post.poster_id,
+        poster_first: post.poster_first,
+        poster_last: post.poster_last,
+        poster_avatar: post.poster_avatar,
         raw_json: {},
         trader: mappedTrader,
       };

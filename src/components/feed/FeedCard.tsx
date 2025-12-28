@@ -43,7 +43,7 @@ export function FeedCard({ item, onAnalyse, onStarForIC, onSave, onUnsave, isSav
       <div className="feed-card animate-fade-in">
         {/* Header */}
         <div className="flex items-start gap-3 mb-3">
-          <Avatar 
+            <Avatar 
             className="h-10 w-10 cursor-pointer hover:ring-2 hover:ring-primary transition-all" 
             onClick={() => post.trader && handleViewTrader(post.trader.id)}
           >

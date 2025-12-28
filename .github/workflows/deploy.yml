@@ -40,6 +40,12 @@ jobs:
       - name: Deploy dispatch-sync-jobs
         run: supabase functions deploy dispatch-sync-jobs --project-ref $PROJECT_ID
 
+      - name: Deploy scrape-posts
+        run: supabase functions deploy scrape-posts --project-ref $PROJECT_ID
+
+      - name: Deploy fix-posts
+        run: supabase functions deploy fix-posts --project-ref $PROJECT_ID
+
       - name: Deploy verify-deployment
         run: supabase functions deploy verify-deployment --project-ref $PROJECT_ID
 

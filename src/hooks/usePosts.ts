@@ -12,7 +12,13 @@ export function usePosts() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('posts')
-        .select('*, traders(*)')
+        .select(
+          `id, content, posted_at, created_at, trader_id,
+           poster_id, poster_first, poster_last, poster_avatar,
+           likes, comments, like_count, comment_count,
+           etoro_post_id, etoro_username, raw_json,
+           traders(*)`
+        )
         .order('posted_at', { ascending: false })
         .limit(50);
       

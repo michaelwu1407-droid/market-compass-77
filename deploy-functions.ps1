@@ -6,6 +6,8 @@ $PROJECT_ID = "xgvaibxxiwfraklfbwey"
 Write-Host "Deploying Supabase Edge Functions..." -ForegroundColor Green
 
 $functions = @(
+    "scrape-posts",
+    "fix-posts",
     "sync-traders",
     "sync-trader-details",
     "sync-worker",

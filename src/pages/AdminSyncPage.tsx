@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { toast } from '@/hooks/use-toast';
@@ -784,11 +784,39 @@ export default function AdminSyncPage() {
     setClearingDataDomains(newClearing);
 
     try {
-      const { data, error } = await supabase.functions.invoke('clear-sync-data', {
+      // Primary path: Supabase functions invoke
+      const invokeResult = await supabase.functions.invoke('clear-sync-data', {
         body: { domain },
       });
 
-      if (error) throw error;
+      // If invoke failed, try HTTP fallback (project domain first, then functions domain without auth)
+      if (invokeResult.error || !invokeResult.data) {
+        const resProj = await fetch(`${SUPABASE_URL}/functions/v1/clear-sync-data`, {
+          method: 'POST',
+          mode: 'cors',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ domain }),
+        }).catch((e) => ({ ok: false, status: 0, statusText: e.message, text: async () => e.message } as any));
+
+        const resNoAuth = resProj && resProj.ok ? resProj : await fetch(`https://xgvaibxxiwfraklfbwey.functions.supabase.co/clear-sync-data`, {
+          method: 'POST',
+          mode: 'cors',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ domain }),
+        }).catch((e) => ({ ok: false, status: 0, statusText: e.message, text: async () => e.message } as any));
+
+        if (!resProj?.ok && !resNoAuth?.ok) {
+          const textProj = resProj ? await resProj.text() : 'no-response';
+          const textNoAuth = resNoAuth ? await resNoAuth.text() : 'no-response';
+          throw new Error(
+            `Edge function failed. invokeError=${invokeResult.error?.message || 'none'}; proj=${resProj?.status}:${textProj}; noAuth=${resNoAuth?.status}:${textNoAuth}`
+          );
+        }
+      }
 
       toast({
         title: `Cleared sync data for ${DOMAIN_CONFIG[domain].label}`,

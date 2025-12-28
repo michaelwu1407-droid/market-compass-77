@@ -171,10 +171,18 @@ serve(async (req) => {
     const tradersToUpsert = allBullwareTraders.map(trader => ({
         etoro_username: trader.username || trader.userName || trader.etoro_username || trader.id,
         display_name: trader.displayName || trader.fullName || trader.name || trader.username || trader.userName || trader.etoro_username,
+        avatar_url: trader.avatar || trader.picture || trader.image || trader.profileImage || trader.photo || null,
+        bio: trader.bio || trader.description || trader.about || null,
+        country: trader.country || trader.location || null,
+        verified: typeof trader.verified === 'boolean' ? trader.verified : (typeof trader.isVerified === 'boolean' ? trader.isVerified : null),
         risk_score: trader.riskScore || trader.risk_score || trader.risk || null,
         copiers: trader.copiers || trader.copier_count || trader.followers || 0,
         gain_12m: trader.gain12Months || trader.gain_12m || trader.gain_12_months || trader.return_12m || null,
+        gain_24m: trader.gain24Months || trader.gain_24m || trader.return_24m || null,
+        max_drawdown: trader.maxDrawdown || trader.max_drawdown || trader.drawdown || null,
+        tags: trader.tags || trader.styles || trader.categories || null,
         updated_at: new Date().toISOString(),
+        active_since: trader.activeSince || trader.memberSince || trader.createdAt || trader.created_at || null,
     })).filter(t => t.etoro_username); // Filter out any traders without a username
 
     if (tradersToUpsert.length > 0) {

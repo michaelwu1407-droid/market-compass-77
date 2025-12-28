@@ -6,6 +6,76 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+function extractSymbols(text: string | undefined | null): string[] {
+  if (typeof text !== 'string' || text.length === 0) return [];
+  const dollarSymbols = text.match(/\$([A-Z]{1,5})/g) || [];
+  const symbols = dollarSymbols.map(s => s.replace('$', ''));
+  return [...new Set(symbols)];
+}
+
+function analyzeSentiment(text: string | undefined | null): string {
+  if (typeof text !== 'string' || text.length === 0) return 'neutral';
+  const lowerText = text.toLowerCase();
+  const bullishWords = ['buy', 'long', 'bullish', 'moon', 'pump', 'growth', 'profit', 'gains', 'up', 'rally'];
+  const bearishWords = ['sell', 'short', 'bearish', 'dump', 'crash', 'loss', 'down', 'drop', 'correction'];
+  let bullScore = 0;
+  let bearScore = 0;
+  for (const word of bullishWords) { if (lowerText.includes(word)) bullScore++; }
+  for (const word of bearishWords) { if (lowerText.includes(word)) bearScore++; }
+  if (bullScore > bearScore) return 'bullish';
+  if (bearScore > bullScore) return 'bearish';
+  return 'neutral';
+}
+
+function firstNumber(candidates: any[]): number {
+  for (const v of candidates) {
+    if (typeof v === 'number' && Number.isFinite(v)) {
+      return v;
+    }
+  }
+  return 0;
+}
+
+function extractEngagement(item: any) {
+  const post = item?.post || {};
+  const metadata = post?.metadata || {};
+  const stats = post?.stats || post?.statistics || metadata?.stats || metadata?.statistics || {};
+  const reactions = post?.reactions || metadata?.reactions || stats?.reactions || {};
+  const commentsObj = post?.comments || metadata?.comments || stats?.comments || {};
+
+  const likes = firstNumber([
+    item?.reactionsCount,
+    item?.reactions?.count,
+    item?.reactions?.totalCount,
+    post?.reactionsCount,
+    metadata?.reactionsCount,
+    stats?.reactionsCount,
+    reactions?.count,
+    reactions?.total,
+    reactions?.totalCount,
+    reactions?.likes,
+    reactions?.likesCount,
+    reactions?.totalLikes,
+  ]);
+
+  const comments = firstNumber([
+    item?.commentsCount,
+    item?.comments?.count,
+    item?.comments?.totalCount,
+    post?.commentsCount,
+    metadata?.commentsCount,
+    stats?.commentsCount,
+    commentsObj?.count,
+    commentsObj?.total,
+    commentsObj?.totalCount,
+  ]);
+
+  return {
+    likes: Math.max(0, likes),
+    comments: Math.max(0, comments),
+  };
+}
+
 function isLikelyId(s: string) {
   if (!s) return false;
   const trimmed = s.trim();
@@ -63,13 +133,26 @@ serve(async (req) => {
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // Fetch all posts (batch if needed)
-    let { data: posts, error } = await supabase
+    const url = new URL(req.url);
+    const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit') || '200')));
+    const offset = Math.max(0, Number(url.searchParams.get('offset') || '0'));
+
+    // Fetch a single batch of posts to avoid timeouts.
+    const { data: posts, error } = await supabase
       .from('posts')
-      .select('*');
+      .select('*')
+      .order('created_at', { ascending: true })
+      .range(offset, offset + limit - 1);
     if (error) throw error;
 
-    let updated = 0;
+    if (!posts || posts.length === 0) {
+      return new Response(
+        JSON.stringify({ success: true, updated: 0, processed: 0, offset, limit, done: true }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const updates: any[] = [];
     for (const row of posts) {
       // Use raw_json if available, else fallback to content
       let postObj: any = {};
@@ -91,61 +174,61 @@ serve(async (req) => {
       let poster_id = postObj?.post?.owner?.id || null;
       let poster_first = postObj?.post?.owner?.firstName || '';
       let poster_last = postObj?.post?.owner?.lastName || '';
-      let poster_avatar = postObj?.post?.owner?.avatar?.medium || postObj?.post?.owner?.avatar?.small || '';
+      let poster_avatar = postObj?.post?.owner?.avatar?.large || postObj?.post?.owner?.avatar?.medium || postObj?.post?.owner?.avatar?.small || '';
 
       // Time
-      let postedAt = row.posted_at || postObj?.post?.published || postObj?.post?.createdAt || postObj?.post?.created || postObj?.post?.date || row.created_at || new Date().toISOString();
+      let postedAt = row.posted_at
+        || postObj?.post?.published
+        || postObj?.post?.createdAt
+        || postObj?.post?.created
+        || postObj?.post?.date
+        || postObj?.post?.timePublished
+        || postObj?.published
+        || postObj?.createdAt
+        || postObj?.created
+        || postObj?.date
+        || row.created_at
+        || new Date().toISOString();
+
+      const engagement = extractEngagement(postObj);
 
       // Likes/comments
-      let likes = row.likes ?? postObj?.reactionsCount ?? postObj?.post?.reactionsCount ?? 0;
-      let comments = row.comments ?? postObj?.commentsCount ?? postObj?.post?.commentsCount ?? 0;
+      let likes = row.likes ?? engagement.likes;
+      let comments = row.comments ?? engagement.comments;
 
-      // Mentioned symbols and sentiment
-      const extractSymbols = (text: string | undefined | null): string[] => {
-        if (typeof text !== 'string' || text.length === 0) return [];
-        const dollarSymbols = text.match(/\$([A-Z]{1,5})/g) || [];
-        const symbols = dollarSymbols.map(s => s.replace('$', ''));
-        return [...new Set(symbols)];
-      };
-      const analyzeSentiment = (text: string | undefined | null): string => {
-        if (typeof text !== 'string' || text.length === 0) return 'neutral';
-        const lowerText = text.toLowerCase();
-        const bullishWords = ['buy', 'long', 'bullish', 'moon', 'pump', 'growth', 'profit', 'gains', 'up', 'rally'];
-        const bearishWords = ['sell', 'short', 'bearish', 'dump', 'crash', 'loss', 'down', 'drop', 'correction'];
-        let bullScore = 0;
-        let bearScore = 0;
-        for (const word of bullishWords) { if (lowerText.includes(word)) bullScore++; }
-        for (const word of bearishWords) { if (lowerText.includes(word)) bearScore++; }
-        if (bullScore > bearScore) return 'bullish';
-        if (bearScore > bullScore) return 'bearish';
-        return 'neutral';
-      };
       const mentioned_symbols = extractSymbols(cleanText);
       const sentiment = analyzeSentiment(cleanText);
 
-      // Update row with all new fields
-      const { error: upErr } = await supabase
-        .from('posts')
-        .update({
-          content: cleanText,
-          _classif: ext.classif,
-          _content_source: ext.source,
-          _content_len: ext.len,
-          etoro_username: poster_username,
-          poster_id: poster_id,
-          poster_first: poster_first,
-          poster_last: poster_last,
-          poster_avatar: poster_avatar,
-          posted_at: postedAt,
-          likes: likes,
-          comments: comments,
-          mentioned_symbols: mentioned_symbols,
-          sentiment: sentiment
-        })
-        .eq('id', row.id);
-      if (!upErr) updated++;
+      updates.push({
+        id: row.id,
+        content: cleanText,
+        _classif: ext.classif,
+        _content_source: ext.source,
+        _content_len: ext.len,
+        etoro_username: poster_username,
+        poster_id: poster_id,
+        poster_first: poster_first,
+        poster_last: poster_last,
+        poster_avatar: poster_avatar,
+        posted_at: postedAt,
+        likes: likes,
+        comments: comments,
+        mentioned_symbols,
+        sentiment,
+      });
     }
-    return new Response(JSON.stringify({ success: true, updated }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+    const { error: upsertError } = await supabase
+      .from('posts')
+      .upsert(updates, { onConflict: 'id' });
+    if (upsertError) throw upsertError;
+
+    const nextOffset = offset + posts.length;
+    const done = posts.length < limit;
+    return new Response(
+      JSON.stringify({ success: true, processed: posts.length, updated: updates.length, offset, limit, next_offset: nextOffset, done }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
   } catch (error) {
     return new Response(JSON.stringify({ success: false, error: error?.message || error?.toString() }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
