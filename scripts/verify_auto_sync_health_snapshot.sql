@@ -19,16 +19,17 @@ SELECT
   count(*) FILTER (WHERE status = 'pending') AS pending_now
 FROM sync_jobs
 WHERE created_at >= now() - interval '30 minutes'
-   OR updated_at >= now() - interval '30 minutes';
+  OR started_at >= now() - interval '30 minutes'
+  OR finished_at >= now() - interval '30 minutes';
 
 -- Failures breakdown in last 60 minutes
 SELECT
-  error_code,
+  COALESCE(NULLIF(error_message, ''), '(no error_message)') AS error_message,
   count(*) AS failed_count
 FROM sync_jobs
 WHERE status = 'failed'
-  AND updated_at >= now() - interval '60 minutes'
-GROUP BY error_code
+  AND COALESCE(finished_at, started_at, created_at) >= now() - interval '60 minutes'
+GROUP BY 1
 ORDER BY failed_count DESC
 LIMIT 20;
 
@@ -37,4 +38,4 @@ SELECT
   count(*) AS stuck_processing_over_20m
 FROM sync_jobs
 WHERE status IN ('processing','in_progress')
-  AND updated_at < now() - interval '20 minutes';
+  AND COALESCE(started_at, created_at) < now() - interval '20 minutes';
