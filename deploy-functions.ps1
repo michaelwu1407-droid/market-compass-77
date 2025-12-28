@@ -8,6 +8,7 @@ Write-Host "Deploying Supabase Edge Functions..." -ForegroundColor Green
 $functions = @(
     "scrape-posts",
     "fix-posts",
+    "trigger-sync",
     "sync-traders",
     "sync-trader-details",
     "sync-worker",

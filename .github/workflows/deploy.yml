@@ -46,6 +46,9 @@ jobs:
       - name: Deploy fix-posts
         run: supabase functions deploy fix-posts --project-ref $PROJECT_ID
 
+      - name: Deploy trigger-sync
+        run: supabase functions deploy trigger-sync --project-ref $PROJECT_ID
+
       - name: Deploy verify-deployment
         run: supabase functions deploy verify-deployment --project-ref $PROJECT_ID
 

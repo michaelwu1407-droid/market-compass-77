@@ -31,6 +31,7 @@ supabase functions deploy sync-trader-details --project-ref $PROJECT_ID
 supabase functions deploy sync-worker --project-ref $PROJECT_ID
 supabase functions deploy scrape-posts --project-ref $PROJECT_ID
 supabase functions deploy fix-posts --project-ref $PROJECT_ID
+supabase functions deploy trigger-sync --project-ref $PROJECT_ID
 supabase functions deploy enqueue-sync-jobs --project-ref $PROJECT_ID
 supabase functions deploy process-sync-job --project-ref $PROJECT_ID
 supabase functions deploy dispatch-sync-jobs --project-ref $PROJECT_ID

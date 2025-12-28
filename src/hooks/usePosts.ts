@@ -16,7 +16,7 @@ export function usePosts() {
           `id, content, posted_at, created_at, trader_id,
            poster_id, poster_first, poster_last, poster_avatar,
            likes, comments, like_count, comment_count,
-           etoro_post_id, etoro_username, raw_json,
+           etoro_post_id, etoro_username,
            traders(*)`
         )
         .order('posted_at', { ascending: false })

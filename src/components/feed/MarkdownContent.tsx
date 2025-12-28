@@ -147,8 +147,9 @@ function cleanContent(raw: string): string {
   const textOnly = text.replace(/[^a-zA-Z\s]/g, '').trim();
   const wordCount = textOnly.split(/\s+/).filter(w => w.length > 2).length;
   
-  // Need at least 10 real words for a valid post
-  if (wordCount < 10) {
+  // Keep short posts (e.g. "$TSLA sold") but still reject empty/boilerplate.
+  // Most of the heavy boilerplate removal happens above.
+  if (wordCount < 3) {
     return '';
   }
   
@@ -170,7 +171,7 @@ function cleanContent(raw: string): string {
 // Check if content is mostly garbage/boilerplate
 export function isValidPostContent(content: string): boolean {
   const cleaned = cleanContent(content);
-  return cleaned.length >= 50;
+  return cleaned.length > 0;
 }
 
 export function MarkdownContent({ content, className = '' }: MarkdownContentProps) {
