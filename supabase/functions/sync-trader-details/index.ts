@@ -203,6 +203,44 @@ serve(async (req) => {
           }
         }
 
+        // If assets are missing (common on fresh DBs), create placeholder assets so holdings can be stored.
+        // This is intentionally minimal: name defaults to the symbol; other fields can be enriched later.
+        const canonicalSymbols = Array.from(
+          new Set(
+            holdings
+              .map((h: any) => {
+                const candidates = normalizeSymbol(
+                  h?.symbol || h?.ticker || h?.asset || h?.assetSymbol || h?.instrument,
+                );
+                return candidates.length > 0 ? candidates[candidates.length - 1] : null; // cleaned
+              })
+              .filter(Boolean),
+          ),
+        ) as string[];
+
+        const missingCanonical = canonicalSymbols.filter((s) => !symbolToAssetId.has(String(s).toUpperCase()));
+        if (missingCanonical.length > 0) {
+          const { error: upsertErr } = await supabase
+            .from('assets')
+            .upsert(
+              missingCanonical.map((s) => ({ symbol: String(s).toUpperCase(), name: String(s).toUpperCase() })),
+              { onConflict: 'symbol', ignoreDuplicates: true },
+            );
+          if (upsertErr) {
+            console.error('Error upserting placeholder assets for holdings:', upsertErr);
+          } else {
+            const { data: createdAssets, error: createdAssetsErr } = await supabase
+              .from('assets')
+              .select('id, symbol')
+              .in('symbol', missingCanonical.map((s) => String(s).toUpperCase()));
+            if (createdAssetsErr) {
+              console.error('Error re-fetching placeholder assets:', createdAssetsErr);
+            } else {
+              (createdAssets || []).forEach((a: any) => symbolToAssetId.set(String(a.symbol).toUpperCase(), a.id));
+            }
+          }
+        }
+
         const rows = holdings
           .map((h: any) => {
             const candidates = normalizeSymbol(h?.symbol || h?.ticker || h?.asset || h?.assetSymbol || h?.instrument);
