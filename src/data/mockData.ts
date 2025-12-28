@@ -442,7 +442,7 @@ export const posts: Post[] = [
     raw_json: {},
     trader: traders[0],
     asset: assets[0],
-    comments: [
+    comments_list: [
       { id: 'c1', author: 'InvestorMike', text: 'Great insight! What price target are you looking at?', created_at: '2024-12-05T14:45:00Z' },
       { id: 'c2', author: 'TechBull2024', text: 'Agreed, NVDA is a must-own for the AI era', created_at: '2024-12-05T15:00:00Z' },
     ],
@@ -461,7 +461,7 @@ export const posts: Post[] = [
     raw_json: {},
     trader: traders[1],
     asset: assets[1],
-    comments: [
+    comments_list: [
       { id: 'c3', author: 'DividendKing', text: 'Apple is the ultimate cash machine!', created_at: '2024-12-05T12:30:00Z' },
     ],
     is_pinned: false,
@@ -479,7 +479,7 @@ export const posts: Post[] = [
     raw_json: {},
     trader: traders[2],
     asset: assets[4],
-    comments: [
+    comments_list: [
       { id: 'c4', author: 'EVFuture', text: 'FSD v12.5 is game changing!', created_at: '2024-12-05T11:00:00Z' },
       { id: 'c5', author: 'Skeptic101', text: "Isn't 15% too concentrated?", created_at: '2024-12-05T11:15:00Z' },
       { id: 'c6', author: 'TechMomentum', text: 'Concentration builds wealth, diversification preserves it 😉', created_at: '2024-12-05T11:20:00Z' },
@@ -499,7 +499,7 @@ export const posts: Post[] = [
     raw_json: {},
     trader: traders[3],
     asset: assets[2],
-    comments: [],
+    comments_list: [],
     is_pinned: false,
   },
   {
@@ -515,7 +515,7 @@ export const posts: Post[] = [
     raw_json: {},
     trader: traders[0],
     asset: assets[5],
-    comments: [],
+    comments_list: [],
     is_pinned: false,
   },
 ];

@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+      console.log('[trigger-sync] req.json() threw:', (e as Error)?.message || e);
 };
 
 type Domain = 'discussion_feed' | 'trader_profiles' | 'stock_data';
@@ -14,7 +14,7 @@ type LockResult = {
   acquired: boolean;
   reason: 'success' | 'already_running' | 'stale_cleared' | 'row_initialized' | 'error';
   lockHolder?: string;
-  lockAcquiredAt?: string;
+        console.log('[trigger-sync] req.text() failed:', (e as Error)?.message || e);
   lockAgeMinutes?: number;
   message?: string;
 };

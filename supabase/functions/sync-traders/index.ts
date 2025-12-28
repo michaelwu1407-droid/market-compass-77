@@ -13,50 +13,102 @@ serve(async (req) => {
   }
 
   try {
-    const BULLAWARE_API_KEY = Deno.env.get('BULLAWARE_API_KEY');
-    const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+        const BULLAWARE_API_KEY = Deno.env.get('BULLAWARE_API_KEY');
+        const envUrl = Deno.env.get('SUPABASE_URL');
+        const SUPABASE_URL = envUrl && envUrl.length > 0 ? envUrl : new URL(req.url).origin;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    let apiWorks = false;
-    let allBullwareTraders: any[] = [];
+        // Prefer eToro (when configured) and fall back to BullAware.
+        // We don't hardcode eToro endpoints here; configure via env so this stays stable.
+        // - ETORO_TRADERS_URL: optional URL template; supports {offset} and {limit} placeholders.
+        const ETORO_TRADERS_URL = Deno.env.get('ETORO_TRADERS_URL');
 
-    if (!BULLAWARE_API_KEY) {
-        console.error("BULLAWARE_API_KEY not found. Cannot fetch traders.");
-        return new Response(
-            JSON.stringify({
-                success: false,
-                error: "BULLAWARE_API_KEY not configured",
-                synced: 0,
-                total_traders: 0,
-                message: "API key missing - check environment variables"
-            }),
-            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-    }
+    let apiUsed: 'etoro' | 'bullaware' | 'none' = 'none';
+    let allTraders: any[] = [];
 
-    // Try to fetch from Bullaware API (respecting rate limits)
-    // CRITICAL: Bullaware API has 10 req/min limit, so we need to make continuous requests
-    // Strategy: Fetch 1 page per call, and have this function called every minute
-    // This way we continuously discover new traders over time
-    console.log(`Attempting to fetch traders from Bullaware API...`);
-    console.log(`[DEBUG] BULLAWARE_API_KEY present: Yes (length: ${BULLAWARE_API_KEY.length})`);
+        const body = await req.json().catch(() => ({}));
+        const startPage = body.start_page || 0;
+        const maxPages = body.max_pages || 1;
+
+        // 1) Attempt eToro if configured
+        if (ETORO_TRADERS_URL) {
+            console.log(`Attempting to fetch traders from eToro (ETORO_TRADERS_URL configured)...`);
+
+            let page = startPage;
+            while (page < maxPages) {
+                const offset = page * 1000;
+                const limit = 1000;
+                const url = ETORO_TRADERS_URL
+                    .replaceAll('{offset}', String(offset))
+                    .replaceAll('{limit}', String(limit));
+                try {
+                    const res = await fetch(url, {
+                        headers: {
+                            'Accept': 'application/json',
+                            'User-Agent': 'Mozilla/5.0',
+                        },
+                        signal: AbortSignal.timeout(15000),
+                    });
+
+                    const raw = await res.text().catch(() => '');
+                    if (!res.ok) {
+                        console.error(`eToro traders HTTP ${res.status}: ${raw.substring(0, 300)}`);
+                        break;
+                    }
+
+                    let data: any = {};
+                    try {
+                        data = raw ? JSON.parse(raw) : {};
+                    } catch {
+                        console.error('eToro traders JSON parse failed, raw:', raw.substring(0, 300));
+                        break;
+                    }
+
+                    const pageTraders =
+                        data.items || data.data || data.investors || data.results || data.traders || data.users ||
+                        (Array.isArray(data) ? data : []);
+
+                    if (!Array.isArray(pageTraders) || pageTraders.length === 0) {
+                        console.log(`eToro page ${page + 1}: no traders, stopping.`);
+                        break;
+                    }
+
+                    allTraders = allTraders.concat(pageTraders);
+                    apiUsed = 'etoro';
+                    console.log(`eToro page ${page + 1}: fetched ${pageTraders.length} traders (total=${allTraders.length})`);
+
+                    if (pageTraders.length < limit) break;
+                    page++;
+                    if (page < maxPages) await new Promise(resolve => setTimeout(resolve, 1000));
+                } catch (e) {
+                    console.error('eToro traders request failed:', (e as Error)?.message || String(e));
+                    break;
+                }
+            }
+        }
+
+        // 2) Fall back to BullAware if eToro didn't return anything
+        if (allTraders.length === 0) {
+            if (!BULLAWARE_API_KEY) {
+                console.error('No eToro traders returned and BULLAWARE_API_KEY not configured.');
+                return new Response(
+                    JSON.stringify({
+                        success: false,
+                        error: 'No trader source configured',
+                        message: 'Set ETORO_TRADERS_URL or BULLAWARE_API_KEY',
+                        synced: 0,
+                        total_traders: 0,
+                    }),
+                    { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+                );
+            }
+
+            console.log(`Attempting to fetch traders from Bullaware API...`);
+            console.log(`[DEBUG] BULLAWARE_API_KEY present: Yes (length: ${BULLAWARE_API_KEY.length})`);
     
-    // Get the last offset we fetched (stored in a simple way - check existing traders)
-    const { data: existingTraders } = await supabase
-      .from('traders')
-      .select('id')
-      .order('created_at', { ascending: false })
-      .limit(1);
-    
-    // Calculate next page to fetch - if we have traders, we've likely fetched some pages already
-    // For now, fetch page 0 (first page) - the continuous calling will handle pagination
-    // TODO: Store last fetched offset in a config table for proper pagination
-    const body = await req.json().catch(() => ({}));
-    const startPage = body.start_page || 0;
-    const maxPages = body.max_pages || 1; // Fetch only 1 page per call to spread over time
-    
-    let page = startPage;
+            // Note: we keep the existing pagination behavior.
+            let page = startPage;
         
         while (page < maxPages) {
             try {
@@ -95,8 +147,9 @@ serve(async (req) => {
                         console.error(`  - Sample response:`, JSON.stringify(data).substring(0, 2000));
                     }
                     
-                    allBullwareTraders = allBullwareTraders.concat(pageTraders);
-                    console.log(`Page ${page + 1}: Fetched ${pageTraders.length} traders (total: ${allBullwareTraders.length})`);
+                    allTraders = allTraders.concat(pageTraders);
+                    apiUsed = 'bullaware';
+                    console.log(`Page ${page + 1}: Fetched ${pageTraders.length} traders (total: ${allTraders.length})`);
                     
                     if (pageTraders.length < 1000) {
                         // Last page
@@ -144,37 +197,37 @@ serve(async (req) => {
             }
         }
         
-        if (allBullwareTraders.length > 0) {
-            console.log(`Successfully fetched ${allBullwareTraders.length} traders from Bullaware API.`);
-            apiWorks = true;
-        } else {
-            console.error("Bullaware API returned no traders.");
-            apiWorks = false;
+            if (allTraders.length > 0) {
+                console.log(`Successfully fetched ${allTraders.length} traders from Bullaware API.`);
+            } else {
+                console.error('Bullaware API returned no traders.');
+            }
         }
 
-    if (!apiWorks || allBullwareTraders.length === 0) {
-        console.error("Bullaware API failed or returned no data. Cannot proceed without real data.");
-        return new Response(
-            JSON.stringify({
-                success: false,
-                error: "Bullaware API failed or returned no data. No mock data will be generated.",
-                synced: 0,
-                total_traders: 0,
-                message: "API call failed - check BULLAWARE_API_KEY and API status"
-            }),
-            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-    }
+        if (allTraders.length === 0) {
+            return new Response(
+                JSON.stringify({
+                    success: false,
+                    error: 'No traders returned',
+                    synced: 0,
+                    total_traders: 0,
+                    message: 'eToro returned no traders and BullAware returned no traders',
+                }),
+                { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+            );
+        }
 
-    console.log(`Processing ${allBullwareTraders.length} traders for upsert.`);
+        console.log(`Processing ${allTraders.length} traders for upsert (source=${apiUsed}).`);
 
-    const tradersToUpsert = allBullwareTraders.map(trader => ({
+        const tradersToUpsert = allTraders.map(trader => ({
         etoro_username: trader.username || trader.userName || trader.etoro_username || trader.id,
         display_name: trader.displayName || trader.fullName || trader.name || trader.username || trader.userName || trader.etoro_username,
         avatar_url: trader.avatar || trader.picture || trader.image || trader.profileImage || trader.photo || null,
         bio: trader.bio || trader.description || trader.about || null,
         country: trader.country || trader.location || null,
         verified: typeof trader.verified === 'boolean' ? trader.verified : (typeof trader.isVerified === 'boolean' ? trader.isVerified : null),
+                etoro_cid: trader.customerId || trader.CustomerId || trader.cid || trader.CID || trader.etoroCid || null,
+                win_ratio: trader.winRatio || trader.win_ratio || trader.winRate || trader.win_rate || null,
         risk_score: trader.riskScore || trader.risk_score || trader.risk || null,
         copiers: trader.copiers || trader.copier_count || trader.followers || 0,
         gain_12m: trader.gain12Months || trader.gain_12m || trader.gain_12_months || trader.return_12m || null,
@@ -183,6 +236,8 @@ serve(async (req) => {
         tags: trader.tags || trader.styles || trader.categories || null,
         updated_at: new Date().toISOString(),
         active_since: trader.activeSince || trader.memberSince || trader.createdAt || trader.created_at || null,
+                last_etoro_sync_at: apiUsed === 'etoro' ? new Date().toISOString() : null,
+                trader_source: apiUsed,
     })).filter(t => t.etoro_username); // Filter out any traders without a username
 
     if (tradersToUpsert.length > 0) {
@@ -237,7 +292,7 @@ serve(async (req) => {
         synced: tradersToUpsert.length,
         total_traders: finalCount || 0,
         message: `Synced ${tradersToUpsert.length} traders. Total in database: ${finalCount || 0}`,
-        api_used: apiWorks
+                api_used: apiUsed
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

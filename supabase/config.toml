@@ -32,3 +32,9 @@ verify_jwt = false
 
 [functions.sync-trader-details]
 verify_jwt = false
+
+[functions.sync-traders]
+verify_jwt = false
+
+[functions.sync-trader-etoro]
+verify_jwt = false

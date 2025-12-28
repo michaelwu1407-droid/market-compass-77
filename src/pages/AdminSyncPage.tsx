@@ -80,7 +80,7 @@ const DOMAIN_CONFIG: Record<Domain, { label: string; icon: React.ElementType; co
     label: 'Trader Profiles',
     icon: Users,
     color: 'blue',
-    description: 'BullAware API - Deep profile & portfolio sync',
+    description: 'Trader discovery via eToro (when configured) with BullAware fallback; portfolio/holdings sync remains BullAware',
   },
   stock_data: {
     label: 'Stock Data',
@@ -573,6 +573,7 @@ function DomainPanel({
 }
 
 export default function AdminSyncPage() {
+          const queryClient = useQueryClient();
           const [clearingDataDomains, setClearingDataDomains] = useState<Set<Domain>>(new Set());
         const [isSyncingAll, setIsSyncingAll] = useState(false);
       // Fetch domain statuses

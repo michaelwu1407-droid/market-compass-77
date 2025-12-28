@@ -234,7 +234,7 @@ serve(async (req) => {
     }
 
     // Classification summary
-    let summary = {readable:0, guid_like:0, short:0, missing:0, non_text:0};
+    const summary: Record<string, number> = { readable: 0, guid_like: 0, short: 0, missing: 0, non_text: 0 };
     for (const item of discussions) {
       const post = item.post;
       if (!post) { summary.missing++; continue; }

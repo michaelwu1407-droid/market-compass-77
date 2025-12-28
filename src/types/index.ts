@@ -97,6 +97,11 @@ export interface Post {
   comments_list?: { id: string; author: string; text: string; created_at: string }[];
   images?: string[];
   is_pinned?: boolean;
+
+  // Debug classification fields (used in FeedCard for debugging)
+  _classif?: string;
+  _content_source?: string;
+  _content_len?: number;
 }
 
 export interface TraderFollow {

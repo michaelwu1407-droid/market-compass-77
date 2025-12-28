@@ -1,3 +1,5 @@
+/// <reference path="../edge-runtime.d.ts" />
+
 
 // @ts-ignore: Deno runtime import (ignore in VS Code, works in Supabase Edge Functions)
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
