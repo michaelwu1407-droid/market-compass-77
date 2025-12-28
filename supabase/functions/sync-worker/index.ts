@@ -13,8 +13,8 @@ serve(async (req) => {
 
     try {
         const QUEUE_LOW_WATERMARK = 20;
-        // Use native SUPABASE_URL - functions are deployed on this project
-        const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+        // Prefer injected env; fall back to request origin to avoid "supabaseUrl is required".
+        const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? new URL(req.url).origin;
         const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
         const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
         

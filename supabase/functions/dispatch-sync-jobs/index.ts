@@ -96,7 +96,7 @@ serve(async (req) => {
 
     try {
         // Use native SUPABASE_URL - functions are deployed on this project
-        const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+        const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? new URL(req.url).origin;
         const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
         const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
