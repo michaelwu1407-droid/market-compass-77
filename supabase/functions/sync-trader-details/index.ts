@@ -13,7 +13,8 @@ serve(async (req) => {
 
   try {
     const BULLAWARE_API_KEY = Deno.env.get('BULLAWARE_API_KEY');
-    const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+    // Prefer injected env; fall back to request origin to avoid "supabaseUrl is required".
+    const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? new URL(req.url).origin;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 

@@ -23,8 +23,10 @@ serve(async (req) => {
         return new Response(JSON.stringify({ error: 'Missing job_id' }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Use native SUPABASE_URL - functions are deployed on this project
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    // Use native SUPABASE_URL when available; fall back to request origin.
+    // This prevents createClient() from throwing "supabaseUrl is required" in environments
+    // where SUPABASE_URL is not injected.
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? new URL(req.url).origin;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     
@@ -93,7 +95,7 @@ serve(async (req) => {
 
     console.log(`[process-sync-job] Processing ${job_type} for ${trader.etoro_username}`);
     
-    // Call sync-trader-details on same project (native SUPABASE_URL)
+    // Call sync-trader-details on same project
     const forwardedAuth = callerAuth || `Bearer ${supabaseAnonKey}`;
     const forwardedApiKey = callerApiKey || supabaseAnonKey;
 
