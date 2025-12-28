@@ -285,7 +285,16 @@ serve(async (req) => {
     }
     console.log(`[summary] counts: ${JSON.stringify(summary)}`);
 
-    console.log(`Prepared ${postsToInsert.length} posts: ${trackedTraderPosts} from tracked traders, ${unknownTraderPosts} from unknown traders`);
+    // De-dupe by etoro_post_id (required for Postgres upsert DO UPDATE; duplicates in one statement can throw)
+    const dedupeMap = new Map<string, any>();
+    for (const p of postsToInsert) {
+      if (!p?.etoro_post_id) continue;
+      dedupeMap.set(String(p.etoro_post_id), p);
+    }
+    const dedupedPosts = Array.from(dedupeMap.values());
+    const duplicatesRemoved = Math.max(0, postsToInsert.length - dedupedPosts.length);
+
+    console.log(`Prepared ${postsToInsert.length} posts (${duplicatesRemoved} dupes removed => ${dedupedPosts.length} unique): ${trackedTraderPosts} from tracked traders, ${unknownTraderPosts} from unknown traders`);
 
     let insertedCount = 0;
     if (dryRun) {
@@ -306,30 +315,53 @@ serve(async (req) => {
       );
     } else if (postsToInsert.length > 0) {
       // Upsert and update existing rows based on etoro_post_id so likes/comments/avatars stay fresh
-      const { data: inserted, error } = await supabase
-        .from('posts')
-        .upsert(postsToInsert, { 
-          onConflict: 'etoro_post_id'
-        })
-        .select();
+      // Also handle common schema drift (e.g. raw_json column missing) by retrying without raw_json.
+      let rawJsonDisabled = false;
+      let rawJsonDisableReason: string | null = null;
+
+      const tryUpsert = async (rows: any[]) => {
+        return await supabase
+          .from('posts')
+          .upsert(rows, { onConflict: 'etoro_post_id' })
+          .select();
+      };
+
+      let { data: inserted, error } = await tryUpsert(dedupedPosts);
+      if (error) {
+        const msg = (error as any)?.message || '';
+        const details = (error as any)?.details || '';
+        const hint = (error as any)?.hint || '';
+        const combined = `${msg} ${details} ${hint}`.toLowerCase();
+
+        // If raw_json isn't present in the DB schema, retry without it.
+        if (combined.includes('raw_json') && (combined.includes('column') || combined.includes('does not exist'))) {
+          rawJsonDisabled = true;
+          rawJsonDisableReason = msg || details || 'raw_json missing';
+          const stripped = dedupedPosts.map(({ raw_json, ...rest }) => rest);
+          const retry = await tryUpsert(stripped);
+          inserted = retry.data;
+          error = retry.error;
+        }
+      }
 
       if (error) {
         console.error('Error upserting posts:', error);
-        throw new Error(error?.message || JSON.stringify(error) || 'Supabase upsert error');
+        throw new Error((error as any)?.message || JSON.stringify(error) || 'Supabase upsert error');
       }
 
       insertedCount = inserted?.length || 0;
-      console.log(`Successfully processed ${insertedCount} new posts`);
+      console.log(`Successfully processed ${insertedCount} posts (raw_json_disabled=${rawJsonDisabled})`);
     }
 
     return new Response(
       JSON.stringify({
         success: true,
         posts_scraped: discussions.length,
-        posts_processed: postsToInsert.length,
+        posts_processed: dedupedPosts.length,
         posts_from_tracked_traders: trackedTraderPosts,
         posts_from_unknown_traders: unknownTraderPosts,
         posts_inserted: insertedCount,
+        duplicates_removed: duplicatesRemoved,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
