@@ -8,3 +8,9 @@ verify_jwt = false
 
 [functions.sync-diagnostics]
 verify_jwt = false
+
+[functions.scrape-posts]
+verify_jwt = false
+
+[functions.fix-posts]
+verify_jwt = false
