@@ -11,10 +11,88 @@ const corsHeaders = {
 const MAX_JOBS_TO_PROCESS = 10; // Process 10 jobs per batch = 1 minute per batch
 const DELAY_BETWEEN_JOBS_MS = 6000; // 6 seconds = exactly 10 req/min
 
+const LOCK_DOMAIN = 'dispatch_sync_jobs';
+const LOCK_TTL_MINUTES = 5;
+
+async function acquireLock(supabase: any, lockHolder: string) {
+    const staleCutoff = new Date(Date.now() - LOCK_TTL_MINUTES * 60 * 1000).toISOString();
+    const now = new Date().toISOString();
+
+    const { data: current, error: fetchError } = await supabase
+        .from('sync_domain_status')
+        .select('status, lock_holder, lock_acquired_at')
+        .eq('domain', LOCK_DOMAIN)
+        .maybeSingle();
+
+    if (fetchError) throw fetchError;
+
+    if (!current) {
+        const { error: insertError } = await supabase
+            .from('sync_domain_status')
+            .insert({ domain: LOCK_DOMAIN, status: 'running', lock_holder: lockHolder, lock_acquired_at: now });
+        if (insertError) throw insertError;
+        return { acquired: true, reason: 'row_initialized' as const };
+    }
+
+    const lockAcquiredAt = current.lock_acquired_at;
+    const lockAgeMinutes = lockAcquiredAt
+        ? Math.floor((Date.now() - new Date(lockAcquiredAt).getTime()) / 60000)
+        : 0;
+    const isStale = lockAcquiredAt && lockAcquiredAt < staleCutoff;
+
+    if (current.status === 'running' && !isStale) {
+        return {
+            acquired: false,
+            reason: 'already_running' as const,
+            lockHolder: current.lock_holder,
+            lockAcquiredAt,
+            lockAgeMinutes,
+        };
+    }
+
+    if (current.status === 'running' && isStale) {
+        await supabase.from('sync_logs').insert({
+            domain: LOCK_DOMAIN,
+            level: 'warn',
+            message: `Stale dispatch lock auto-cleared (was held by ${current.lock_holder} for ${lockAgeMinutes} min, TTL is ${LOCK_TTL_MINUTES} min)`,
+            details: { previous_holder: current.lock_holder, lock_acquired_at: lockAcquiredAt, age_minutes: lockAgeMinutes },
+        });
+    }
+
+    const { data: updated, error: updateError } = await supabase
+        .from('sync_domain_status')
+        .update({ status: 'running', lock_holder: lockHolder, lock_acquired_at: now })
+        .eq('domain', LOCK_DOMAIN)
+        .select()
+        .maybeSingle();
+
+    if (updateError) throw updateError;
+    if (!updated) throw new Error('Failed to acquire lock (no row returned)');
+    return { acquired: true, reason: isStale ? 'stale_cleared' as const : 'success' as const };
+}
+
+async function releaseLock(supabase: any, status: 'idle' | 'error', errorMessage?: string) {
+    const updates: Record<string, any> = {
+        status,
+        lock_holder: null,
+        lock_acquired_at: null,
+    };
+    if (status === 'idle') {
+        updates.last_successful_at = new Date().toISOString();
+    }
+    if (errorMessage) {
+        updates.last_error_message = errorMessage;
+        updates.last_error_at = new Date().toISOString();
+    }
+    await supabase.from('sync_domain_status').update(updates).eq('domain', LOCK_DOMAIN);
+}
+
 serve(async (req) => {
     if (req.method === 'OPTIONS') {
         return new Response(null, { headers: corsHeaders });
     }
+
+    const invocationId = crypto.randomUUID();
 
     try {
         // Use native SUPABASE_URL - functions are deployed on this project
@@ -28,9 +106,33 @@ serve(async (req) => {
         const forwardedAuth = callerAuth || `Bearer ${supabaseAnonKey}`;
         const forwardedApiKey = callerApiKey || supabaseAnonKey;
         
-        const supabase = createClient(supabaseUrl, supabaseServiceKey);
+                const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-        console.log("Searching for pending jobs...");
+                const lockHolder = req.headers.get('x-dispatch-invocation') || `dispatch-sync-jobs:${invocationId}`;
+                const lock = await acquireLock(supabase, lockHolder);
+
+                if (!lock.acquired) {
+                    await supabase.from('sync_logs').insert({
+                        domain: LOCK_DOMAIN,
+                        level: 'info',
+                        message: `Skipped dispatch: already running (holder=${lock.lockHolder}, age=${lock.lockAgeMinutes}m)`,
+                        details: { invocation_id: invocationId, lock },
+                    });
+
+                    return new Response(JSON.stringify({
+                        success: true,
+                        message: 'Dispatch already running; skipping to prevent overlap.',
+                        dispatched_jobs: 0,
+                        attempted: 0,
+                        errors: [],
+                        lock,
+                    }), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 200,
+                    });
+                }
+
+        console.log(`[${invocationId}] Searching for pending jobs...`);
 
         // Also reset stuck in_progress jobs (older than 10 minutes) before fetching
         const stuckThreshold = new Date(Date.now() - 10 * 60 * 1000).toISOString();
@@ -56,7 +158,7 @@ serve(async (req) => {
             throw fetchError;
         }
 
-        console.log(`Found ${pendingJobs?.length} pending jobs.`);
+        console.log(`[${invocationId}] Found ${pendingJobs?.length} pending jobs.`);
 
         if (!pendingJobs || pendingJobs.length === 0) {
             // Double-check with a count query
@@ -96,11 +198,34 @@ serve(async (req) => {
         let invokedCount = 0;
         const errors: any[] = []; // Collect errors
 
-        for (let i = 0; i < pendingJobs.length; i++) {
+                for (let i = 0; i < pendingJobs.length; i++) {
             const job = pendingJobs[i];
-            console.log(`Processing job ${i + 1}/${pendingJobs.length}: ${job.id}`);
+                        console.log(`[${invocationId}] Processing job ${i + 1}/${pendingJobs.length}: ${job.id}`);
             
             try {
+                                // Claim the job first to avoid duplicate processing if another dispatch overlaps
+                                const { data: claimed, error: claimError } = await supabase
+                                    .from('sync_jobs')
+                                    .update({ status: 'in_progress', started_at: new Date().toISOString() })
+                                    .eq('id', job.id)
+                                    .eq('status', 'pending')
+                                    .select('id')
+                                    .maybeSingle();
+
+                                if (claimError) {
+                                    console.error(`[${invocationId}] Error claiming job ${job.id}:`, claimError);
+                                    errors.push({ job_id: job.id, error: `Claim error: ${claimError.message}` });
+                                    if (i < pendingJobs.length - 1) {
+                                        await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_JOBS_MS));
+                                    }
+                                    continue;
+                                }
+
+                                if (!claimed) {
+                                    console.log(`[${invocationId}] Job ${job.id} was already claimed; skipping.`);
+                                    continue;
+                                }
+
                 // Call process-sync-job on same project (native SUPABASE_URL)
                 const processResponse = await fetch(`${supabaseUrl}/functions/v1/process-sync-job`, {
                     method: 'POST',
@@ -108,6 +233,7 @@ serve(async (req) => {
                         'Authorization': forwardedAuth,
                         'apikey': forwardedApiKey,
                         'Content-Type': 'application/json',
+                                                'x-dispatch-invocation': invocationId,
                     },
                     body: JSON.stringify({ job_id: job.id }),
                 });
@@ -126,11 +252,23 @@ serve(async (req) => {
                     const errorMsg = typeof invokeError === 'string' ? invokeError : (invokeError.message || JSON.stringify(invokeError));
                     console.error(`Failed to invoke process-sync-job for job ${job.id}:`, errorMsg);
                     errors.push({ job_id: job.id, error: `Invocation error: ${errorMsg}` });
+                                        await supabase.from('sync_logs').insert({
+                                            domain: LOCK_DOMAIN,
+                                            level: 'error',
+                                            message: `Invocation error for job ${job.id}: ${errorMsg}`,
+                                            details: { invocation_id: invocationId, job_id: job.id },
+                                        });
                 } else if (result && (result.error || result.success === false)) {
                     // Function returned successfully but with an error in the response
                     const errorMsg = result.error || 'Process failed';
                     console.error(`process-sync-job returned error for job ${job.id}:`, errorMsg);
                     errors.push({ job_id: job.id, error: errorMsg, details: result.details });
+                                        await supabase.from('sync_logs').insert({
+                                            domain: LOCK_DOMAIN,
+                                            level: 'error',
+                                            message: `process-sync-job returned error for job ${job.id}: ${errorMsg}`,
+                                            details: { invocation_id: invocationId, job_id: job.id, result },
+                                        });
                 } else if (result && result.success !== false) {
                     // Success
                     invokedCount++;
@@ -151,6 +289,12 @@ serve(async (req) => {
                 const errorMsg = err?.message || err?.toString() || JSON.stringify(err);
                 console.error(`Exception invoking process-sync-job for job ${job.id}:`, errorMsg);
                 errors.push({ job_id: job.id, error: `Exception: ${errorMsg}` });
+                                await supabase.from('sync_logs').insert({
+                                    domain: LOCK_DOMAIN,
+                                    level: 'error',
+                                    message: `Exception processing job ${job.id}: ${errorMsg}`,
+                                    details: { invocation_id: invocationId, job_id: job.id },
+                                });
                 
                 // Still add delay even on error to respect rate limits
                 if (i < pendingJobs.length - 1) {
@@ -159,7 +303,16 @@ serve(async (req) => {
             }
         }
 
-        console.log(`Dispatched ${invokedCount} of ${pendingJobs.length} pending jobs.`);
+                console.log(`[${invocationId}] Dispatched ${invokedCount} of ${pendingJobs.length} pending jobs.`);
+
+                await supabase.from('sync_logs').insert({
+                    domain: LOCK_DOMAIN,
+                    level: 'info',
+                    message: `Dispatch finished: dispatched=${invokedCount} attempted=${pendingJobs.length} errors=${errors.length}`,
+                    details: { invocation_id: invocationId, dispatched: invokedCount, attempted: pendingJobs.length, errors_count: errors.length },
+                });
+
+                await releaseLock(supabase, 'idle');
 
         return new Response(JSON.stringify({ 
             success: true, 
