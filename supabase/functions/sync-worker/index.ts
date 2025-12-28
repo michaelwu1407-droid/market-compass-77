@@ -12,6 +12,7 @@ serve(async (req) => {
     }
 
     try {
+        const QUEUE_LOW_WATERMARK = 20;
         // Use native SUPABASE_URL - functions are deployed on this project
         const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
         const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -69,9 +70,9 @@ serve(async (req) => {
             console.log(`Trader count (${traderCount}) is below 5000. Queue will be refilled from existing traders.`);
         }
         
-        // NUCLEAR MODE: Always enqueue if pending < 200
-        if ((currentPending || 0) < 200) {
-            console.log(`Queue is low (${currentPending} pending). NUCLEAR MODE: Enqueuing ALL traders...`);
+        // Enqueue only when the queue is genuinely low.
+        if ((currentPending || 0) < QUEUE_LOW_WATERMARK) {
+            console.log(`Queue is low (${currentPending} pending). Enqueuing more jobs...`);
             try {
                 // Call enqueue-sync-jobs on same project
                 const enqueueResponse = await fetch(`${supabaseUrl}/functions/v1/enqueue-sync-jobs`, {
@@ -88,7 +89,7 @@ serve(async (req) => {
                     console.error("CRITICAL: Error enqueuing jobs:", enqueueError);
                 } else {
                     const enqueueData = await enqueueResponse.json();
-                    console.log("NUCLEAR MODE enqueue result:", JSON.stringify(enqueueData, null, 2));
+                    console.log("Enqueue result:", JSON.stringify(enqueueData, null, 2));
                     if (enqueueData && enqueueData.jobs_created === 0) {
                         console.error("CRITICAL: enqueue-sync-jobs returned 0 jobs created. This is a problem!");
                     }
@@ -113,8 +114,8 @@ serve(async (req) => {
             trader_count: traderCount || 0,
             actions_taken: {
                 processed_jobs: dispatchData?.dispatched_jobs || 0,
-                triggered_discovery: (traderCount || 0) < 1000,
-                refilled_queue: (currentPending || 0) < 50
+                triggered_discovery: false,
+                refilled_queue: (currentPending || 0) < QUEUE_LOW_WATERMARK
             },
             note: shouldReschedule ? "More work available - call again in 2 minutes" : "Queue is healthy"
         }), { 

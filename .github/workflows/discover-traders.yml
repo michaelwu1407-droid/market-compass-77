@@ -1,17 +1,15 @@
 name: Discover New Traders - Continuous
 
 on:
-  schedule:
-    # Runs every minute to continuously fetch traders from Bullaware API
-    # Each call fetches 1 page (respecting 10 req/min limit)
-    # This ensures we're constantly discovering new traders
-    - cron: '* * * * *'  # Every minute
   workflow_dispatch: # Allows manual runs
 
 jobs:
   discover:
     runs-on: ubuntu-latest
     timeout-minutes: 2
+    env:
+      SUPABASE_FUNCTIONS_BASE_URL: https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
     
     steps:
       - name: Discover new traders (1 page per call)
@@ -20,9 +18,9 @@ jobs:
           # Call sync-traders directly to fetch 1 page
           # It will automatically paginate based on what's already in the database
           curl -X POST \
-            -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhndmFpYnh4aXdmcmFrbGZid2V5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYzODYwMjcsImV4cCI6MjA4MTk2MjAyN30.6WpGcdGeuFngazeTP5tiwVL--htj7AUqsLsTqW5Iz7M" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
             -H "Content-Type: application/json" \
             -d '{"max_pages": 1}' \
             -w "\nHTTP Status: %{http_code}\n" \
-            https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/sync-traders || echo "Error discovering traders"
+            "$SUPABASE_FUNCTIONS_BASE_URL/sync-traders" || echo "Error discovering traders"
 

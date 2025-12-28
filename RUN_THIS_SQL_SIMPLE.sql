@@ -10,7 +10,7 @@ SELECT cron.schedule(
     $func$
     SELECT net.http_post(
         url:='https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/sync-worker',
-        headers:='{"Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhndmFpYnh4aXdmcmFrbGZid2V5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYzODYwMjcsImV4cCI6MjA4MTk2MjAyN30.6WpGcdGeuFngazeTP5tiwVL--htj7AUqsLsTqW5Iz7M"}'::jsonb
+        headers:='{}'::jsonb
     )
     $func$
 );
@@ -22,7 +22,7 @@ SELECT cron.schedule(
     $func$
     SELECT net.http_post(
         url:='https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/enqueue-sync-jobs',
-        headers:='{"Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhndmFpYnh4aXdmcmFrbGZid2V5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYzODYwMjcsImV4cCI6MjA4MTk2MjAyN30.6WpGcdGeuFngazeTP5tiwVL--htj7AUqsLsTqW5Iz7M", "Content-Type": "application/json"}'::jsonb,
+        headers:='{ "Content-Type": "application/json"}'::jsonb,
         body:='{"sync_traders": true}'::jsonb
     )
     $func$

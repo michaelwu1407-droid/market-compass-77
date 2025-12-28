@@ -314,6 +314,7 @@ async function invokeFunction(
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${supabaseKey}`,
+        'apikey': supabaseKey,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
@@ -398,15 +399,44 @@ async function runTraderProfilesSync(
       return;
     }
 
-    const { count: pendingCount } = await supabase
+    let { count: pendingCount } = await supabase
       .from('sync_jobs')
       .select('*', { count: 'exact', head: true })
       .eq('status', 'pending');
 
-    const { count: inProgressCount } = await supabase
+    let { count: inProgressCount } = await supabase
       .from('sync_jobs')
       .select('*', { count: 'exact', head: true })
       .eq('status', 'in_progress');
+
+    // If the queue is empty, enqueue jobs first.
+    // This avoids the "0 jobs pending" no-op where trader_profiles never runs.
+    if ((pendingCount || 0) === 0 && (inProgressCount || 0) === 0) {
+      await logSync(supabase, runId, domain, 'info', 'No trader profile jobs queued; enqueuing jobs');
+      const { data: enqueueData, error: enqueueErr } = await invokeFunction(supabaseUrl, supabaseKey, 'enqueue-sync-jobs', {
+        // Keep it conservative by default; enqueue-sync-jobs can decide what to create.
+        force: false,
+      });
+
+      if (enqueueErr) {
+        await logSync(supabase, runId, domain, 'error', `Failed to enqueue trader jobs: ${enqueueErr.message || enqueueErr}`);
+      } else {
+        await logSync(supabase, runId, domain, 'info', 'Enqueue result', enqueueData);
+      }
+
+      // Re-count after enqueue attempt
+      const recountPending = await supabase
+        .from('sync_jobs')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'pending');
+      pendingCount = recountPending.count;
+
+      const recountInProgress = await supabase
+        .from('sync_jobs')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'in_progress');
+      inProgressCount = recountInProgress.count;
+    }
 
     const { count: completedCount } = await supabase
       .from('sync_jobs')
@@ -667,13 +697,13 @@ serve(async (req) => {
           try {
             switch (domain) {
               case 'discussion_feed':
-                await runDiscussionFeedSync(supabase, runId, supabaseUrl, supabaseAnonKey);
+                await runDiscussionFeedSync(supabase, runId, supabaseUrl, supabaseServiceKey);
                 break;
               case 'trader_profiles':
-                await runTraderProfilesSync(supabase, runId, supabaseUrl, supabaseAnonKey);
+                await runTraderProfilesSync(supabase, runId, supabaseUrl, supabaseServiceKey);
                 break;
               case 'stock_data':
-                await runStockDataSync(supabase, runId, supabaseUrl, supabaseAnonKey);
+                await runStockDataSync(supabase, runId, supabaseUrl, supabaseServiceKey);
                 break;
             }
             await completeRun(supabase, runId, 'completed');

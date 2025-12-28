@@ -12,6 +12,9 @@ serve(async (req) => {
   }
 
   try {
+        const callerAuth = req.headers.get('authorization') || '';
+        const callerApiKey = req.headers.get('apikey') || '';
+
     const body = await req.json();
     const { job_id } = body;
     console.log(`[process-sync-job] Received request for job_id: ${job_id}`);
@@ -30,7 +33,7 @@ serve(async (req) => {
     // 1. Fetch the job first (read-only check)
     const { data: jobCheck, error: checkError } = await supabase
         .from('sync_jobs')
-        .select('id, trader_id')
+        .select('id, trader_id, job_type')
         .eq('id', job_id)
         .single();
 
@@ -91,13 +94,17 @@ serve(async (req) => {
     console.log(`[process-sync-job] Processing ${job_type} for ${trader.etoro_username}`);
     
     // Call sync-trader-details on same project (native SUPABASE_URL)
+    const forwardedAuth = callerAuth || `Bearer ${supabaseAnonKey}`;
+    const forwardedApiKey = callerApiKey || supabaseAnonKey;
+
     const syncResponse = await fetch(`${supabaseUrl}/functions/v1/sync-trader-details`, {
         method: 'POST',
         headers: {
-            'Authorization': `Bearer ${supabaseAnonKey}`,
+            'Authorization': forwardedAuth,
+            'apikey': forwardedApiKey,
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ username: trader.etoro_username }),
+        body: JSON.stringify({ username: trader.etoro_username, job_type: job_type || 'deep_sync' }),
     });
     
     let syncData = null;
@@ -153,7 +160,17 @@ serve(async (req) => {
     }
 
     // 3. Mark job as complete
-    await supabase.from('sync_jobs').update({ status: 'completed', finished_at: new Date().toISOString() }).eq('id', job.id);
+        // Mark job as complete; support both finished_at and completed_at columns.
+        const finishedAt = new Date().toISOString();
+        const { error: completeErr } = await supabase
+            .from('sync_jobs')
+            .update({ status: 'completed', finished_at: finishedAt, completed_at: finishedAt })
+            .eq('id', job.id);
+
+        if (completeErr) {
+            // Older schema may not have completed_at/finished_at.
+            await supabase.from('sync_jobs').update({ status: 'completed' }).eq('id', job.id);
+        }
     console.log(`[process-sync-job] Successfully processed job ${job.id}`);
 
     return new Response(JSON.stringify({ success: true, job_id: job.id, message: `Synced ${trader.etoro_username}`, data: syncData }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });

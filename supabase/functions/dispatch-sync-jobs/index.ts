@@ -21,6 +21,12 @@ serve(async (req) => {
         const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
         const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
         const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+
+        // Prefer passing through the caller's auth headers (more reliable than env in some deployments)
+        const callerAuth = req.headers.get('authorization') || '';
+        const callerApiKey = req.headers.get('apikey') || '';
+        const forwardedAuth = callerAuth || `Bearer ${supabaseAnonKey}`;
+        const forwardedApiKey = callerApiKey || supabaseAnonKey;
         
         const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -99,7 +105,8 @@ serve(async (req) => {
                 const processResponse = await fetch(`${supabaseUrl}/functions/v1/process-sync-job`, {
                     method: 'POST',
                     headers: {
-                        'Authorization': `Bearer ${supabaseAnonKey}`,
+                        'Authorization': forwardedAuth,
+                        'apikey': forwardedApiKey,
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({ job_id: job.id }),

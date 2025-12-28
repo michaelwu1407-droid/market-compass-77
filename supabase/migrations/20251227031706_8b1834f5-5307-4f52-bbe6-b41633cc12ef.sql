@@ -76,17 +76,59 @@ ALTER TABLE public.sync_domain_status ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.sync_rate_limits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.sync_logs ENABLE ROW LEVEL SECURITY;
 
--- Create read policies (anyone can view sync status)
-CREATE POLICY "Anyone can view sync_runs" ON public.sync_runs FOR SELECT USING (true);
-CREATE POLICY "Anyone can view sync_domain_status" ON public.sync_domain_status FOR SELECT USING (true);
-CREATE POLICY "Anyone can view sync_rate_limits" ON public.sync_rate_limits FOR SELECT USING (true);
-CREATE POLICY "Anyone can view sync_logs" ON public.sync_logs FOR SELECT USING (true);
+-- Create RLS policies idempotently
+DO $$
+BEGIN
+  -- Read policies (anyone can view sync status)
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'sync_runs' AND policyname = 'Anyone can view sync_runs'
+  ) THEN
+    EXECUTE 'CREATE POLICY "Anyone can view sync_runs" ON public.sync_runs FOR SELECT USING (true)';
+  END IF;
 
--- Create write policies (service role only via edge functions)
-CREATE POLICY "Service can manage sync_runs" ON public.sync_runs FOR ALL USING (true);
-CREATE POLICY "Service can manage sync_domain_status" ON public.sync_domain_status FOR ALL USING (true);
-CREATE POLICY "Service can manage sync_rate_limits" ON public.sync_rate_limits FOR ALL USING (true);
-CREATE POLICY "Service can manage sync_logs" ON public.sync_logs FOR ALL USING (true);
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'sync_domain_status' AND policyname = 'Anyone can view sync_domain_status'
+  ) THEN
+    EXECUTE 'CREATE POLICY "Anyone can view sync_domain_status" ON public.sync_domain_status FOR SELECT USING (true)';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'sync_rate_limits' AND policyname = 'Anyone can view sync_rate_limits'
+  ) THEN
+    EXECUTE 'CREATE POLICY "Anyone can view sync_rate_limits" ON public.sync_rate_limits FOR SELECT USING (true)';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'sync_logs' AND policyname = 'Anyone can view sync_logs'
+  ) THEN
+    EXECUTE 'CREATE POLICY "Anyone can view sync_logs" ON public.sync_logs FOR SELECT USING (true)';
+  END IF;
+
+  -- Write policies (service role only via edge functions)
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'sync_runs' AND policyname = 'Service can manage sync_runs'
+  ) THEN
+    EXECUTE 'CREATE POLICY "Service can manage sync_runs" ON public.sync_runs FOR ALL USING (true)';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'sync_domain_status' AND policyname = 'Service can manage sync_domain_status'
+  ) THEN
+    EXECUTE 'CREATE POLICY "Service can manage sync_domain_status" ON public.sync_domain_status FOR ALL USING (true)';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'sync_rate_limits' AND policyname = 'Service can manage sync_rate_limits'
+  ) THEN
+    EXECUTE 'CREATE POLICY "Service can manage sync_rate_limits" ON public.sync_rate_limits FOR ALL USING (true)';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'sync_logs' AND policyname = 'Service can manage sync_logs'
+  ) THEN
+    EXECUTE 'CREATE POLICY "Service can manage sync_logs" ON public.sync_logs FOR ALL USING (true)';
+  END IF;
+END $$;
 
 -- Create indexes for performance
 CREATE INDEX IF NOT EXISTS idx_sync_runs_domain_status ON public.sync_runs(domain, status);
@@ -103,15 +145,24 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SET search_path = public;
 
--- Create triggers for updated_at
-CREATE TRIGGER update_sync_runs_updated_at
-  BEFORE UPDATE ON public.sync_runs
-  FOR EACH ROW EXECUTE FUNCTION public.update_sync_updated_at();
+-- Create triggers idempotently
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger WHERE tgname = 'update_sync_runs_updated_at' AND tgrelid = 'public.sync_runs'::regclass
+  ) THEN
+    EXECUTE 'CREATE TRIGGER update_sync_runs_updated_at BEFORE UPDATE ON public.sync_runs FOR EACH ROW EXECUTE FUNCTION public.update_sync_updated_at()';
+  END IF;
 
-CREATE TRIGGER update_sync_domain_status_updated_at
-  BEFORE UPDATE ON public.sync_domain_status
-  FOR EACH ROW EXECUTE FUNCTION public.update_sync_updated_at();
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger WHERE tgname = 'update_sync_domain_status_updated_at' AND tgrelid = 'public.sync_domain_status'::regclass
+  ) THEN
+    EXECUTE 'CREATE TRIGGER update_sync_domain_status_updated_at BEFORE UPDATE ON public.sync_domain_status FOR EACH ROW EXECUTE FUNCTION public.update_sync_updated_at()';
+  END IF;
 
-CREATE TRIGGER update_sync_rate_limits_updated_at
-  BEFORE UPDATE ON public.sync_rate_limits
-  FOR EACH ROW EXECUTE FUNCTION public.update_sync_updated_at();
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger WHERE tgname = 'update_sync_rate_limits_updated_at' AND tgrelid = 'public.sync_rate_limits'::regclass
+  ) THEN
+    EXECUTE 'CREATE TRIGGER update_sync_rate_limits_updated_at BEFORE UPDATE ON public.sync_rate_limits FOR EACH ROW EXECUTE FUNCTION public.update_sync_updated_at()';
+  END IF;
+END $$;

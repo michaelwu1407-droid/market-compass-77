@@ -16,12 +16,26 @@ serve(async (req) => {
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    
+
+    const BULLAWARE_BASE = 'https://api.bullaware.com/v1';
+
     let username: string | null = null;
+    let jobType: string | null = null;
     try {
       const body = await req.json();
       username = body.username || null;
+      jobType = body.job_type || null;
     } catch { }
+
+    if (!BULLAWARE_API_KEY) {
+      return new Response(JSON.stringify({
+        success: false,
+        error: 'BULLAWARE_API_KEY not configured',
+      }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     let tradersToSync: any[] = [];
     if (username) {
@@ -33,12 +47,12 @@ serve(async (req) => {
         .maybeSingle();
       if (trader) tradersToSync = [trader];
     } else {
-      // Fetch stale traders (not updated in last 6 hours)
+      // Fetch stale trader details (separate from basic profile updated_at)
       const staleThreshold = new Date(Date.now() - 6 * 3600000).toISOString();
       const { data: staleTraders } = await supabase
         .from('traders')
         .select('id, etoro_username')
-        .or(`updated_at.lt.${staleThreshold},updated_at.is.null`)
+        .or(`details_synced_at.lt.${staleThreshold},details_synced_at.is.null`)
         .limit(10);
       if (staleTraders) tradersToSync = staleTraders;
     }
@@ -54,83 +68,182 @@ serve(async (req) => {
       });
     }
 
+    const endpointForJobType = (jt: string) => {
+      switch (jt) {
+        case 'investor_details':
+          return `${BULLAWARE_BASE}/investors/${username}`;
+        case 'risk_score':
+          return `${BULLAWARE_BASE}/investors/${username}/risk-score/monthly`;
+        case 'metrics':
+          return `${BULLAWARE_BASE}/investors/${username}/metrics`;
+        case 'portfolio':
+        default:
+          return `${BULLAWARE_BASE}/investors/${username}/portfolio`;
+      }
+    };
+
     let syncedCount = 0;
     for (let i = 0; i < tradersToSync.length; i++) {
         const trader = tradersToSync[i];
-        let bullwareHoldings: any[] = [];
-        let apiSuccess = false;
+        const effectiveJobType = jobType || 'portfolio';
 
-        if (BULLAWARE_API_KEY) {
-             // Try fetching real data
-             try {
-                 const res = await fetch(`https://api.bullaware.com/v1/investors/${trader.etoro_username}/portfolio`, {
-                     headers: { 'Authorization': `Bearer ${BULLAWARE_API_KEY}` },
-                     signal: AbortSignal.timeout(15000)
-                 });
-                 if (res.ok) {
-                     const data = await res.json();
-                     // Map the API response to our holdings format
-                     if (data.holdings || data.portfolio || Array.isArray(data)) {
-                         const holdings = data.holdings || data.portfolio || data;
-                         bullwareHoldings = holdings.map((h: any) => ({
-                             trader_id: trader.id,
-                             symbol: h.symbol || h.ticker || h.asset,
-                             allocation_pct: h.allocation || h.weight || 0,
-                             profit_loss_pct: h.profitLoss || h.pnl || 0,
-                             updated_at: new Date().toISOString()
-                         }));
-                     }
-                     apiSuccess = true;
-                 } else if (res.status === 429) {
-                     console.error(`Rate limit hit for ${trader.etoro_username}, using mock data`);
-                 } else {
-                     console.error(`API returned ${res.status} for ${trader.etoro_username}`);
-                 }
-             } catch (e: any) { 
-                 console.error("API failed", e.message); 
-             }
-             
-             // Add delay between API calls to respect rate limit (10 req/min = 6 seconds)
-             // Only delay if processing multiple traders and not the last one
-             if (i < tradersToSync.length - 1) {
-                 await new Promise(resolve => setTimeout(resolve, 6000));
-             }
+        const url = endpointForJobType(effectiveJobType);
+        let apiData: any = null;
+
+        try {
+          const res = await fetch(url, {
+            headers: { 'Authorization': `Bearer ${BULLAWARE_API_KEY}` },
+            signal: AbortSignal.timeout(15000),
+          });
+
+          if (!res.ok) {
+            const text = await res.text().catch(() => '');
+            const msg = `Bullaware HTTP ${res.status} for ${trader.etoro_username} (${effectiveJobType}): ${text.substring(0, 300)}`;
+            await supabase.from('traders').update({ last_sync_error: msg }).eq('id', trader.id);
+            console.error(msg);
+            continue;
+          }
+          apiData = await res.json();
+        } catch (e: any) {
+          const msg = `Bullaware request failed for ${trader.etoro_username} (${effectiveJobType}): ${e?.message || String(e)}`;
+          await supabase.from('traders').update({ last_sync_error: msg }).eq('id', trader.id);
+          console.error(msg);
+          continue;
         }
 
-        // NO MOCK DATA - Only save if API succeeded
-        if (!apiSuccess) {
-            console.error(`API failed for ${trader.etoro_username} - skipping (no mock data)`);
-            // Mark as updated anyway to prevent immediate retry
-            await supabase.from('traders').update({ updated_at: new Date().toISOString() }).eq('id', trader.id);
-            continue; // Skip to next trader
+        const nowIso = new Date().toISOString();
+
+        if (effectiveJobType === 'investor_details') {
+          const investor = apiData?.investor || apiData?.data || apiData;
+          await supabase.from('traders').update({
+            profitable_weeks_pct: investor?.profitableWeeksPct ?? investor?.profitable_weeks_pct ?? null,
+            profitable_months_pct: investor?.profitableMonthsPct ?? investor?.profitable_months_pct ?? null,
+            daily_drawdown: investor?.dailyDD ?? investor?.daily_drawdown ?? null,
+            weekly_drawdown: investor?.weeklyDD ?? investor?.weekly_drawdown ?? null,
+            details_synced_at: nowIso,
+            last_sync_error: null,
+          }).eq('id', trader.id);
+          syncedCount++;
+          continue;
         }
 
-        // Save holdings only if API succeeded
-        if (bullwareHoldings.length > 0) {
-            const { error: deleteError } = await supabase.from('trader_holdings').delete().eq('trader_id', trader.id);
-            if (deleteError) {
-                console.error(`Error deleting old holdings for ${trader.etoro_username}:`, deleteError);
-            }
-            
-            const { error: insertError } = await supabase.from('trader_holdings').insert(bullwareHoldings);
-            if (insertError) {
-                console.error(`Error inserting holdings for ${trader.etoro_username}:`, insertError);
-                // Continue to next trader even if this one fails
-            } else {
-                syncedCount++;
-            }
+        if (effectiveJobType === 'risk_score') {
+          const score = typeof apiData === 'number'
+            ? apiData
+            : (apiData?.riskScore ?? apiData?.points?.[apiData?.points?.length - 1]?.riskScore);
+          await supabase.from('traders').update({
+            risk_score: score ?? null,
+            details_synced_at: nowIso,
+            last_sync_error: null,
+          }).eq('id', trader.id);
+          syncedCount++;
+          continue;
         }
-        
-        // Mark as updated so we don't sync again immediately
-        const { error: updateError } = await supabase.from('traders').update({ updated_at: new Date().toISOString() }).eq('id', trader.id);
-        if (updateError) {
-            console.error(`Error updating trader timestamp for ${trader.etoro_username}:`, updateError);
+
+        if (effectiveJobType === 'metrics') {
+          const m = apiData?.data || apiData;
+          await supabase.from('traders').update({
+            sharpe_ratio: m?.sharpeRatio ?? m?.sharpe_ratio ?? null,
+            sortino_ratio: m?.sortinoRatio ?? m?.sortino_ratio ?? null,
+            alpha: m?.alpha ?? null,
+            beta: m?.beta ?? null,
+            details_synced_at: nowIso,
+            last_sync_error: null,
+          }).eq('id', trader.id);
+          syncedCount++;
+          continue;
         }
+
+        // portfolio (default)
+        // BullAware payloads vary; commonly holdings/positions live under `data`.
+        const portfolioRoot = apiData?.data ?? apiData;
+        const holdings =
+          portfolioRoot?.holdings ||
+          portfolioRoot?.positions ||
+          portfolioRoot?.items ||
+          portfolioRoot?.portfolio ||
+          (Array.isArray(portfolioRoot) ? portfolioRoot : []);
+        if (!Array.isArray(holdings)) {
+          const msg = `Unexpected portfolio payload for ${trader.etoro_username}`;
+          await supabase.from('traders').update({ last_sync_error: msg }).eq('id', trader.id);
+          console.error(msg);
+          continue;
+        }
+
+        const normalizeSymbol = (raw: any): string[] => {
+          const base = (raw ?? '').toString().trim().toUpperCase();
+          if (!base) return [];
+          const noPrefix = base.includes(':') ? base.split(':').pop()!.trim() : base;
+          const noSuffix = noPrefix.includes('.') ? noPrefix.split('.')[0].trim() : noPrefix;
+          const cleaned = noSuffix.replace(/[^A-Z0-9\-]/g, '');
+
+          // Return a small set of candidates ordered by likelihood.
+          return Array.from(new Set([base, noPrefix, noSuffix, cleaned].filter(Boolean)));
+        };
+
+        const symbols = Array.from(
+          new Set(
+            holdings
+              .flatMap((h: any) => normalizeSymbol(h?.symbol || h?.ticker || h?.asset || h?.assetSymbol || h?.instrument))
+              .filter(Boolean)
+          )
+        );
+
+        const symbolToAssetId = new Map<string, string>();
+        if (symbols.length > 0) {
+          const { data: assets, error: assetsErr } = await supabase
+            .from('assets')
+            .select('id, symbol')
+            .in('symbol', symbols);
+          if (assetsErr) {
+            console.error('Error looking up assets for holdings:', assetsErr);
+          } else {
+            (assets || []).forEach((a: any) => symbolToAssetId.set(String(a.symbol).toUpperCase(), a.id));
+          }
+        }
+
+        const rows = holdings
+          .map((h: any) => {
+            const candidates = normalizeSymbol(h?.symbol || h?.ticker || h?.asset || h?.assetSymbol || h?.instrument);
+            const assetId = candidates.map((c) => symbolToAssetId.get(c)).find(Boolean) || null;
+            if (!assetId) return null;
+            return {
+              trader_id: trader.id,
+              asset_id: assetId,
+              allocation_pct: h?.allocation ?? h?.weight ?? h?.allocation_pct ?? null,
+              profit_loss_pct: h?.profitLoss ?? h?.pnl ?? h?.profit_loss_pct ?? null,
+              updated_at: nowIso,
+            };
+          })
+          .filter(Boolean);
+
+        // Replace holdings snapshot only if we could map at least one holding.
+        // This prevents wiping existing holdings when symbol formats don't match assets.
+        if (rows.length === 0 && holdings.length > 0) {
+          const msg = `No holdings matched assets for ${trader.etoro_username} (symbols may need normalization)`;
+          await supabase.from('traders').update({ last_sync_error: msg }).eq('id', trader.id);
+          console.warn(msg);
+          continue;
+        }
+
+        if (rows.length > 0) {
+          await supabase.from('trader_holdings').delete().eq('trader_id', trader.id);
+          const { error: insertError } = await supabase.from('trader_holdings').insert(rows as any);
+          if (insertError) {
+            const msg = `Error inserting holdings for ${trader.etoro_username}: ${insertError.message}`;
+            await supabase.from('traders').update({ last_sync_error: msg }).eq('id', trader.id);
+            console.error(msg);
+            continue;
+          }
+        }
+
+        await supabase.from('traders').update({ details_synced_at: nowIso, last_sync_error: null }).eq('id', trader.id);
+        syncedCount++;
     }
     
     return new Response(JSON.stringify({ 
         success: true, 
-        message: `Synced details for ${syncedCount} traders from Bullaware API`,
+      message: `Synced ${syncedCount} trader detail jobs from Bullaware API`,
         synced: syncedCount,
         api_used: !!BULLAWARE_API_KEY
     }), { 

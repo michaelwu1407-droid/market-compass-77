@@ -15,7 +15,7 @@ SELECT cron.schedule(
     $$
     SELECT net.http_post(
         url:='https://purbxytpqvfbgrmfglws.supabase.co/functions/v1/sync-worker',
-        headers:='{"Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB1cmJ4eXRwcXZmYmdybWZnbHdzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MjE0MDQ3NTcsImV4cCI6MjAzNjk4MDc1N30.2N-5r35b2T1S22-2r5o4W2n_J0up2uGAnV2S3bz8OhA"}'
+        headers:='{}'
     )
     $$
 );

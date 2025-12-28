@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.trigger-sync]
 verify_jwt = false
+
+[functions.sync-worker]
+verify_jwt = false

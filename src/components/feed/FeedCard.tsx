@@ -96,11 +96,11 @@ export function FeedCard({ item, onAnalyse, onStarForIC, onSave, onUnsave, isSav
         <div className="flex items-center gap-4 text-xs text-muted-foreground mb-3">
           <span className="flex items-center gap-1">
             <Heart className="h-3.5 w-3.5" />
-            {post.likes ?? post.like_count ?? 0}
+            {post.like_count ?? post.likes ?? 0}
           </span>
           <span className="flex items-center gap-1">
             <MessageCircle className="h-3.5 w-3.5" />
-            {post.comments ?? post.comment_count ?? 0}
+            {post.comment_count ?? post.comments ?? 0}
           </span>
           {/* Show content source/length if present */}
           {post._content_source && (

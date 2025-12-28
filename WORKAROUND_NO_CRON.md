@@ -13,10 +13,12 @@ Set up a cron job to call:
 ```
 https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/sync-worker
 ```
-With header:
+Headers:
 ```
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhndmFpYnh4aXdmcmFrbGZid2V5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYzODYwMjcsImV4cCI6MjA4MTk2MjAyN30.6WpGcdGeuFngazeTP5tiwVL--htj7AUqsLsTqW5Iz7M
+Content-Type: application/json
 ```
+
+Note: `sync-worker` is configured as public (`verify_jwt = false`), so no Authorization header is required.
 
 Schedule: Every 2 minutes
 

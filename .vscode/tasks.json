@@ -10,6 +10,232 @@
 				"$tsc"
 			],
 			"group": "build"
+		},
+		{
+			"label": "dev",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"dev"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "debug trader holdings",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"./scripts/d.mjs"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "debug trader holdings",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"./scripts/d.mjs"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "supabase db push remote",
+			"type": "shell",
+			"command": "supabase",
+			"args": [
+				"db",
+				"push",
+				"--project-ref",
+				"xgvaibxxiwfraklfbwey"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "supabase db push help",
+			"type": "shell",
+			"command": "supabase",
+			"args": [
+				"db",
+				"push",
+				"--help"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "supabase link help",
+			"type": "shell",
+			"command": "supabase",
+			"args": [
+				"link",
+				"--help"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "supabase link project",
+			"type": "shell",
+			"command": "supabase",
+			"args": [
+				"link",
+				"--project-ref",
+				"xgvaibxxiwfraklfbwey",
+				"--password",
+				"\"\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "capture supabase db push help",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"supabase db push --help | Out-File -Encoding utf8 .\\tmp_supabase_db_push_help.txt"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "apply traders.username migration via API",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-File",
+				".\\run-migration-via-api.ps1",
+				"-SqlFile",
+				".\\supabase\\migrations\\20251228150000_add_username_to_traders.sql"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "apply traders.username migration (API script)",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-File",
+				".\\run-migration-via-api.ps1",
+				"-SqlFile",
+				".\\supabase\\migrations\\20251228150000_add_username_to_traders.sql"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "debug migration api payload",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"$sql=Get-Content .\\supabase\\migrations\\20251228150000_add_username_to_traders.sql -Raw; $obj=@{ query = $sql }; Write-Host ($obj.query.GetType().FullName); $json=$obj|ConvertTo-Json -Depth 3; $json.Substring(0,[Math]::Min(200,$json.Length)) | Out-File -Encoding utf8 .\\tmp_api_payload_preview.txt; Write-Host 'wrote tmp_api_payload_preview.txt'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "debug migration api payload v2",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"$sql=Get-Content .\\supabase\\migrations\\20251228150000_add_username_to_traders.sql -Raw; $obj=[pscustomobject]@{ query = [string]$sql }; $json=$obj|ConvertTo-Json -Depth 3; $json.Substring(0,[Math]::Min(200,$json.Length)) | Out-File -Encoding utf8 .\\tmp_api_payload_preview2.txt; Write-Host 'wrote tmp_api_payload_preview2.txt'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "apply traders.username migration (API script)",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-File",
+				".\\run-migration-via-api.ps1",
+				"-SqlFile",
+				".\\supabase\\migrations\\20251228150000_add_username_to_traders.sql"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "verify traders.username exists",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"-e",
+				"const fs=require('fs');const env=fs.readFileSync('.env','utf8');const get=(k)=>{const m=env.match(new RegExp(k+'=\"([^\"]+)\"'));return m?m[1]:null};const url=get('VITE_SUPABASE_URL');const key=get('VITE_SUPABASE_ANON_KEY');(async()=>{const res=await fetch(url+'/rest/v1/traders?select=id,etoro_username,username&limit=1',{headers:{apikey:key,Authorization:'Bearer '+key}});const t=await res.text();console.log(res.status,t.slice(0,300));})();"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "verify username and dispatch batch",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"./scripts/verify_username_and_run_dispatch.mjs"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "verify username and dispatch batch (capture log)",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"node .\\scripts\\verify_username_and_run_dispatch.mjs | Out-File -Encoding utf8 .\\tmp_verify_username_dispatch_log.txt"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "sleep 75",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"Start-Sleep -Seconds 75"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "verify traders_username_unique index (API)",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-File",
+				".\\run-migration-via-api.ps1",
+				"-SqlFile",
+				".\\scripts\\check_traders_username_index.sql"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "capture index check output",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"powershell -NoProfile -File .\\run-migration-via-api.ps1 -SqlFile .\\scripts\\check_traders_username_index.sql | Out-File -Encoding utf8 .\\tmp_check_index_log.txt"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "verify traders_username_unique index (API)",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-File",
+				".\\run-migration-via-api.ps1",
+				"-SqlFile",
+				".\\scripts\\check_traders_username_index.sql"
+			],
+			"isBackground": false
 		}
 	]
 }

@@ -1,29 +1,14 @@
--- Fix the sync-worker cron job with correct URL and ensure it's active
--- Remove old cron jobs
-DELETE FROM cron.job WHERE jobname = 'invoke-sync-worker';
-
--- Schedule sync-worker to run every 2 minutes (more frequent for better processing)
-SELECT cron.schedule(
-    'invoke-sync-worker',
-    '*/2 * * * *', -- Every 2 minutes
-    $$
-    SELECT net.http_post(
-        url:='https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/sync-worker',
-        headers:='{"Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhndmFpYnh4aXdmcmFrbGZid2V5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYzODYwMjcsImV4cCI6MjA4MTk2MjAyN30.6WpGcdGeuFngazeTP5tiwVL--htj7AUqsLsTqW5Iz7M"}'::jsonb
-    )
-    $$
-);
-
--- Schedule sync-traders to run every hour to discover new traders
-SELECT cron.schedule(
-    'discover-new-traders',
-    '0 * * * *', -- Every hour
-    $$
-    SELECT net.http_post(
-        url:='https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/enqueue-sync-jobs',
-        headers:='{"Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhndmFpYnh4aXdmcmFrbGZid2V5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYzODYwMjcsImV4cCI6MjA4MTk2MjAyN30.6WpGcdGeuFngazeTP5tiwVL--htj7AUqsLsTqW5Iz7M", "Content-Type": "application/json"}'::jsonb,
-        body:='{"sync_traders": true}'::jsonb
-    )
-    $$
-);
+-- NOTE:
+-- This repo originally attempted to manage `pg_cron` schedules via migrations by
+-- directly writing to `cron.job` and embedding auth tokens.
+--
+-- In managed Supabase projects, migration roles commonly *cannot* modify `cron.job`,
+-- and embedding secrets in migrations is not acceptable.
+--
+-- Cron scheduling for production should be managed via:
+-- - Supabase Scheduled Functions / `supabase/cron.yaml`, or
+-- - an external cron runner (see docs in this repo).
+--
+-- Keeping this migration as a no-op ensures `supabase db push` can proceed.
+select 1;
 

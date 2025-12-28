@@ -1,6 +1,13 @@
-# Run Supabase migration with permissions
-$accessToken = "sbp_14ca1d97edc258b528506bde360f05b03ecef08c"
-$projectRef = "xgvaibxxiwfraklfbwey"
+param(
+    [string]$projectRef = "xgvaibxxiwfraklfbwey"
+)
+
+# Run Supabase migration with permissions (pg_cron helper).
+# NOTE: This requires elevated DB privileges and may not work on managed projects.
+$accessToken = $env:SUPABASE_ACCESS_TOKEN
+if (-not $accessToken) {
+    throw "Missing SUPABASE_ACCESS_TOKEN environment variable. Refusing to run without it."
+}
 
 $headers = @{
     "Authorization" = "Bearer $accessToken"
@@ -38,14 +45,14 @@ DELETE FROM cron.job WHERE jobname = 'discover-new-traders';
 SELECT cron.schedule(
     'invoke-sync-worker',
     '*/2 * * * *',
-    `$func`$SELECT net.http_post(url:='https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/sync-worker', headers:='{"Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhndmFpYnh4aXdmcmFrbGZid2V5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYzODYwMjcsImV4cCI6MjA4MTk2MjAyN30.6WpGcdGeuFngazeTP5tiwVL--htj7AUqsLsTqW5Iz7M"}'::jsonb)`$func`$
+    `$func`$SELECT net.http_post(url:='https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/sync-worker', headers:='{}'::jsonb)`$func`$
 );
 
 -- Schedule discover-new-traders to run every hour
 SELECT cron.schedule(
     'discover-new-traders',
     '0 * * * *',
-    `$func`$SELECT net.http_post(url:='https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/enqueue-sync-jobs', headers:='{"Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhndmFpYnh4aXdmcmFrbGZid2V5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYzODYwMjcsImV4cCI6MjA4MTk2MjAyN30.6WpGcdGeuFngazeTP5tiwVL--htj7AUqsLsTqW5Iz7M", "Content-Type": "application/json"}'::jsonb, body:='{"sync_traders": true}'::jsonb)`$func`$
+    `$func`$SELECT net.http_post(url:='https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/enqueue-sync-jobs', headers:='{ "Content-Type": "application/json"}'::jsonb, body:='{"sync_traders": true}'::jsonb)`$func`$
 );
 "@
 

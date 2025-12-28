@@ -13,7 +13,6 @@ Since Supabase pg_cron requires superuser access, use a free external cron servi
    - **Request method:** POST
    - **Request headers:** 
      ```
-     Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhndmFpYnh4aXdmcmFrbGZid2V5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYzODYwMjcsImV4cCI6MjA4MTk2MjAyN30.6WpGcdGeuFngazeTP5tiwVL--htj7AUqsLsTqW5Iz7M
      Content-Type: application/json
      ```
    - **Request body:** `{}`
@@ -27,6 +26,8 @@ Since Supabase pg_cron requires superuser access, use a free external cron servi
    - **Request body:** `{"sync_traders": true}`
 
 That's it! The system will now run automatically.
+
+Note: `sync-worker` is configured as public (`verify_jwt = false`), so you do not need an Authorization header.
 
 ## Alternative: GitHub Actions (Already Available)
 

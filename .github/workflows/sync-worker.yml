@@ -1,39 +1,23 @@
 name: Sync Worker - Continuous Processing
 
 on:
-  schedule:
-    # Runs every 2 minutes
-    - cron: '*/2 * * * *'
   workflow_dispatch: # Allows manual runs
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      SUPABASE_FUNCTIONS_BASE_URL: https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
     
     steps:
       - name: Call sync-worker
         run: |
           echo "Calling sync-worker at $(date)"
           curl -X POST \
-            -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhndmFpYnh4aXdmcmFrbGZid2V5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYzODYwMjcsImV4cCI6MjA4MTk2MjAyN30.6WpGcdGeuFngazeTP5tiwVL--htj7AUqsLsTqW5Iz7M" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
             -H "Content-Type: application/json" \
             -w "\nHTTP Status: %{http_code}\n" \
-            https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/sync-worker || echo "Error calling sync-worker"
-
-      - name: Enqueue ALL traders (NUCLEAR MODE - every run)
-        run: |
-          echo "NUCLEAR MODE: Enqueuing ALL traders at $(date)"
-          RESPONSE=$(curl -s -X POST \
-            -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhndmFpYnh4aXdmcmFrbGZid2V5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYzODYwMjcsImV4cCI6MjA4MTk2MjAyN30.6WpGcdGeuFngazeTP5tiwVL--htj7AUqsLsTqW5Iz7M" \
-            -H "Content-Type: application/json" \
-            -d '{}' \
-            -w "\nHTTP Status: %{http_code}\n" \
-            https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/enqueue-sync-jobs)
-          echo "$RESPONSE"
-          if echo "$RESPONSE" | grep -q '"jobs_created":0'; then
-            echo "CRITICAL ERROR: No jobs were created! This is a serious problem."
-          else
-            echo "SUCCESS: Jobs were created"
-          fi
+            "$SUPABASE_FUNCTIONS_BASE_URL/sync-worker" || echo "Error calling sync-worker"
 

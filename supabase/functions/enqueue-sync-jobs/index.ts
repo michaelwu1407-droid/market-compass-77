@@ -71,13 +71,31 @@ serve(async (req) => {
       });
     }
 
-    const jobsToInsert = allTraderIds.map(trader_id => ({ trader_id, status: 'pending', job_type: 'deep_sync' }));
+    // One API request per job to respect Bullaware 10 req/min.
+    // These job types map 1:1 to endpoints in sync-trader-details.
+    const jobTypes = ['investor_details', 'risk_score', 'metrics', 'portfolio'] as const;
+
+    const jobsToInsert = allTraderIds.flatMap((trader_id) =>
+      jobTypes.map((job_type) => ({ trader_id, status: 'pending', job_type }))
+    );
     const batchSize = 500;
     let actualInserted = 0;
 
     for (let i = 0; i < jobsToInsert.length; i += batchSize) {
       const batch = jobsToInsert.slice(i, i + batchSize);
-      const { data } = await supabase.from('sync_jobs').insert(batch).select('id');
+      const { data, error } = await supabase.from('sync_jobs').insert(batch).select('id');
+      if (error) {
+        // Surface schema mismatches clearly (common: missing job_type column).
+        console.error('Error inserting sync_jobs batch:', error);
+        return new Response(JSON.stringify({
+          success: false,
+          error: error.message || 'Failed inserting sync_jobs',
+          hint: 'Check sync_jobs schema has columns: trader_id, status, job_type',
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 500,
+        });
+      }
       actualInserted += data?.length || 0;
     }
 
