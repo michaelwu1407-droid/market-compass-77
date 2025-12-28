@@ -78,16 +78,19 @@ export default function FeedPage() {
   const feedItems: FeedItem[] = useMemo(() => (posts || [])
     .filter(post => isValidPostContent(post.content))
     .map((post) => {
-      const displayName = post.traders?.display_name || '';
+      const traderUsername = post.traders?.etoro_username || post.etoro_username || '';
+      const displayName = post.traders?.display_name || traderUsername || 'Unknown';
       const nameParts = displayName.split(' ').filter(Boolean);
-      const poster_first = nameParts[0] || '';
-      const poster_last = nameParts.slice(1).join(' ');
-      const poster_avatar = post.traders?.avatar_url || '';
+      const fallbackFirst = nameParts[0] || '';
+      const fallbackLast = nameParts.slice(1).join(' ');
+      const poster_first = (post as any).poster_first || fallbackFirst;
+      const poster_last = (post as any).poster_last || fallbackLast;
+      const poster_avatar = (post as any).poster_avatar || post.traders?.avatar_url || '';
 
       const mappedTrader: FeedTrader | undefined = post.traders ? {
         id: post.traders.id,
         etoro_trader_id: post.traders.etoro_username,
-        display_name: post.traders.display_name,
+        display_name: post.traders.display_name || post.traders.etoro_username || displayName,
         avatar_url: post.traders.avatar_url || '',
         bio: post.traders.bio || '',
         risk_score: post.traders.risk_score || 0,

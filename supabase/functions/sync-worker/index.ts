@@ -20,6 +20,117 @@ serve(async (req) => {
         
         const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+        const body = await req.json().catch(() => ({}));
+        const traderId = body?.trader_id ?? body?.traderId ?? null;
+        const preferEtoro = body?.prefer_etoro !== false;
+        const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+        // Targeted refresh path (used by TraderDetail "Refresh data")
+        // This bypasses the global queue so the UI can update immediately.
+        if (traderId) {
+            const { data: trader, error: traderErr } = await supabase
+                .from('traders')
+                .select('id, etoro_username, etoro_cid')
+                .eq('id', traderId)
+                .maybeSingle();
+
+            if (traderErr || !trader) {
+                return new Response(JSON.stringify({
+                    success: false,
+                    error: traderErr?.message || 'Trader not found',
+                }), {
+                    status: 200,
+                    headers: { ...corsHeaders, "Content-Type": "application/json" },
+                });
+            }
+
+            const results: Record<string, any> = { trader_id: trader.id };
+
+            if (preferEtoro && trader.etoro_cid) {
+                const etoroResp = await fetch(`${supabaseUrl}/functions/v1/sync-trader-etoro`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${supabaseAnonKey}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ cid: trader.etoro_cid }),
+                });
+                results.etoro_profile = etoroResp.ok
+                    ? await etoroResp.json()
+                    : { success: false, error: `HTTP ${etoroResp.status}: ${await etoroResp.text()}` };
+            }
+
+            // If eToro didn't provide monthly/equity/portfolio history (it often doesn't),
+            // fall back to BullAware investor_details which now best-effort parses those series.
+            let performanceCount = 0;
+            let equityCount = 0;
+            let portfolioHistoryCount = 0;
+            try {
+                const perf = await supabase
+                    .from('trader_performance')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('trader_id', trader.id);
+                performanceCount = perf.count || 0;
+
+                const eq = await supabase
+                    .from('trader_equity_history')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('trader_id', trader.id);
+                equityCount = eq.count || 0;
+
+                const ph = await supabase
+                    .from('trader_portfolio_history')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('trader_id', trader.id);
+                portfolioHistoryCount = ph.count || 0;
+            } catch (_e) {
+                // Best-effort only
+            }
+
+            const bullAwareJobTypes = [
+                ...(preferEtoro && (performanceCount > 0 || equityCount > 0 || portfolioHistoryCount > 0) ? [] : ['investor_details']),
+                'risk_score',
+                'metrics',
+                'portfolio',
+                'trades'
+            ];
+            const bullaware: Array<any> = [];
+            for (let i = 0; i < bullAwareJobTypes.length; i++) {
+                const job_type = bullAwareJobTypes[i];
+                const baResp = await fetch(`${supabaseUrl}/functions/v1/sync-trader-details`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${supabaseAnonKey}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username: trader.etoro_username, job_type }),
+                });
+                bullaware.push({
+                    job_type,
+                    result: baResp.ok
+                        ? await baResp.json()
+                        : { success: false, error: `HTTP ${baResp.status}: ${await baResp.text()}` },
+                });
+                if (i < bullAwareJobTypes.length - 1) await sleep(6000);
+            }
+            results.bullaware = bullaware;
+
+            results.history_counts_before_fallback = {
+                trader_performance: performanceCount,
+                trader_equity_history: equityCount,
+                trader_portfolio_history: portfolioHistoryCount,
+                prefer_etoro: preferEtoro,
+            };
+
+            return new Response(JSON.stringify({
+                success: true,
+                mode: 'targeted',
+                results,
+            }), {
+                headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+        }
+
         // 1. Invoke dispatch-sync-jobs on same project
         console.log("Invoking dispatch-sync-jobs...");
         

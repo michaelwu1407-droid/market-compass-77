@@ -21,33 +21,97 @@ serve(async (req) => {
 
         // Prefer eToro (when configured) and fall back to BullAware.
         // We don't hardcode eToro endpoints here; configure via env so this stays stable.
-        // - ETORO_TRADERS_URL: optional URL template; supports {offset} and {limit} placeholders.
+                // - ETORO_TRADERS_URL: optional URL template; supports {page} and {pagesize}/{limit} placeholders.
+                //   (We also still support legacy {offset}/{limit} templates.)
         const ETORO_TRADERS_URL = Deno.env.get('ETORO_TRADERS_URL');
 
     let apiUsed: 'etoro' | 'bullaware' | 'none' = 'none';
     let allTraders: any[] = [];
+        let apiWorks = true;
+
+        const etoroHeaders = {
+            'Accept': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        };
+
+        const extractEtoroRankingsItems = (data: any): any[] => {
+            if (!data) return [];
+            if (Array.isArray(data)) return data;
+            const candidates = [
+                data.items,
+                data.Items,
+                data.data,
+                data.Data,
+                data.results,
+                data.Results,
+                data.rankings,
+                data.Rankings,
+                data.investors,
+                data.traders,
+                data.users,
+            ];
+            for (const c of candidates) {
+                if (Array.isArray(c)) return c;
+            }
+            if (typeof data === 'object' && (data.CID !== undefined || data.Value !== undefined)) return [data];
+            return [];
+        };
+
+        const clampInt = (v: unknown, fallback: number, min: number, max: number) => {
+            const n = Number(v);
+            if (!Number.isFinite(n)) return fallback;
+            return Math.max(min, Math.min(max, Math.floor(n)));
+        };
+
+        const asFiniteNumber = (v: unknown): number | null => {
+            if (typeof v === 'number' && Number.isFinite(v)) return v;
+            if (typeof v === 'string') {
+                const t = v.trim();
+                if (!t) return null;
+                const n = Number(t);
+                if (Number.isFinite(n)) return n;
+            }
+            return null;
+        };
+
+        const buildEtoroRankingsUrl = (templateOrBase: string, page: number, pageSize: number) => {
+            // Supports either placeholders ({page}/{pagesize}/{limit}) or a base URL without pagination params.
+            const hasPlaceholders = /\{page\}|\{pagesize\}|\{limit\}|\{offset\}/.test(templateOrBase);
+            if (hasPlaceholders) {
+                const offset = page * pageSize;
+                return templateOrBase
+                    .replaceAll('{page}', String(page))
+                    .replaceAll('{pagesize}', String(pageSize))
+                    .replaceAll('{limit}', String(pageSize))
+                    .replaceAll('{offset}', String(offset));
+            }
+
+            // No placeholders: treat as a base URL and inject page/pagesize if absent.
+            const u = new URL(templateOrBase);
+            if (!u.searchParams.has('page')) u.searchParams.set('page', String(page));
+            // eToro uses 'pagesize' (lowercase) per OpenAPI.
+            if (!u.searchParams.has('pagesize')) u.searchParams.set('pagesize', String(pageSize));
+            return u.toString();
+        };
 
         const body = await req.json().catch(() => ({}));
-        const startPage = body.start_page || 0;
-        const maxPages = body.max_pages || 1;
+        const startPage = clampInt(body.start_page, 0, 0, 10_000);
+        const pagesToFetch = clampInt(body.max_pages, 1, 1, 50);
+        // OpenAPI suggests 50-100; keep a hard cap to avoid timeouts.
+        const pageSize = clampInt(body.page_size, 50, 1, 100);
+        const endPageExclusive = startPage + pagesToFetch;
 
         // 1) Attempt eToro if configured
         if (ETORO_TRADERS_URL) {
             console.log(`Attempting to fetch traders from eToro (ETORO_TRADERS_URL configured)...`);
 
-            let page = startPage;
-            while (page < maxPages) {
-                const offset = page * 1000;
-                const limit = 1000;
-                const url = ETORO_TRADERS_URL
-                    .replaceAll('{offset}', String(offset))
-                    .replaceAll('{limit}', String(limit));
+            for (let i = 0; i < pagesToFetch; i++) {
+                const page = startPage + i;
+                const limit = pageSize;
+                const url = buildEtoroRankingsUrl(ETORO_TRADERS_URL, page, pageSize);
                 try {
                     const res = await fetch(url, {
-                        headers: {
-                            'Accept': 'application/json',
-                            'User-Agent': 'Mozilla/5.0',
-                        },
+                        headers: etoroHeaders,
                         signal: AbortSignal.timeout(15000),
                     });
 
@@ -65,9 +129,7 @@ serve(async (req) => {
                         break;
                     }
 
-                    const pageTraders =
-                        data.items || data.data || data.investors || data.results || data.traders || data.users ||
-                        (Array.isArray(data) ? data : []);
+                    const pageTraders = extractEtoroRankingsItems(data);
 
                     if (!Array.isArray(pageTraders) || pageTraders.length === 0) {
                         console.log(`eToro page ${page + 1}: no traders, stopping.`);
@@ -76,11 +138,10 @@ serve(async (req) => {
 
                     allTraders = allTraders.concat(pageTraders);
                     apiUsed = 'etoro';
-                    console.log(`eToro page ${page + 1}: fetched ${pageTraders.length} traders (total=${allTraders.length})`);
+                    console.log(`eToro page ${page}: fetched ${pageTraders.length} traders (total=${allTraders.length})`);
 
                     if (pageTraders.length < limit) break;
-                    page++;
-                    if (page < maxPages) await new Promise(resolve => setTimeout(resolve, 1000));
+                    if (i < pagesToFetch - 1) await new Promise(resolve => setTimeout(resolve, 1000));
                 } catch (e) {
                     console.error('eToro traders request failed:', (e as Error)?.message || String(e));
                     break;
@@ -110,7 +171,7 @@ serve(async (req) => {
             // Note: we keep the existing pagination behavior.
             let page = startPage;
         
-        while (page < maxPages) {
+        while (page < endPageExclusive) {
             try {
                 const bullwareUrl = `https://api.bullaware.com/v1/investors?limit=1000&offset=${page * 1000}`;
                 const response = await fetch(bullwareUrl, {
@@ -161,7 +222,7 @@ serve(async (req) => {
                     apiWorks = true;
                     
                     // Add delay between pages to respect rate limits (10 req/min = 6 seconds between requests)
-                    if (page < maxPages) {
+                    if (page < endPageExclusive) {
                         console.log(`Waiting 6 seconds before next page to respect API rate limit...`);
                         await new Promise(resolve => setTimeout(resolve, 6000));
                     }
@@ -219,26 +280,32 @@ serve(async (req) => {
 
         console.log(`Processing ${allTraders.length} traders for upsert (source=${apiUsed}).`);
 
-        const tradersToUpsert = allTraders.map(trader => ({
-        etoro_username: trader.username || trader.userName || trader.etoro_username || trader.id,
-        display_name: trader.displayName || trader.fullName || trader.name || trader.username || trader.userName || trader.etoro_username,
-        avatar_url: trader.avatar || trader.picture || trader.image || trader.profileImage || trader.photo || null,
-        bio: trader.bio || trader.description || trader.about || null,
-        country: trader.country || trader.location || null,
-        verified: typeof trader.verified === 'boolean' ? trader.verified : (typeof trader.isVerified === 'boolean' ? trader.isVerified : null),
-                etoro_cid: trader.customerId || trader.CustomerId || trader.cid || trader.CID || trader.etoroCid || null,
-                win_ratio: trader.winRatio || trader.win_ratio || trader.winRate || trader.win_rate || null,
-        risk_score: trader.riskScore || trader.risk_score || trader.risk || null,
-        copiers: trader.copiers || trader.copier_count || trader.followers || 0,
-        gain_12m: trader.gain12Months || trader.gain_12m || trader.gain_12_months || trader.return_12m || null,
-        gain_24m: trader.gain24Months || trader.gain_24m || trader.return_24m || null,
-        max_drawdown: trader.maxDrawdown || trader.max_drawdown || trader.drawdown || null,
-        tags: trader.tags || trader.styles || trader.categories || null,
-        updated_at: new Date().toISOString(),
-        active_since: trader.activeSince || trader.memberSince || trader.createdAt || trader.created_at || null,
+        const tradersToUpsert = allTraders.map((trader) => {
+            const v = trader?.Value ?? trader?.value ?? trader;
+            const etoroUsername = v?.UserName || v?.userName || v?.username || trader?.username || trader?.userName || trader?.etoro_username || trader?.id;
+            const etoroCid = trader?.CID ?? trader?.cid ?? v?.CustomerId ?? v?.customerId ?? trader?.customerId ?? trader?.CustomerId;
+
+            return {
+                etoro_username: etoroUsername,
+                display_name: v?.DisplayName || v?.displayName || v?.fullName || v?.name || etoroUsername,
+                avatar_url: v?.avatar || v?.avatarUrl || v?.picture || v?.image || v?.profileImage || v?.photo || null,
+                bio: v?.bio || v?.description || v?.about || null,
+                country: v?.country || v?.location || null,
+                verified: typeof v?.Verified === 'boolean' ? v.Verified : (typeof v?.verified === 'boolean' ? v.verified : (typeof v?.isVerified === 'boolean' ? v.isVerified : null)),
+                etoro_cid: etoroCid ?? null,
+                win_ratio: asFiniteNumber(v?.WinRatio ?? v?.winRatio ?? v?.win_ratio ?? v?.winRate ?? v?.win_rate),
+                risk_score: asFiniteNumber(v?.RiskScore ?? v?.riskScore ?? v?.risk_score ?? v?.risk),
+                copiers: v?.Copiers ?? v?.copiers ?? v?.copier_count ?? v?.followers ?? 0,
+                gain_12m: v?.Gain ?? v?.gain ?? v?.gain12Months ?? v?.gain_12m ?? v?.gain_12_months ?? v?.return_12m ?? null,
+                gain_24m: v?.gain24Months || v?.gain_24m || v?.return_24m || null,
+                max_drawdown: v?.WeeklyDD ?? v?.weeklyDD ?? v?.DailyDD ?? v?.dailyDD ?? v?.maxDrawdown ?? v?.max_drawdown ?? v?.drawdown ?? null,
+                tags: v?.tags || v?.styles || v?.categories || null,
+                updated_at: new Date().toISOString(),
+                active_since: v?.activeSince || v?.memberSince || v?.createdAt || v?.created_at || null,
                 last_etoro_sync_at: apiUsed === 'etoro' ? new Date().toISOString() : null,
                 trader_source: apiUsed,
-    })).filter(t => t.etoro_username); // Filter out any traders without a username
+            };
+        }).filter(t => t.etoro_username); // Filter out any traders without a username
 
     if (tradersToUpsert.length > 0) {
         console.log(`Attempting to upsert ${tradersToUpsert.length} traders...`);

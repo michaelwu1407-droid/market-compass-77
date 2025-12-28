@@ -41,6 +41,17 @@ serve(async (req) => {
       .from('traders')
       .select('*', { count: 'exact', head: true });
 
+    const { count: tradersWithCid, error: cidError } = await supabase
+      .from('traders')
+      .select('id', { count: 'exact', head: true })
+      .not('etoro_cid', 'is', null);
+
+    const { count: tradersWithCidNeverSynced, error: cidNeverError } = await supabase
+      .from('traders')
+      .select('id', { count: 'exact', head: true })
+      .not('etoro_cid', 'is', null)
+      .is('last_etoro_sync_at', null);
+
     // 2. Count Sync Jobs by Status
     const { data: jobStats, error: jobError } = await supabase
       .from('sync_jobs')
@@ -61,10 +72,12 @@ serve(async (req) => {
 
     return new Response(JSON.stringify({
       trader_count: traderCount,
+      traders_with_etoro_cid: tradersWithCid,
+      traders_with_etoro_cid_never_synced: tradersWithCidNeverSynced,
       jobs_total: jobStats?.length,
       jobs_by_status: jobsByStatus,
       recent_errors: recentErrors,
-      db_errors: { trader: traderError, job: jobError }
+      db_errors: { trader: traderError, job: jobError, cid: cidError, cid_never: cidNeverError }
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 200,

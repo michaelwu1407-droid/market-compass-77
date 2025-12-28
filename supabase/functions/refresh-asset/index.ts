@@ -231,14 +231,15 @@ serve(async (req) => {
     }
 
     // Store price history
+    const q: any = quotes as any;
     const priceHistory = timestamps.map((ts: number, i: number) => ({
       asset_id: assetId,
       date: new Date(ts * 1000).toISOString().split('T')[0],
-      open_price: quotes.open?.[i] || null,
-      high_price: quotes.high?.[i] || null,
-      low_price: quotes.low?.[i] || null,
-      close_price: quotes.close?.[i] || null,
-      volume: quotes.volume?.[i] || null,
+      open_price: q.open?.[i] || null,
+      high_price: q.high?.[i] || null,
+      low_price: q.low?.[i] || null,
+      close_price: q.close?.[i] || null,
+      volume: q.volume?.[i] || null,
     })).filter((p: any) => p.close_price !== null);
 
     console.log(`[refresh-asset] Storing ${priceHistory.length} price history records`);

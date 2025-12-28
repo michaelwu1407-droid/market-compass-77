@@ -5,6 +5,10 @@ declare const Deno: {
   env: {
     get(key: string): string | undefined;
   };
+  serve: (
+    handler: (request: Request) => Response | Promise<Response>,
+    options?: unknown,
+  ) => void;
 };
 
 declare module "https://deno.land/std@0.168.0/http/server.ts" {

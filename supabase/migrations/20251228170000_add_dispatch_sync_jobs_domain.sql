@@ -23,11 +23,9 @@ BEGIN
       AND contype = 'c'
       AND conname = 'sync_domain_status_domain_check'
   ) THEN
-    EXECUTE $$
-      ALTER TABLE public.sync_domain_status
-      ADD CONSTRAINT sync_domain_status_domain_check
-      CHECK (domain IN ('discussion_feed', 'trader_profiles', 'stock_data', 'dispatch_sync_jobs'))
-    $$;
+    EXECUTE 'ALTER TABLE public.sync_domain_status '
+      || 'ADD CONSTRAINT sync_domain_status_domain_check '
+      || 'CHECK (domain IN (''discussion_feed'', ''trader_profiles'', ''stock_data'', ''dispatch_sync_jobs''))';
   END IF;
 
   -- Ensure the status row exists.

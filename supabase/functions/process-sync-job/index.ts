@@ -59,7 +59,7 @@ serve(async (req: Request) => {
         .from('sync_jobs')
         .update({ status: 'in_progress', started_at: new Date().toISOString() })
         .eq('id', job_id)
-        .select('*, trader:traders(id, etoro_username)')
+        .select('*, trader:traders(id, etoro_username, etoro_cid)')
         .single();
 
     if (fetchError || !job) {
@@ -76,7 +76,7 @@ serve(async (req: Request) => {
     }
 
     const { trader, job_type } = job;
-    if (!trader || !trader.etoro_username) {
+    if (!trader) {
         console.error(`[process-sync-job] Trader missing for job ${job_id}`);
         await supabase.from('sync_jobs').update({ 
             status: 'failed', 
@@ -84,7 +84,6 @@ serve(async (req: Request) => {
             error_message: 'Trader not found',
             retry_count: (job.retry_count || 0) + 1
         }).eq('id', job.id);
-        // Return 200 so dispatch-sync-jobs can continue processing other jobs
         return new Response(JSON.stringify({ 
             success: false,
             error: 'Trader missing',
@@ -95,20 +94,65 @@ serve(async (req: Request) => {
         });
     }
 
-    console.log(`[process-sync-job] Processing ${job_type} for ${trader.etoro_username}`);
+    const normalizedJobType = (job_type || '').toString();
+    const isEtoroProfile = normalizedJobType === 'etoro_profile';
+    const requiresUsername = !isEtoroProfile;
+
+    if (requiresUsername && !trader.etoro_username) {
+        console.error(`[process-sync-job] Trader missing etoro_username for job ${job_id}`);
+        await supabase.from('sync_jobs').update({ 
+            status: 'failed', 
+            finished_at: new Date().toISOString(), 
+            error_message: 'Trader missing etoro_username',
+            retry_count: (job.retry_count || 0) + 1
+        }).eq('id', job.id);
+        return new Response(JSON.stringify({ 
+            success: false,
+            error: 'Trader missing etoro_username',
+            job_id: job.id
+        }), { 
+            status: 200, 
+            headers: { ...corsHeaders, "Content-Type": "application/json" } 
+        });
+    }
+
+    if (isEtoroProfile && !trader.etoro_cid) {
+        console.error(`[process-sync-job] Trader missing etoro_cid for job ${job_id}`);
+        await supabase.from('sync_jobs').update({ 
+            status: 'failed', 
+            finished_at: new Date().toISOString(), 
+            error_message: 'Trader missing etoro_cid',
+            retry_count: (job.retry_count || 0) + 1
+        }).eq('id', job.id);
+        return new Response(JSON.stringify({ 
+            success: false,
+            error: 'Trader missing etoro_cid',
+            job_id: job.id
+        }), { 
+            status: 200, 
+            headers: { ...corsHeaders, "Content-Type": "application/json" } 
+        });
+    }
+
+    console.log(`[process-sync-job] Processing ${normalizedJobType} for trader_id=${trader.id}`);
     
     // Call sync-trader-details on same project
     const forwardedAuth = callerAuth || `Bearer ${supabaseAnonKey}`;
     const forwardedApiKey = callerApiKey || supabaseAnonKey;
 
-    const syncResponse = await fetch(`${supabaseUrl}/functions/v1/sync-trader-details`, {
+    const targetFunction = isEtoroProfile ? 'sync-trader-etoro' : 'sync-trader-details';
+    const targetBody = isEtoroProfile
+      ? { cid: trader.etoro_cid, username: trader.etoro_username || undefined }
+      : { username: trader.etoro_username, job_type: normalizedJobType || 'deep_sync' };
+
+    const syncResponse = await fetch(`${supabaseUrl}/functions/v1/${targetFunction}`, {
         method: 'POST',
         headers: {
             'Authorization': forwardedAuth,
             'apikey': forwardedApiKey,
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ username: trader.etoro_username, job_type: job_type || 'deep_sync' }),
+        body: JSON.stringify(targetBody),
     });
     
     let syncData = null;
@@ -121,12 +165,12 @@ serve(async (req: Request) => {
     }
 
     if (syncError) {
-        console.error(`[process-sync-job] Error syncing details for ${trader.etoro_username}:`, syncError);
+        console.error(`[process-sync-job] Error invoking ${targetFunction} for trader_id=${trader.id}:`, syncError);
         const errorMsg = typeof syncError === 'string' ? syncError : (syncError.message || JSON.stringify(syncError));
         await supabase.from('sync_jobs').update({ 
             status: 'failed', 
             finished_at: new Date().toISOString(), 
-            error_message: errorMsg || 'Error invoking sync-trader-details',
+            error_message: errorMsg || `Error invoking ${targetFunction}`,
             retry_count: (job.retry_count || 0) + 1
         }).eq('id', job.id);
         
@@ -143,8 +187,8 @@ serve(async (req: Request) => {
     }
 
     // Check if the sync function itself reported failure despite successful invocation
-    if (syncData && syncData.success === false) {
-         console.error(`[process-sync-job] Sync reported failure for ${trader.etoro_username}:`, syncData.error);
+        if (syncData && syncData.success === false) {
+            console.error(`[process-sync-job] ${targetFunction} reported failure for trader_id=${trader.id}:`, syncData.error);
          await supabase.from('sync_jobs').update({ 
             status: 'failed', 
             finished_at: new Date().toISOString(), 
@@ -177,7 +221,8 @@ serve(async (req: Request) => {
         }
     console.log(`[process-sync-job] Successfully processed job ${job.id}`);
 
-    return new Response(JSON.stringify({ success: true, job_id: job.id, message: `Synced ${trader.etoro_username}`, data: syncData }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const identity = trader.etoro_username ? trader.etoro_username : `trader:${trader.id}`;
+    return new Response(JSON.stringify({ success: true, job_id: job.id, message: `Synced ${identity}`, data: syncData }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (error: any) {
     console.error("[process-sync-job] Fatal error:", error);

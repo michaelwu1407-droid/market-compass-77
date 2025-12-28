@@ -14,6 +14,7 @@ type LockResult = {
   acquired: boolean;
   reason: 'success' | 'already_running' | 'stale_cleared' | 'row_initialized' | 'error';
   lockHolder?: string;
+  lockAcquiredAt?: string | null;
   lockAgeMinutes?: number;
   message?: string;
 };
