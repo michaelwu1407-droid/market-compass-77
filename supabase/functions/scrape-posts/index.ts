@@ -28,6 +28,11 @@ function extractEngagement(item: any) {
   const stats = post?.stats || post?.statistics || metadata?.stats || metadata?.statistics || {};
   const reactions = post?.reactions || metadata?.reactions || stats?.reactions || {};
   const commentsObj = post?.comments || metadata?.comments || stats?.comments || {};
+  const emotionsData = item?.emotionsData || post?.emotionsData || metadata?.emotionsData || {};
+  const likeEmotions = emotionsData?.like || emotionsData?.Like || {};
+  const likePaging = likeEmotions?.paging || likeEmotions?.reactionPaging || {};
+  const commentsData = item?.commentsData || post?.commentsData || {};
+  const summary = item?.summary || post?.summary || {};
 
   const likes = firstNumber([
     item?.reactionsCount,
@@ -42,6 +47,10 @@ function extractEngagement(item: any) {
     reactions?.likes,
     reactions?.likesCount,
     reactions?.totalLikes,
+    likePaging?.totalCount,
+    likePaging?.count,
+    likeEmotions?.totalCount,
+    commentsData?.reactionPaging?.totalCount,
   ]);
 
   const comments = firstNumber([
@@ -54,6 +63,10 @@ function extractEngagement(item: any) {
     commentsObj?.count,
     commentsObj?.total,
     commentsObj?.totalCount,
+    summary?.totalCommentsAndReplies,
+    summary?.totalComments,
+    summary?.commentsCount,
+    commentsData?.commentsCount,
   ]);
 
   return {

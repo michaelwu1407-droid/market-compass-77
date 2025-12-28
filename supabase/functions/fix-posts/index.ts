@@ -49,6 +49,11 @@ function extractEngagement(item: any) {
   const stats = post?.stats || post?.statistics || metadata?.stats || metadata?.statistics || {};
   const reactions = post?.reactions || metadata?.reactions || stats?.reactions || {};
   const commentsObj = post?.comments || metadata?.comments || stats?.comments || {};
+  const emotionsData = item?.emotionsData || post?.emotionsData || metadata?.emotionsData || {};
+  const likeEmotions = emotionsData?.like || emotionsData?.Like || {};
+  const likePaging = likeEmotions?.paging || likeEmotions?.reactionPaging || {};
+  const commentsData = item?.commentsData || post?.commentsData || {};
+  const summary = item?.summary || post?.summary || {};
 
   const likes = firstNumber([
     item?.reactionsCount,
@@ -63,6 +68,10 @@ function extractEngagement(item: any) {
     reactions?.likes,
     reactions?.likesCount,
     reactions?.totalLikes,
+    likePaging?.totalCount,
+    likePaging?.count,
+    likeEmotions?.totalCount,
+    commentsData?.reactionPaging?.totalCount,
   ]);
 
   const comments = firstNumber([
@@ -75,6 +84,10 @@ function extractEngagement(item: any) {
     commentsObj?.count,
     commentsObj?.total,
     commentsObj?.totalCount,
+    summary?.totalCommentsAndReplies,
+    summary?.totalComments,
+    summary?.commentsCount,
+    commentsData?.commentsCount,
   ]);
 
   return {
@@ -176,24 +189,28 @@ serve(async (req) => {
       let cleanText = (ext.text || '').replace(/\r\n|\r/g, '\n').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
       cleanText = cleanText.replace(/\n{3,}/g, '\n\n');
 
-      // Poster info (if available)
-      let poster_username = row.etoro_username || postObj?.post?.owner?.username || 'unknown';
-      let poster_id = postObj?.post?.owner?.id || null;
-      let poster_first = postObj?.post?.owner?.firstName
-        || postObj?.post?.owner?.first_name
-        || postObj?.post?.owner?.firstname
+      // Poster info: prefer existing DB values; only fill gaps from raw JSON.
+      const owner = postObj?.post?.owner || {};
+      let poster_username = row.etoro_username || owner?.username || 'unknown';
+      let poster_id = row.poster_id || owner?.id || null;
+      let poster_first = row.poster_first
+        || owner?.firstName
+        || owner?.first_name
+        || owner?.firstname
         || poster_username
         || '';
-      let poster_last = postObj?.post?.owner?.lastName
-        || postObj?.post?.owner?.last_name
-        || postObj?.post?.owner?.lastname
+      let poster_last = row.poster_last
+        || owner?.lastName
+        || owner?.last_name
+        || owner?.lastname
         || '';
-      let poster_avatar = postObj?.post?.owner?.avatar?.large
-        || postObj?.post?.owner?.avatar?.medium
-        || postObj?.post?.owner?.avatar?.small
-        || postObj?.post?.owner?.avatarUrl
-        || postObj?.post?.owner?.pictureUrl
-        || postObj?.post?.owner?.imageUrl
+      let poster_avatar = row.poster_avatar
+        || owner?.avatar?.large
+        || owner?.avatar?.medium
+        || owner?.avatar?.small
+        || owner?.avatarUrl
+        || owner?.pictureUrl
+        || owner?.imageUrl
         || '';
 
       // Time
@@ -212,9 +229,9 @@ serve(async (req) => {
 
       const engagement = extractEngagement(postObj);
 
-      // Likes/comments
-      let likes = row.likes ?? engagement.likes;
-      let comments = row.comments ?? engagement.comments;
+      // Likes/comments: keep existing non-zero values, otherwise fill from engagement.
+      let likes = (typeof row.likes === 'number' && row.likes > 0) ? row.likes : engagement.likes;
+      let comments = (typeof row.comments === 'number' && row.comments > 0) ? row.comments : engagement.comments;
 
       const mentioned_symbols = extractSymbols(cleanText);
       const sentiment = analyzeSentiment(cleanText);
