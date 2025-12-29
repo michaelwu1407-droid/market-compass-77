@@ -67,6 +67,20 @@ export function PerformanceVsBenchmarkChart({ data, height = 300 }: PerformanceV
     return null;
   };
 
+  const WrappedLegend = ({ payload }: any) => {
+    if (!payload) return null;
+    return (
+      <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-2">
+        {payload.map((entry: any, index: number) => (
+          <div key={`legend-${index}`} className="flex items-center gap-1.5">
+            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: entry.color }} />
+            <span className="text-xs text-muted-foreground">{entry.value}</span>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   const timeRanges: TimeRange[] = ['6M', '1Y', '2Y', 'MAX'];
 
   return (
@@ -84,22 +98,28 @@ export function PerformanceVsBenchmarkChart({ data, height = 300 }: PerformanceV
           </Button>
         ))}
       </div>
-      <ResponsiveContainer width="100%" height={height}>
-        <LineChart data={filteredData}>
+      <div className="w-full overflow-hidden">
+        <ResponsiveContainer width="100%" height={height}>
+          <LineChart data={filteredData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
           <XAxis 
             dataKey="date" 
-            tick={{ fontSize: 10 }}
+            tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+            tickLine={false}
+            axisLine={{ stroke: 'hsl(var(--border))' }}
             tickFormatter={(value) => {
               const date = new Date(value);
               return date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
             }}
           />
           <YAxis 
-            tick={{ fontSize: 10 }}
+            tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+            tickLine={false}
+            axisLine={false}
             tickFormatter={(value) => `${value}%`}
+            width={40}
           />
           <Tooltip content={<CustomTooltip />} />
-          <Legend />
+          <Legend content={<WrappedLegend />} />
           <Line 
             type="monotone" 
             dataKey="trader" 
@@ -117,8 +137,9 @@ export function PerformanceVsBenchmarkChart({ data, height = 300 }: PerformanceV
             strokeDasharray="5 5"
             dot={false}
           />
-        </LineChart>
-      </ResponsiveContainer>
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 }

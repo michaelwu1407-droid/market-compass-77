@@ -46,18 +46,21 @@ export function PerformanceBarChart({ data, height = 200 }: PerformanceBarChartP
 
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+      <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
         <XAxis 
           dataKey="name" 
           tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
           axisLine={{ stroke: 'hsl(var(--border))' }}
           tickLine={false}
+          interval="preserveStartEnd"
+          minTickGap={12}
         />
         <YAxis 
           tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
           axisLine={false}
           tickLine={false}
           tickFormatter={(v) => `${v}%`}
+          width={40}
         />
         <Tooltip content={<CustomTooltip />} />
         <ReferenceLine y={0} stroke="hsl(var(--border))" />

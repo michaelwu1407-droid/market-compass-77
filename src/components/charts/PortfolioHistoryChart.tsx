@@ -94,11 +94,11 @@ export function PortfolioHistoryChart({ data, height = 300 }: PortfolioHistoryCh
           {payload.map((entry: any, index: number) => (
             <p key={index} className="text-xs flex justify-between gap-4" style={{ color: entry.color }}>
               <span>{entry.name}</span>
-              <span className="font-medium">{entry.value?.toFixed(1)}%</span>
+              <span className="font-medium">{((entry.value || 0) * 100).toFixed(1)}%</span>
             </p>
           ))}
           <p className="text-xs font-medium mt-2 pt-2 border-t border-border">
-            Total: {total.toFixed(1)}%
+            Total: {(total * 100).toFixed(1)}%
           </p>
         </div>
       );
@@ -106,23 +106,43 @@ export function PortfolioHistoryChart({ data, height = 300 }: PortfolioHistoryCh
     return null;
   };
 
+  const WrappedLegend = ({ payload }: any) => {
+    if (!payload) return null;
+    return (
+      <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-2">
+        {payload.map((entry: any, index: number) => (
+          <div key={`legend-${index}`} className="flex items-center gap-1.5">
+            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: entry.color }} />
+            <span className="text-xs text-muted-foreground">{entry.value}</span>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   return (
-    <ResponsiveContainer width="100%" height={height}>
-      <AreaChart data={chartData} stackOffset="expand">
+    <div className="w-full overflow-hidden">
+      <ResponsiveContainer width="100%" height={height}>
+        <AreaChart data={chartData} stackOffset="expand" margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
         <XAxis 
           dataKey="date" 
-          tick={{ fontSize: 10 }}
+          tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+          tickLine={false}
+          axisLine={{ stroke: 'hsl(var(--border))' }}
           tickFormatter={(value) => {
             const date = new Date(value);
             return date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
           }}
         />
         <YAxis 
-          tick={{ fontSize: 10 }}
+          tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+          tickLine={false}
+          axisLine={false}
           tickFormatter={(value) => `${(value * 100).toFixed(0)}%`}
+          width={40}
         />
         <Tooltip content={<CustomTooltip />} />
-        <Legend />
+        <Legend content={<WrappedLegend />} />
         {topSymbols.map((symbol, index) => (
           <Area
             key={symbol}
@@ -134,7 +154,8 @@ export function PortfolioHistoryChart({ data, height = 300 }: PortfolioHistoryCh
             fillOpacity={0.8}
           />
         ))}
-      </AreaChart>
-    </ResponsiveContainer>
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
