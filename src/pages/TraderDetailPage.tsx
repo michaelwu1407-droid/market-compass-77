@@ -31,7 +31,7 @@ import { useAnalyse } from '@/hooks/useAnalyse';
 import { useFollowedTraders } from '@/hooks/useFollowedTraders';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
-import { formatDistanceToNow, format } from 'date-fns';
+import { formatDistanceToNow, format, isValid } from 'date-fns';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 
@@ -102,6 +102,20 @@ export default function TraderDetailPage() {
     } finally {
       setIsRefreshing(false);
     }
+  };
+
+  const safeFormatDate = (value: string | null | undefined, pattern: string) => {
+    if (!value) return '-';
+    const d = new Date(value);
+    if (!isValid(d)) return '-';
+    return format(d, pattern);
+  };
+
+  const safeDistanceToNow = (value: string | null | undefined) => {
+    if (!value) return '-';
+    const d = new Date(value);
+    if (!isValid(d)) return '-';
+    return formatDistanceToNow(d, { addSuffix: true });
   };
 
   if (traderLoading) {
@@ -189,7 +203,7 @@ export default function TraderDetailPage() {
                   {trader.active_since && (
                     <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
                       <Calendar className="h-3.5 w-3.5" />
-                      <span>Active since {format(new Date(trader.active_since), 'MMM yyyy')}</span>
+                      <span>Active since {safeFormatDate(trader.active_since, 'MMM yyyy')}</span>
                     </div>
                   )}
                 </div>
@@ -606,13 +620,13 @@ export default function TraderDetailPage() {
                               </Badge>
                             </td>
                             <td className="py-3 px-2 text-right text-muted-foreground">
-                              {trade.open_date ? format(new Date(trade.open_date), 'MMM d, yyyy') : '-'}
+                              {safeFormatDate(trade.open_date, 'MMM d, yyyy')}
                             </td>
                             <td className="py-3 px-2 text-right">
                               {trade.open_price ? `$${trade.open_price.toFixed(2)}` : '-'}
                             </td>
                             <td className="py-3 px-2 text-right text-muted-foreground">
-                              {trade.executed_at ? format(new Date(trade.executed_at), 'MMM d, yyyy') : '-'}
+                              {safeFormatDate(trade.executed_at, 'MMM d, yyyy')}
                             </td>
                             <td className="py-3 px-2 text-right">
                               {trade.close_price ? `$${trade.close_price.toFixed(2)}` : '-'}
@@ -654,7 +668,7 @@ export default function TraderDetailPage() {
                         <span>❤️ {post.likes || 0}</span>
                         <span>💬 {post.comments || 0}</span>
                         {post.posted_at && (
-                          <span>{formatDistanceToNow(new Date(post.posted_at), { addSuffix: true })}</span>
+                          <span>{safeDistanceToNow(post.posted_at)}</span>
                         )}
                       </div>
                     </div>
