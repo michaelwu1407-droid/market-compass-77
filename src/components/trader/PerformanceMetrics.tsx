@@ -76,10 +76,10 @@ export function PerformanceMetrics({ performance, gain12m, gain24m }: Performanc
     <div className="grid grid-cols-3 md:grid-cols-6 gap-4 p-4 bg-secondary/30 rounded-lg">
       <MetricCard label="This Month" value={thisMonthReturn} />
       <MetricCard label="YTD" value={ytdPct} />
-      <MetricCard label="1 Year" value={gain12m || null} />
+      <MetricCard label="1 Year" value={gain12m ?? null} />
       <MetricCard label="2 Years" value={gain24m ?? null} />
       <MetricCard label="5 Years" value={fiveYearPct} />
-      <MetricCard label="Annualized" value={annualizedReturn || null} />
+      <MetricCard label="Annualized" value={annualizedReturn ?? null} />
     </div>
   );
 }

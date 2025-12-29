@@ -31,7 +31,7 @@ export function DrawdownsTable({ drawdowns, maxDrawdown, dailyDrawdown }: Drawdo
           <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
             <span className="text-sm text-muted-foreground">Maximum Drawdown</span>
             <span className="text-xl font-bold text-loss">
-              {maxDrawdown ? `${maxDrawdown.toFixed(1)}%` : '-'}
+              {maxDrawdown !== null && maxDrawdown !== undefined ? `${maxDrawdown.toFixed(1)}%` : '-'}
             </span>
           </div>
           {dailyDrawdown !== null && dailyDrawdown !== undefined && (
@@ -59,7 +59,7 @@ export function DrawdownsTable({ drawdowns, maxDrawdown, dailyDrawdown }: Drawdo
         </CardTitle>
       </CardHeader>
       <CardContent>
-        {maxDrawdown && (
+        {maxDrawdown !== null && maxDrawdown !== undefined && (
           <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 mb-4">
             <span className="text-sm text-muted-foreground">Maximum Drawdown</span>
             <span className="text-xl font-bold text-loss">{maxDrawdown.toFixed(1)}%</span>
@@ -85,7 +85,7 @@ export function DrawdownsTable({ drawdowns, maxDrawdown, dailyDrawdown }: Drawdo
                   -{Math.abs(dd.depth_pct).toFixed(1)}%
                 </TableCell>
                 <TableCell className="text-right text-sm text-muted-foreground">
-                  {dd.recovery_days ? `${dd.recovery_days} days` : 'Ongoing'}
+                  {dd.recovery_days !== null && dd.recovery_days !== undefined ? `${dd.recovery_days} days` : 'Ongoing'}
                 </TableCell>
               </TableRow>
             ))}

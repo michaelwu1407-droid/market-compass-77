@@ -72,7 +72,7 @@ export default function TraderDetailPage() {
     
     setIsRefreshing(true);
     try {
-      toast.info('Refreshing trader data from Bullaware...');
+      toast.info('Refreshing trader data...');
       
       // Use external Supabase project for function invocations
       const { data, error } = await supabase.functions.invoke('sync-worker', {
@@ -146,12 +146,12 @@ export default function TraderDetailPage() {
       sector: h.assets?.sector || 'Other',
     },
     weight_pct: h.allocation_pct ?? h.current_value ?? 0,
-    pnl_pct: h.profit_loss_pct || 0,
+    pnl_pct: h.profit_loss_pct ?? 0,
   }));
 
-  const copiers = trader.copiers || 0;
-  const gain12m = trader.gain_12m || 0;
-  const gain24m = trader.gain_24m || 0;
+  const copiers = trader.copiers ?? null;
+  const gain12m = trader.gain_12m ?? null;
+  const gain24m = trader.gain_24m ?? null;
   const tags = trader.tags || [];
 
   return (
@@ -220,7 +220,7 @@ export default function TraderDetailPage() {
                     size="icon" 
                     onClick={handleRefreshData}
                     disabled={isRefreshing}
-                    title="Refresh data from Bullaware"
+                    title="Refresh trader data"
                   >
                     <RefreshCw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
                   </Button>
@@ -245,29 +245,45 @@ export default function TraderDetailPage() {
           {/* Key Stats Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mt-6 pt-6 border-t border-border">
             <div className="stat-card text-center">
-              <RiskGauge score={trader.risk_score || 0} size="sm" />
+              {trader.risk_score !== null && trader.risk_score !== undefined ? (
+                <RiskGauge score={trader.risk_score} size="sm" />
+              ) : (
+                <div className="h-full flex items-center justify-center text-muted-foreground">-</div>
+              )}
             </div>
             <div className="stat-card">
               <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
                 <TrendingUp className="h-3 w-3" />
                 12M Return
               </div>
-              <span className={cn("font-bold text-xl", gain12m >= 0 ? "text-gain" : "text-loss")}>
-                {gain12m >= 0 ? '+' : ''}{gain12m.toFixed(1)}%
-              </span>
+              {gain12m === null ? (
+                <span className="font-bold text-xl text-muted-foreground">-</span>
+              ) : (
+                <span className={cn("font-bold text-xl", gain12m >= 0 ? "text-gain" : "text-loss")}>
+                  {gain12m >= 0 ? '+' : ''}{gain12m.toFixed(1)}%
+                </span>
+              )}
             </div>
             <div className="stat-card">
               <div className="text-xs text-muted-foreground mb-1">24M Return</div>
-              <span className={cn("font-bold text-xl", gain24m >= 0 ? "text-gain" : "text-loss")}>
-                {gain24m >= 0 ? '+' : ''}{gain24m.toFixed(1)}%
-              </span>
+              {gain24m === null ? (
+                <span className="font-bold text-xl text-muted-foreground">-</span>
+              ) : (
+                <span className={cn("font-bold text-xl", gain24m >= 0 ? "text-gain" : "text-loss")}>
+                  {gain24m >= 0 ? '+' : ''}{gain24m.toFixed(1)}%
+                </span>
+              )}
             </div>
             <div className="stat-card">
               <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
                 <AlertTriangle className="h-3 w-3" />
                 Max Drawdown
               </div>
-              <span className="font-bold text-xl text-loss">{trader.max_drawdown || 0}%</span>
+              {trader.max_drawdown !== null && trader.max_drawdown !== undefined ? (
+                <span className="font-bold text-xl text-loss">{trader.max_drawdown.toFixed(1)}%</span>
+              ) : (
+                <span className="font-bold text-xl text-muted-foreground">-</span>
+              )}
             </div>
             <div className="stat-card">
               <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
@@ -275,7 +291,9 @@ export default function TraderDetailPage() {
                 Copiers
               </div>
               <span className="font-bold text-xl">
-                {copiers >= 1000 ? `${(copiers / 1000).toFixed(1)}K` : copiers}
+                {copiers === null
+                  ? '-'
+                  : (copiers >= 1000 ? `${(copiers / 1000).toFixed(1)}K` : copiers)}
               </span>
             </div>
             <div className="stat-card">

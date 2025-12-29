@@ -9,12 +9,18 @@ interface TraderMoveCardProps {
 }
 
 export function TraderMoveCard({ trade }: TraderMoveCardProps) {
-  const timeAgo = formatDistanceToNow(new Date(trade.executed_at), { addSuffix: true });
-  const isPositive = trade.trade_type === 'buy';
+  const executedAt = trade.executed_at ? new Date(trade.executed_at) : null;
+  const hasValidDate = !!executedAt && Number.isFinite(executedAt.getTime());
+  const timeAgo = hasValidDate ? formatDistanceToNow(executedAt!, { addSuffix: true }) : 'recently';
+
+  const tradeType = typeof trade.trade_type === 'string' && trade.trade_type.length > 0
+    ? trade.trade_type
+    : 'trade';
+  const isPositive = tradeType === 'buy';
   
-  const actionText = trade.trade_type === 'buy' 
+  const actionText = tradeType === 'buy' 
     ? 'opened' 
-    : trade.trade_type === 'sell' 
+    : tradeType === 'sell' 
       ? 'trimmed' 
       : 'closed';
 
@@ -28,13 +34,13 @@ export function TraderMoveCard({ trade }: TraderMoveCardProps) {
         <div className="flex-1">
           <span className="font-medium text-sm">{trade.trader?.display_name}</span>
           <span className="text-muted-foreground text-sm"> {actionText} </span>
-          <span className="chip-ticker">${trade.asset?.ticker}</span>
+          <span className="chip-ticker">${trade.asset?.ticker || '—'}</span>
         </div>
         <Badge variant="outline" className={cn(
           "text-xs",
           isPositive ? "text-gain border-gain" : "text-loss border-loss"
         )}>
-          {trade.trade_type.toUpperCase()}
+          {tradeType.toUpperCase()}
         </Badge>
       </div>
 

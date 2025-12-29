@@ -40,7 +40,7 @@ serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const requestedUsername = String(body.username || '').trim();
     const requestedCidRaw = body.cid ?? body.CID ?? body.customerId ?? body.CustomerId;
-    const requestedCid = requestedCidRaw !== undefined && requestedCidRaw !== null && String(requestedCidRaw).trim() !== ''
+    let cid = requestedCidRaw !== undefined && requestedCidRaw !== null && String(requestedCidRaw).trim() !== ''
       ? String(requestedCidRaw).trim()
       : '';
 
@@ -64,13 +64,25 @@ serve(async (req: Request) => {
       );
     }
 
+    // If the configured URL requires {cid} but the caller only provided username,
+    // try to resolve cid from our DB first.
+    if (!cid && requestedUsername && profileUrlTemplate.includes('{cid}')) {
+      const { data: existingByUsername, error: byUsernameErr } = await supabase
+        .from('traders')
+        .select('etoro_cid')
+        .eq('etoro_username', requestedUsername)
+        .maybeSingle();
+      if (byUsernameErr) throw byUsernameErr;
+      cid = String(existingByUsername?.etoro_cid || '').trim();
+    }
+
     // Resolve username if caller only provided CID (so we can upsert via onConflict: etoro_username)
     let username = requestedUsername;
-    if (!username && requestedCid) {
+    if (!username && cid) {
       const { data: existing, error: lookupError } = await supabase
         .from('traders')
         .select('etoro_username')
-        .eq('etoro_cid', requestedCid)
+        .eq('etoro_cid', cid)
         .maybeSingle();
       if (lookupError) throw lookupError;
       username = String(existing?.etoro_username || '').trim();
@@ -82,7 +94,7 @@ serve(async (req: Request) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-    if (!requestedCid && profileUrlTemplate.includes('{cid}')) {
+    if (!cid && profileUrlTemplate.includes('{cid}')) {
       return new Response(JSON.stringify({ success: false, error: 'Missing cid' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -91,7 +103,7 @@ serve(async (req: Request) => {
 
     const profileUrl = profileUrlTemplate
       .replaceAll('{username}', encodeURIComponent(username))
-      .replaceAll('{cid}', encodeURIComponent(requestedCid));
+      .replaceAll('{cid}', encodeURIComponent(cid));
 
     const etoroHeaders = {
       'Accept': 'application/json',
@@ -152,7 +164,7 @@ serve(async (req: Request) => {
       );
     }
 
-    let etoroCid = (pick(root, ['CID', 'cid']) ?? pick(v, ['CustomerId', 'customerId', 'customerID', 'CID', 'cid']) ?? (requestedCid || null));
+    let etoroCid = (pick(root, ['CID', 'cid']) ?? pick(v, ['CustomerId', 'customerId', 'customerID', 'CID', 'cid']) ?? (cid || null));
     const usernameFromPayload = pick(v, ['UserName', 'userName', 'username']) ?? pick(root, ['UserName', 'userName', 'username']);
     if (!username && usernameFromPayload) {
       username = String(usernameFromPayload).trim();

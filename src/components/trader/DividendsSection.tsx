@@ -33,7 +33,9 @@ export function DividendsSection({
                 <span className="text-xs text-muted-foreground block mb-1">Portfolio Yield</span>
                 <span className={cn(
                   "text-xl font-bold",
-                  portfolioDividendYield && portfolioDividendYield > 0 ? "text-gain" : "text-muted-foreground"
+                  portfolioDividendYield !== null && portfolioDividendYield !== undefined && portfolioDividendYield > 0
+                    ? "text-gain"
+                    : "text-muted-foreground"
                 )}>
                   {portfolioDividendYield?.toFixed(2) ?? '-'}%
                 </span>
@@ -41,7 +43,9 @@ export function DividendsSection({
               <div className="p-3 rounded-lg bg-muted/50">
                 <span className="text-xs text-muted-foreground block mb-1">Est. Annual Income</span>
                 <span className="text-xl font-bold">
-                  {annualDividendIncome ? `$${annualDividendIncome.toLocaleString()}` : '-'}
+                  {annualDividendIncome !== null && annualDividendIncome !== undefined
+                    ? `$${annualDividendIncome.toLocaleString()}`
+                    : '-'}
                 </span>
               </div>
             </div>

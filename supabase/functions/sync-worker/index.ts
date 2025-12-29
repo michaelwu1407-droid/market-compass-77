@@ -46,14 +46,14 @@ serve(async (req) => {
 
             const results: Record<string, any> = { trader_id: trader.id };
 
-            if (preferEtoro && trader.etoro_cid) {
+            if (preferEtoro && (trader.etoro_cid || trader.etoro_username)) {
                 const etoroResp = await fetch(`${supabaseUrl}/functions/v1/sync-trader-etoro`, {
                     method: 'POST',
                     headers: {
                         'Authorization': `Bearer ${supabaseAnonKey}`,
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ cid: trader.etoro_cid }),
+                    body: JSON.stringify({ cid: trader.etoro_cid ?? null, username: trader.etoro_username ?? null }),
                 });
                 results.etoro_profile = etoroResp.ok
                     ? await etoroResp.json()
