@@ -239,6 +239,63 @@ async function fetchBullawareQuotes(symbols: string[]): Promise<Map<string, Bull
   }
 }
 
+async function fetchBullawareDefaultQuotes(): Promise<Map<string, BullawareQuote>> {
+  const results = new Map<string, BullawareQuote>();
+  const apiKey = Deno.env.get('BULLAWARE_API_KEY');
+  if (!apiKey) {
+    return results;
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15_000);
+
+  try {
+    // Some BullAware deployments appear to ignore the symbols filter and only return a small default
+    // set of instruments. We still use that set as a reliable fallback for daily price change data.
+    const url = `https://api.bullaware.com/v1/instruments?limit=100`;
+
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      console.log(`[fetch-daily-prices] BullAware API error (default): ${response.status}`);
+      return results;
+    }
+
+    const data = await response.json();
+    const items: any[] = data?.items || data?.data || data?.instruments || (Array.isArray(data) ? data : []);
+
+    for (const item of items) {
+      const symbol = String(item?.symbol || item?.ticker || '').trim().toUpperCase();
+      if (!symbol) continue;
+
+      const price = Number(item?.price ?? item?.lastPrice);
+      const change = Number(item?.change ?? item?.priceChange);
+      const changePct = Number(item?.changePct ?? item?.changePercent);
+
+      results.set(symbol, {
+        symbol,
+        price: Number.isFinite(price) ? price : undefined,
+        change: Number.isFinite(change) ? change : undefined,
+        changePct: Number.isFinite(changePct) ? changePct : undefined,
+      });
+    }
+
+    return results;
+  } catch (error) {
+    console.log(`[fetch-daily-prices] Error fetching quotes (BullAware default):`, error);
+    return results;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -249,6 +306,78 @@ serve(async (req) => {
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    const yahooProbe = await fetchYahooQuotes(['AAPL']);
+    const yahooAvailable = yahooProbe.size > 0;
+    if (!yahooAvailable) {
+      console.log('[fetch-daily-prices] Yahoo appears unavailable from edge runtime; using BullAware default fallback');
+
+      const bullDefault = await fetchBullawareDefaultQuotes();
+      const bullSymbols = Array.from(bullDefault.keys());
+
+      if (bullSymbols.length === 0) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            updated: 0,
+            failed: 0,
+            total: 0,
+            yahoo_updated: 0,
+            bullaware_updated: 0,
+            message: 'No BullAware quotes available and Yahoo unavailable',
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+        );
+      }
+
+      const { data: assets, error: assetsError } = await supabase
+        .from('assets')
+        .select('id, symbol')
+        .in('symbol', bullSymbols);
+
+      if (assetsError) {
+        console.error('[fetch-daily-prices] Error fetching assets for BullAware fallback:', assetsError);
+        throw assetsError;
+      }
+
+      let updated = 0;
+      let failed = 0;
+
+      for (const asset of assets || []) {
+        const sym = String((asset as any).symbol || '').trim().toUpperCase();
+        const quote = bullDefault.get(sym);
+        if (!quote?.price) continue;
+
+        const { error: updateError } = await supabase
+          .from('assets')
+          .update({
+            current_price: quote.price,
+            price_change: quote.change ?? 0,
+            price_change_pct: quote.changePct ?? 0,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', (asset as any).id);
+
+        if (updateError) {
+          failed++;
+        } else {
+          updated++;
+        }
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          updated,
+          failed,
+          total: (assets || []).length,
+          yahoo_updated: 0,
+          bullaware_updated: updated,
+          bullaware_default_count: bullDefault.size,
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
+    }
 
     // Optional diagnostic probe to confirm outbound access + parsing.
     // Example: /functions/v1/fetch-daily-prices?probe=1
@@ -266,14 +395,17 @@ serve(async (req) => {
 
       const yahoo = await fetchYahooQuotes(probeSymbols);
       const bull = await fetchBullawareQuotes(probeSymbols);
+      const bullDefault = await fetchBullawareDefaultQuotes();
       return new Response(
         JSON.stringify({
           success: true,
           probeSymbols,
           yahooCount: yahoo.size,
           bullawareCount: bull.size,
+          bullawareDefaultCount: bullDefault.size,
           sampleYahoo: Array.from(yahoo.values()).slice(0, 3),
           sampleBullaware: Array.from(bull.values()).slice(0, 3),
+          sampleBullawareDefault: Array.from(bullDefault.values()).slice(0, 3),
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
       );
