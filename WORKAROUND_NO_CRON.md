@@ -22,6 +22,22 @@ Note: `sync-worker` is configured as public (`verify_jwt = false`), so no Author
 
 Schedule: Every 2 minutes
 
+## Asset Turbo Mode (Optional)
+
+To get stock sectors/fundamentals and 5Y price history filled in faster, add two more cron jobs:
+
+1) **Enrich assets (sectors/fundamentals)**
+- URL: `https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/enrich-assets-yahoo`
+- Method: POST
+- Schedule: every 15 minutes (`*/15 * * * *`)
+- Body: `{}`
+
+2) **Backfill 5Y price history**
+- URL: `https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/backfill-asset-history`
+- Method: POST
+- Schedule: staggered every 15 minutes (`7,22,37,52 * * * *`)
+- Body: `{}`
+
 ## Option 2: Contact Supabase Support
 
 Ask them to:

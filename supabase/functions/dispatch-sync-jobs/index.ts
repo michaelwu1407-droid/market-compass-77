@@ -14,6 +14,35 @@ const DELAY_BETWEEN_JOBS_MS = 6000; // 6 seconds = exactly 10 req/min
 const LOCK_DOMAIN = 'dispatch_sync_jobs';
 const LOCK_TTL_MINUTES = 5;
 
+const FOLLOWED_TRADERS_LIMIT = 200;
+
+async function getFollowedTraderIds(supabase: any): Promise<string[]> {
+    // Service role bypasses RLS, so we can read all follows.
+    // Distinct is not supported in supabase-js select builder reliably, so fetch
+    // a bounded list and de-dupe client-side.
+    const { data, error } = await supabase
+        .from('user_follows')
+        .select('trader_id')
+        .order('created_at', { ascending: false })
+        .limit(FOLLOWED_TRADERS_LIMIT);
+
+    if (error) {
+        console.warn('Warning: failed to fetch followed traders:', error);
+        return [];
+    }
+
+    const ids = (data || []).map((r: any) => r.trader_id).filter(Boolean);
+    return Array.from(new Set(ids));
+}
+
+function makeNotInFilter(ids: string[]) {
+    // PostgREST expects a parenthesized, comma-separated list.
+    // UUIDs have no commas so this is safe.
+    const unique = Array.from(new Set(ids)).filter(Boolean);
+    if (unique.length === 0) return null;
+    return `(${unique.join(',')})`;
+}
+
 async function acquireLock(supabase: any, lockHolder: string) {
     const staleCutoff = new Date(Date.now() - LOCK_TTL_MINUTES * 60 * 1000).toISOString();
     const now = new Date().toISOString();
@@ -146,16 +175,48 @@ serve(async (req) => {
             console.warn("Warning: Error resetting stuck jobs (non-fatal):", resetError);
         }
 
-        const { data: pendingJobs, error: fetchError } = await supabase
-            .from('sync_jobs')
-            .select('id, status')
-            .eq('status', 'pending')
-            .order('created_at', { ascending: true }) // Process oldest first
-            .limit(MAX_JOBS_TO_PROCESS); // Process up to 10 jobs per call (with 7s delays = ~1.4 min per batch)
+        const followedTraderIds = await getFollowedTraderIds(supabase);
 
-        if (fetchError) {
-            console.error("Error fetching pending jobs:", fetchError);
-            throw fetchError;
+        // Prefer followed traders first so the UI stays fresh without manual refresh.
+        let pendingJobs: any[] = [];
+        if (followedTraderIds.length > 0) {
+            const { data: followedPending, error: followedErr } = await supabase
+                .from('sync_jobs')
+                .select('id, status')
+                .eq('status', 'pending')
+                .in('trader_id', followedTraderIds)
+                .order('created_at', { ascending: true })
+                .limit(MAX_JOBS_TO_PROCESS);
+
+            if (followedErr) {
+                console.warn('Warning: failed to fetch followed pending jobs:', followedErr);
+            } else {
+                pendingJobs = followedPending || [];
+            }
+        }
+
+        if (pendingJobs.length < MAX_JOBS_TO_PROCESS) {
+            const remaining = MAX_JOBS_TO_PROCESS - pendingJobs.length;
+            const excludeJobIds = pendingJobs.map((j: any) => j.id).filter(Boolean);
+            const excludeFollowed = makeNotInFilter(followedTraderIds);
+
+            let query = supabase
+                .from('sync_jobs')
+                .select('id, status')
+                .eq('status', 'pending')
+                .order('created_at', { ascending: true })
+                .limit(remaining);
+
+            if (excludeJobIds.length > 0) query = query.not('id', 'in', `(${excludeJobIds.join(',')})`);
+            if (excludeFollowed) query = query.not('trader_id', 'in', excludeFollowed);
+
+            const { data: otherPending, error: otherErr } = await query;
+            if (otherErr) {
+                console.error('Error fetching pending jobs:', otherErr);
+                throw otherErr;
+            }
+
+            pendingJobs = pendingJobs.concat(otherPending || []);
         }
 
         console.log(`[${invocationId}] Found ${pendingJobs?.length} pending jobs.`);

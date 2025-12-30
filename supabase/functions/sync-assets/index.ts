@@ -99,27 +99,51 @@ serve(async (req) => {
     console.log(`Total assets from Bullaware: ${allAssets.length}`);
 
     // Map Bullaware data to our assets table schema
-    const assetsToUpsert = allAssets.map((asset: any) => ({
-      symbol: asset.symbol || asset.ticker,
-      name: asset.name || asset.fullName,
-      asset_type: asset.type || asset.assetType || 'stock',
-      current_price: asset.price || asset.lastPrice || null,
-      price_change: asset.change || asset.priceChange || null,
-      price_change_pct: asset.changePct || asset.changePercent || null,
-      market_cap: asset.marketCap || null,
-      pe_ratio: asset.peRatio || asset.pe || null,
-      eps: asset.eps || null,
-      dividend_yield: asset.dividendYield || null,
-      high_52w: asset.high52Week || asset.yearHigh || null,
-      low_52w: asset.low52Week || asset.yearLow || null,
-      avg_volume: asset.avgVolume || asset.volume || null,
-      beta: asset.beta || null,
-      sector: asset.sector || null,
-      industry: asset.industry || null,
-      exchange: asset.exchange || null,
-      logo_url: asset.logoUrl || asset.logo || null,
-      updated_at: new Date().toISOString(),
-    }));
+    // Important: do NOT overwrite existing enrichment data with nulls.
+    // When an upstream value is missing, omit the column so upsert won't clobber.
+    const assetsToUpsert = allAssets
+      .map((asset: any) => {
+        const symbol = (asset.symbol || asset.ticker || '').toString().trim();
+        if (!symbol) return null;
+
+        const row: Record<string, any> = {
+          symbol,
+          updated_at: new Date().toISOString(),
+        };
+
+        const setIfPresent = (key: string, value: unknown) => {
+          if (value === null || value === undefined) return;
+          row[key] = value;
+        };
+
+        setIfPresent('name', asset.name ?? asset.fullName);
+        setIfPresent('asset_type', asset.type ?? asset.assetType ?? 'stock');
+
+        setIfPresent('current_price', asset.price ?? asset.lastPrice);
+        setIfPresent('price_change', asset.change ?? asset.priceChange);
+        setIfPresent('price_change_pct', asset.changePct ?? asset.changePercent);
+
+        setIfPresent('market_cap', asset.marketCap);
+        setIfPresent('pe_ratio', asset.peRatio ?? asset.pe);
+        setIfPresent('eps', asset.eps);
+        setIfPresent('dividend_yield', asset.dividendYield);
+        setIfPresent('high_52w', asset.high52Week ?? asset.yearHigh);
+        setIfPresent('low_52w', asset.low52Week ?? asset.yearLow);
+        setIfPresent('avg_volume', asset.avgVolume ?? asset.volume);
+        setIfPresent('beta', asset.beta);
+
+        setIfPresent('sector', asset.sector);
+        setIfPresent('industry', asset.industry);
+        setIfPresent('exchange', asset.exchange);
+        setIfPresent('logo_url', asset.logoUrl ?? asset.logo);
+
+        // Optional hints (if BullAware provides them)
+        setIfPresent('country', asset.country ?? asset.countryCode);
+        setIfPresent('currency', asset.currency ?? asset.quoteCurrency);
+
+        return row;
+      })
+      .filter(Boolean);
 
     console.log(`Upserting ${assetsToUpsert.length} assets to database...`);
 

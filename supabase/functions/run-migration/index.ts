@@ -28,6 +28,9 @@ serve(async (req) => {
       ALTER TABLE sync_jobs ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ;
       ALTER TABLE sync_jobs ADD COLUMN IF NOT EXISTS error_message TEXT;
       ALTER TABLE sync_jobs ADD COLUMN IF NOT EXISTS retry_count INT DEFAULT 0;
+
+      ALTER TABLE public.assets
+      ADD COLUMN IF NOT EXISTS price_history_synced_at TIMESTAMPTZ;
     `;
 
     console.log("Running schema migration...");

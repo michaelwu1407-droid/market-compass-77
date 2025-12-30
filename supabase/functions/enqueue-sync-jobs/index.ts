@@ -20,6 +20,8 @@ serve(async (req) => {
       sync_etoro_profiles = true,
       etoro_profiles_limit = 100,
       etoro_profiles_stale_hours = 24,
+      bullaware_stale_hours = 72,
+      bullaware_traders_limit = 500,
       debug = false,
     } = await req.json().catch(() => ({}));
     
@@ -50,27 +52,30 @@ serve(async (req) => {
       });
     }
 
-    // Get ALL traders
-    console.log("Fetching ALL traders from database...");
+    // Choose candidates to enqueue (do NOT enqueue all traders by default; it floods the queue).
+    console.log("Selecting trader candidates for enqueue...");
     let allTraderIds: string[] = [];
     
     if (specific_trader_ids && specific_trader_ids.length > 0) {
       allTraderIds = specific_trader_ids;
     } else {
-      let page = 0;
-      const pageSize = 1000;
-      let hasMore = true;
+      const rawStaleHours = Number(bullaware_stale_hours);
+      const staleHours = Math.max(0, Number.isFinite(rawStaleHours) ? rawStaleHours : 72);
+      const cutoffIso = new Date(Date.now() - staleHours * 60 * 60 * 1000).toISOString();
+      const rawLimit = Number(bullaware_traders_limit);
+      const limit = Math.max(0, Math.min(Number.isFinite(rawLimit) ? rawLimit : 500, 2000));
 
-      while (hasMore) {
-        const { data: pageTraders, error } = await supabase
-          .from('traders')
-          .select('id')
-          .range(page * pageSize, (page + 1) * pageSize - 1);
+      const { data: candidateTraders, error } = await supabase
+        .from('traders')
+        .select('id')
+        .or(`details_synced_at.is.null,details_synced_at.lt.${cutoffIso}`)
+        .order('details_synced_at', { ascending: true, nullsFirst: true })
+        .limit(limit);
 
-        if (error || !pageTraders?.length) break;
-        pageTraders.forEach(t => allTraderIds.push(t.id));
-        page++;
-        hasMore = pageTraders.length === pageSize;
+      if (error) {
+        console.error('Error selecting stale traders for enqueue:', error);
+      } else {
+        allTraderIds = (candidateTraders || []).map((t: any) => t.id).filter(Boolean);
       }
     }
 
@@ -86,8 +91,24 @@ serve(async (req) => {
       // These job types map 1:1 to endpoints in sync-trader-details.
       const jobTypes = ['investor_details', 'risk_score', 'metrics', 'portfolio'] as const;
 
+      // De-dupe: do not enqueue jobs that are already pending or in_progress.
+      const { data: existing, error: existingErr } = await supabase
+        .from('sync_jobs')
+        .select('trader_id, job_type, status')
+        .in('trader_id', allTraderIds)
+        .in('job_type', Array.from(jobTypes))
+        .in('status', ['pending', 'in_progress']);
+
+      if (existingErr) {
+        console.warn('Warning: failed to check existing sync jobs (continuing anyway):', existingErr);
+      }
+
+      const existingKey = new Set((existing || []).map((j: any) => `${j.trader_id}:${j.job_type}`));
+
       const jobsToInsert = allTraderIds.flatMap((trader_id) =>
-        jobTypes.map((job_type) => ({ trader_id, status: 'pending', job_type }))
+        jobTypes
+          .filter((job_type) => force || !existingKey.has(`${trader_id}:${job_type}`))
+          .map((job_type) => ({ trader_id, status: 'pending', job_type }))
       );
       const batchSize = 500;
 

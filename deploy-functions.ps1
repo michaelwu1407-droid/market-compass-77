@@ -5,18 +5,30 @@ $PROJECT_ID = "xgvaibxxiwfraklfbwey"
 
 Write-Host "Deploying Supabase Edge Functions..." -ForegroundColor Green
 
+# Functions invoked by cron.yaml (unauthenticated POSTs)
+$noVerifyJwtFunctions = @(
+    "sync-worker",
+    "enrich-assets-yahoo",
+    "backfill-asset-history"
+)
+
 $functions = @(
     "scrape-posts",
     "fetch-daily-prices",
     "scrape-daily-movers",
     "fix-posts",
     "trigger-sync",
+    "run-migration",
     "sync-traders",
     "sync-trader-details",
+    "sync-trader-etoro",
     "sync-worker",
     "enqueue-sync-jobs",
     "process-sync-job",
     "dispatch-sync-jobs",
+    "refresh-asset",
+    "enrich-assets-yahoo",
+    "backfill-asset-history",
     "verify-deployment",
     "force-process-queue",
     "sync-diagnostics"
@@ -24,7 +36,13 @@ $functions = @(
 
 foreach ($func in $functions) {
     Write-Host "`nDeploying $func..." -ForegroundColor Yellow
-    supabase functions deploy $func --project-ref $PROJECT_ID
+
+    if ($noVerifyJwtFunctions -contains $func) {
+        supabase functions deploy $func --project-ref $PROJECT_ID --no-verify-jwt
+    } else {
+        supabase functions deploy $func --project-ref $PROJECT_ID
+    }
+
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Failed to deploy $func" -ForegroundColor Red
     } else {

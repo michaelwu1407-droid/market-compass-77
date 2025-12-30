@@ -13,6 +13,9 @@ serve(async (req) => {
 
     try {
         const QUEUE_LOW_WATERMARK = 20;
+        const FOLLOWED_ENQUEUE_LIMIT = 50;
+        const FOLLOWED_STALE_MINUTES = 30;
+        const FOLLOWED_BULLAWARE_JOB_TYPES = ['investor_details', 'risk_score', 'metrics', 'portfolio'] as const;
         // Prefer injected env; fall back to request origin to avoid "supabaseUrl is required".
         const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? new URL(req.url).origin;
         const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -133,6 +136,77 @@ serve(async (req) => {
 
         // 1. Invoke dispatch-sync-jobs on same project
         console.log("Invoking dispatch-sync-jobs...");
+
+        // Always keep followed traders fresh by ensuring they have pending work when stale.
+        // This prevents needing manual per-trader refresh.
+        try {
+            const cutoffIso = new Date(Date.now() - FOLLOWED_STALE_MINUTES * 60 * 1000).toISOString();
+
+            const { data: followed, error: followedErr } = await supabase
+                .from('user_follows')
+                .select('trader_id')
+                .order('created_at', { ascending: false })
+                .limit(200);
+
+            if (followedErr) {
+                console.warn('Warning: failed to load followed traders:', followedErr);
+            } else {
+                const followedIds = Array.from(new Set((followed || []).map((r: any) => r.trader_id).filter(Boolean)));
+
+                if (followedIds.length > 0) {
+                    // Only enqueue for traders that are stale.
+                    const { data: staleTraders, error: staleErr } = await supabase
+                        .from('traders')
+                        .select('id, details_synced_at')
+                        .in('id', followedIds)
+                        .or(`details_synced_at.is.null,details_synced_at.lt.${cutoffIso}`)
+                        .order('details_synced_at', { ascending: true, nullsFirst: true })
+                        .limit(FOLLOWED_ENQUEUE_LIMIT);
+
+                    if (staleErr) {
+                        console.warn('Warning: failed to load stale followed traders:', staleErr);
+                    } else {
+                        const staleIds = (staleTraders || []).map((t: any) => t.id).filter(Boolean);
+                        if (staleIds.length > 0) {
+                            const { data: existing, error: existingErr } = await supabase
+                                .from('sync_jobs')
+                                .select('trader_id, job_type, status')
+                                .in('trader_id', staleIds)
+                                .in('job_type', Array.from(FOLLOWED_BULLAWARE_JOB_TYPES))
+                                .in('status', ['pending', 'in_progress']);
+
+                            const existingKey = new Set(
+                                (existing || []).map((j: any) => `${j.trader_id}:${j.job_type}`)
+                            );
+
+                            if (existingErr) {
+                                console.warn('Warning: failed checking existing jobs for followed traders:', existingErr);
+                            }
+
+                            const jobsToInsert = staleIds.flatMap((trader_id: string) =>
+                                Array.from(FOLLOWED_BULLAWARE_JOB_TYPES)
+                                    .filter((job_type) => !existingKey.has(`${trader_id}:${job_type}`))
+                                    .map((job_type) => ({ trader_id, status: 'pending', job_type }))
+                            );
+
+                            if (jobsToInsert.length > 0) {
+                                const { error: insertErr } = await supabase
+                                    .from('sync_jobs')
+                                    .insert(jobsToInsert);
+
+                                if (insertErr) {
+                                    console.warn('Warning: failed inserting followed-trader jobs:', insertErr);
+                                } else {
+                                    console.log(`Enqueued ${jobsToInsert.length} jobs for stale followed traders.`);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: any) {
+            console.warn('Warning: followed-trader enqueue step failed:', e?.message || e);
+        }
         
         const dispatchResponse = await fetch(`${supabaseUrl}/functions/v1/dispatch-sync-jobs`, {
             method: 'POST',

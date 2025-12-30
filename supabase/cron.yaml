@@ -2,3 +2,11 @@ jobs:
   syncWorker:
     schedule: '*/2 * * * *' # Every 2 minutes
     command: curl -sS -X POST https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/sync-worker
+
+  enrichAssetsYahoo:
+    schedule: '*/15 * * * *' # Turbo: every 15 minutes (processes BATCH_SIZE assets per run)
+    command: curl -sS -X POST https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/enrich-assets-yahoo
+
+  backfillAssetHistory:
+    schedule: '7,22,37,52 * * * *' # Turbo: every 15 minutes, staggered
+    command: curl -sS -X POST https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/backfill-asset-history

@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { yahooSymbolCandidates } from "../_shared/yahooSymbol.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -28,82 +29,19 @@ type AssetRow = {
   asset_type?: string | null;
   exchange?: string | null;
   country?: string | null;
+  currency?: string | null;
   sector?: string | null;
 };
 
-function mapSymbolToYahoo(symbol: string): string {
-  // Already has a suffix, apply conversions (keep in sync with enrich-assets-yahoo)
-  if (symbol.includes('.')) {
-    const suffixMappings: Record<string, string> = {
-      '.ASX': '.AX',
-      '.LON': '.L',
-      '.PAR': '.PA',
-      '.FRA': '.F',
-      '.MIL': '.MI',
-      '.MAD': '.MC',
-      '.AMS': '.AS',
-      '.BRU': '.BR',
-      '.STO': '.ST',
-      '.HEL': '.HE',
-      '.OSL': '.OL',
-      '.CPH': '.CO',
-      '.SWX': '.SW',
-      '.ZU': '.SW',
-      '.TSE': '.TO',
-      '.NSE': '.NS',
-      '.BSE': '.BO',
-    };
-
-    for (const [from, to] of Object.entries(suffixMappings)) {
-      if (symbol.endsWith(from)) {
-        return symbol.replace(from, to);
-      }
-    }
-  }
-
-  return symbol;
-}
-
 function yahooCandidatesForAsset(asset: AssetRow): string[] {
-  const raw = String(asset.symbol || '').trim().toUpperCase();
-  if (!raw) return [];
-
-  const candidates: string[] = [];
-
-  // FX pairs: Yahoo convention is EURUSD=X.
-  // Only apply when the symbol looks like a currency pair (6 letters, both legs are common ISO codes).
-  if (/^[A-Z]{6}$/.test(raw)) {
-    const ccy = new Set(['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD']);
-    const base = raw.slice(0, 3);
-    const quote = raw.slice(3, 6);
-    if (ccy.has(base) && ccy.has(quote)) {
-      candidates.push(`${raw}=X`);
-    }
-  }
-
-  // Base + suffix normalization
-  candidates.push(mapSymbolToYahoo(raw));
-
-  // Some data sources store HK tickers as numeric-only symbols.
-  // If we see a 4-5 digit symbol, also try appending .HK.
-  if (/^\d{4,5}$/.test(raw)) {
-    candidates.push(`${raw}.HK`);
-  }
-  // If it's a shorter numeric symbol, also try a zero-padded 4-digit HK ticker.
-  if (/^\d{1,3}$/.test(raw)) {
-    candidates.push(`${raw.padStart(4, '0')}.HK`);
-  }
-
-  // Crypto: try SYMBOL-USD (Yahoo convention) when asset_type suggests crypto.
-  const assetType = String(asset.asset_type || '').toLowerCase();
-  const sector = String(asset.sector || '').toLowerCase();
-  const looksCrypto = assetType.includes('crypto') || sector.includes('crypto');
-  if (looksCrypto && !raw.includes('-') && !raw.includes('=') && !raw.includes('.')) {
-    candidates.unshift(`${raw}-USD`);
-  }
-
-  // De-dupe while preserving order
-  return Array.from(new Set(candidates.filter(Boolean)));
+  return yahooSymbolCandidates({
+    symbol: asset.symbol,
+    exchange: asset.exchange ?? null,
+    country: asset.country ?? null,
+    currency: asset.currency ?? null,
+    asset_type: asset.asset_type ?? null,
+    sector: asset.sector ?? null,
+  });
 }
 
 async function fetchYahooQuotes(symbols: string[]): Promise<Map<string, YahooQuote>> {

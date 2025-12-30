@@ -14,7 +14,7 @@ export function useRefreshAsset() {
     mutationFn: async ({ assetId, symbol }: RefreshAssetParams) => {
       // Use external Supabase project for function invocations
       const { data, error } = await supabase.functions.invoke('refresh-asset', {
-        body: { assetId, symbol }
+        body: { assetId, symbol, range: '5y' }
       });
       
       if (error) throw error;

@@ -18,6 +18,7 @@ const timeRanges = [
   { label: '3M', days: 90 },
   { label: '6M', days: 180 },
   { label: '1Y', days: 365 },
+  { label: '5Y', days: 365 * 5 },
   { label: 'All', days: 9999 },
 ];
 
@@ -73,6 +74,9 @@ export function PriceChart({
     const d = new Date(date);
     if (selectedDays <= 30) {
       return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+    if (selectedDays > 365) {
+      return d.toLocaleDateString('en-US', { year: '2-digit' });
     }
     return d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
   };
@@ -140,6 +144,7 @@ export function PriceChart({
               axisLine={false}
               tickLine={false}
               interval="preserveStartEnd"
+              minTickGap={24}
             />
             <YAxis 
               domain={[minValue, maxValue]}
@@ -166,6 +171,8 @@ export function PriceChart({
               tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
               axisLine={false}
               tickLine={false}
+              interval="preserveStartEnd"
+              minTickGap={24}
             />
             <YAxis 
               domain={[minValue, maxValue]}
