@@ -23,18 +23,19 @@ export function TraderCard({
   onStarForIC,
   onClick 
 }: TraderCardProps) {
-  const copiers = trader.copiers || 0;
-  const gain12m = trader.gain_12m || 0;
-  const gain24m = trader.gain_24m || 0;
+  const copiers = trader.copiers ?? 0;
+  const gain12m = trader.gain_12m;
+  const gain24m = trader.gain_24m;
   const tags = trader.tags || [];
+
+  const displayName = String(trader.display_name || trader.etoro_username || 'Trader');
+  const fallbackInitial = (displayName.trim()[0] || 'T').toUpperCase();
 
   return (
     <Card className="card-hover cursor-pointer" onClick={onClick}>
       <CardContent className="p-4">
         {/* Header */}
         <div className="flex items-start gap-3 mb-4">
-    const displayName = String(trader.display_name || trader.etoro_username || 'Trader');
-    const fallbackInitial = (displayName.trim()[0] || 'T').toUpperCase();
           <Avatar className="h-12 w-12">
             <AvatarImage src={trader.avatar_url || undefined} />
               <AvatarFallback>{fallbackInitial}</AvatarFallback>
@@ -52,9 +53,13 @@ export function TraderCard({
               <TrendingUp className="h-3 w-3" />
               12M Return
             </div>
-            <span className={cn("font-bold", gain12m >= 0 ? "text-gain" : "text-loss")}>
-              {gain12m >= 0 ? '+' : ''}{gain12m.toFixed(1)}%
-            </span>
+            {gain12m == null ? (
+              <span className="font-bold">—</span>
+            ) : (
+              <span className={cn("font-bold", gain12m >= 0 ? "text-gain" : "text-loss")}>
+                {gain12m >= 0 ? '+' : ''}{gain12m.toFixed(1)}%
+              </span>
+            )}
           </div>
           <div className="stat-card">
             <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
@@ -74,9 +79,13 @@ export function TraderCard({
             <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
               24M Return
             </div>
-            <span className={cn("font-bold", gain24m >= 0 ? "text-gain" : "text-loss")}>
-              {gain24m >= 0 ? '+' : ''}{gain24m.toFixed(1)}%
-            </span>
+            {gain24m == null ? (
+              <span className="font-bold">—</span>
+            ) : (
+              <span className={cn("font-bold", gain24m >= 0 ? "text-gain" : "text-loss")}>
+                {gain24m >= 0 ? '+' : ''}{gain24m.toFixed(1)}%
+              </span>
+            )}
           </div>
         </div>
 
