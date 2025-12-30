@@ -14,6 +14,13 @@ interface YahooQuote {
   regularMarketPreviousClose?: number;
 }
 
+type BullawareQuote = {
+  symbol: string;
+  price?: number;
+  change?: number;
+  changePct?: number;
+};
+
 type AssetRow = {
   id: string;
   symbol: string;
@@ -153,12 +160,89 @@ async function fetchYahooQuotes(symbols: string[]): Promise<Map<string, YahooQuo
   }
 }
 
+async function fetchBullawareQuotes(symbols: string[]): Promise<Map<string, BullawareQuote>> {
+  const results = new Map<string, BullawareQuote>();
+  const apiKey = Deno.env.get('BULLAWARE_API_KEY');
+  if (!apiKey || symbols.length === 0) {
+    return results;
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15_000);
+
+  try {
+    const url = `https://api.bullaware.com/v1/instruments?symbols=${encodeURIComponent(
+      symbols.join(','),
+    )}`;
+
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      console.log(`[fetch-daily-prices] BullAware API error (batch): ${response.status}`);
+      return results;
+    }
+
+    const data = await response.json();
+    const items: any[] = data?.items || data?.data || data?.instruments || (Array.isArray(data) ? data : []);
+
+    for (const item of items) {
+      const symbol = String(item?.symbol || item?.ticker || '').trim().toUpperCase();
+      if (!symbol) continue;
+
+      const price = Number(item?.price ?? item?.lastPrice);
+      const change = Number(item?.change ?? item?.priceChange);
+      const changePct = Number(item?.changePct ?? item?.changePercent);
+
+      results.set(symbol, {
+        symbol,
+        price: Number.isFinite(price) ? price : undefined,
+        change: Number.isFinite(change) ? change : undefined,
+        changePct: Number.isFinite(changePct) ? changePct : undefined,
+      });
+    }
+
+    return results;
+  } catch (error) {
+    console.log(`[fetch-daily-prices] Error fetching quotes (BullAware batch):`, error);
+    return results;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    // Optional diagnostic probe to confirm outbound access + parsing.
+    // Example: /functions/v1/fetch-daily-prices?probe=1
+    const urlObj = new URL(req.url);
+    if (urlObj.searchParams.get('probe') === '1') {
+      const probeSymbols = ['AAPL', '0700.HK', 'BTC-USD'];
+      const yahoo = await fetchYahooQuotes(probeSymbols);
+      const bull = await fetchBullawareQuotes(probeSymbols);
+      return new Response(
+        JSON.stringify({
+          success: true,
+          probeSymbols,
+          yahooCount: yahoo.size,
+          bullawareCount: bull.size,
+          sampleYahoo: Array.from(yahoo.values()).slice(0, 3),
+          sampleBullaware: Array.from(bull.values()).slice(0, 3),
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
+    }
+
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
@@ -191,6 +275,8 @@ serve(async (req) => {
     const batchSize = 25;
     let totalUpdated = 0;
     let totalFailed = 0;
+    let yahooUpdated = 0;
+    let bullawareUpdated = 0;
 
     for (let i = 0; i < assets.length; i += batchSize) {
       const batch = assets.slice(i, i + batchSize) as AssetRow[];
@@ -209,11 +295,15 @@ serve(async (req) => {
       console.log(`[fetch-daily-prices] Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(assets.length / batchSize)}: ${symbols.join(', ')}`);
       
       const quotes = await fetchYahooQuotes(symbols);
+
+      // BullAware fallback for symbols Yahoo can't resolve or when Yahoo is blocked.
+      const bullawareQuotes = await fetchBullawareQuotes(batch.map((a) => a.symbol));
       
       for (const asset of batch) {
         const candidates = assetToCandidates.get(asset.id) || [];
         const quoteSymbol = candidates.map((c) => c.toUpperCase()).find((c) => quotes.has(c));
         const quote = quoteSymbol ? quotes.get(quoteSymbol) : undefined;
+        const bull = bullawareQuotes.get(String(asset.symbol || '').trim().toUpperCase());
         
         if (quote && quote.regularMarketPrice !== undefined) {
           const { error: updateError } = await supabase
@@ -232,6 +322,25 @@ serve(async (req) => {
           } else {
             console.log(`[fetch-daily-prices] Updated ${asset.symbol}: $${quote.regularMarketPrice} (${quote.regularMarketChangePercent?.toFixed(2)}%)`);
             totalUpdated++;
+            yahooUpdated++;
+          }
+        } else if (bull?.price !== undefined) {
+          const { error: updateError } = await supabase
+            .from('assets')
+            .update({
+              current_price: bull.price,
+              price_change: bull.change ?? 0,
+              price_change_pct: bull.changePct ?? 0,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', asset.id);
+
+          if (updateError) {
+            console.error(`[fetch-daily-prices] Error updating ${asset.symbol} (BullAware):`, updateError);
+            totalFailed++;
+          } else {
+            totalUpdated++;
+            bullawareUpdated++;
           }
         } else {
           console.log(`[fetch-daily-prices] No quote data for ${asset.symbol} (tried: ${(assetToCandidates.get(asset.id) || []).join(', ')})`);
@@ -253,6 +362,8 @@ serve(async (req) => {
         updated: totalUpdated,
         failed: totalFailed,
         total: assets.length,
+        yahoo_updated: yahooUpdated,
+        bullaware_updated: bullawareUpdated,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
