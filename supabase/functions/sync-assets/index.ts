@@ -54,14 +54,17 @@ serve(async (req) => {
       const data = await response.json();
       allAssets = data.items || data.data || data.instruments || (Array.isArray(data) ? data : []);
     } else {
-      // Fetch all with pagination
-      let page = 1;
-      const pageSize = 100;
+      // Fetch with pagination.
+      // BullAware endpoints commonly use limit+offset (see investors endpoint), and some deployments
+      // ignore page-based pagination. We default to offset paging with a safety cap.
+      let offset = 0;
+      const pageSize = 200;
+      const maxItems = 2000;
       let hasMore = true;
 
       while (hasMore) {
-        const bullwareUrl = `https://api.bullaware.com/v1/instruments?page=${page}&limit=${pageSize}`;
-        console.log(`Fetching assets page ${page}...`);
+        const bullwareUrl = `https://api.bullaware.com/v1/instruments?limit=${pageSize}&offset=${offset}`;
+        console.log(`Fetching assets offset ${offset} (limit ${pageSize})...`);
 
         const response = await fetch(bullwareUrl, {
           headers: {
@@ -78,21 +81,17 @@ serve(async (req) => {
         const items = data.items || data.data || data.instruments || (Array.isArray(data) ? data : []);
         
         allAssets.push(...items);
-        console.log(`Page ${page}: received ${items.length} assets (total: ${allAssets.length})`);
+        console.log(`Received ${items.length} assets (total: ${allAssets.length})`);
 
-        // Check if more pages
-        const total = data.total || data.totalCount;
-        if (total && allAssets.length >= total) {
+        offset += items.length;
+
+        // Stop conditions
+        if (items.length < pageSize) {
           hasMore = false;
-        } else if (items.length < pageSize) {
+        }
+        if (allAssets.length >= maxItems) {
+          console.log(`Reached maxItems=${maxItems}, stopping pagination early`);
           hasMore = false;
-        } else {
-          page++;
-          // Safety limit
-          if (page > 100) {
-            console.log('Reached page limit, stopping pagination');
-            hasMore = false;
-          }
         }
       }
     }
