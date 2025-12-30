@@ -12,6 +12,7 @@ BEGIN
     FROM cron.job
     WHERE jobname IN (
       'scrape-posts-hourly',
+      'sync-assets-daily',
       'fetch-daily-prices-daily',
       'scrape-daily-movers-daily',
       'sync-trader-details-4h'
@@ -39,10 +40,28 @@ SELECT cron.schedule(
   $$
 );
 
--- Schedule fetch-daily-prices every day at 8 PM UTC (Market close + buffer)
+-- Schedule sync-assets every day at 8 PM UTC (Market close + buffer)
+-- This populates assets.current_price / price_change_pct via BullAware (more reliable than ticker mapping).
+SELECT cron.schedule(
+  'sync-assets-daily',
+  '0 20 * * 1-5',
+  $$
+  SELECT
+    net.http_post(
+      url:='https://<PROJECT_REF>.supabase.co/functions/v1/sync-assets',
+      headers:=jsonb_build_object(
+        'Content-Type','application/json',
+        'Authorization','Bearer ' || '<SERVICE_ROLE_KEY>'
+      ),
+      body:='{}'::jsonb
+    ) as request_id;
+  $$
+);
+
+-- Schedule fetch-daily-prices every day at 8:10 PM UTC
 SELECT cron.schedule(
   'fetch-daily-prices-daily',
-  '0 20 * * 1-5',
+  '10 20 * * 1-5',
   $$
   SELECT
     net.http_post(
