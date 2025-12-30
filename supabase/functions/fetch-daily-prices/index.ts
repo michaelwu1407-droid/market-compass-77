@@ -167,13 +167,18 @@ async function fetchBullawareQuotes(symbols: string[]): Promise<Map<string, Bull
     return results;
   }
 
+  const requestedSymbols = new Set(
+    symbols
+      .map((s) => String(s || '').trim().toUpperCase())
+      .filter(Boolean),
+  );
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15_000);
 
   try {
-    const url = `https://api.bullaware.com/v1/instruments?symbols=${encodeURIComponent(
-      symbols.join(','),
-    )}`;
+    // IMPORTANT: BullAware expects a comma-separated list (unescaped commas), as used by sync-assets.
+    const url = `https://api.bullaware.com/v1/instruments?symbols=${symbols.join(',')}`;
 
     const response = await fetch(url, {
       signal: controller.signal,
@@ -191,6 +196,23 @@ async function fetchBullawareQuotes(symbols: string[]): Promise<Map<string, Bull
 
     const data = await response.json();
     const items: any[] = data?.items || data?.data || data?.instruments || (Array.isArray(data) ? data : []);
+
+    // If BullAware ignores our filter, it may return a default page (e.g. FX pairs).
+    // Prevent writing incorrect prices by requiring at least one overlap with the requested set.
+    let overlap = 0;
+    for (const item of items) {
+      const sym = String(item?.symbol || item?.ticker || '').trim().toUpperCase();
+      if (sym && requestedSymbols.has(sym)) {
+        overlap++;
+        break;
+      }
+    }
+    if (items.length > 0 && overlap === 0) {
+      console.log(
+        `[fetch-daily-prices] BullAware returned ${items.length} items but none matched requested symbols; treating as unfiltered response`,
+      );
+      return results;
+    }
 
     for (const item of items) {
       const symbol = String(item?.symbol || item?.ticker || '').trim().toUpperCase();
@@ -223,11 +245,25 @@ serve(async (req) => {
   }
 
   try {
+    const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
     // Optional diagnostic probe to confirm outbound access + parsing.
     // Example: /functions/v1/fetch-daily-prices?probe=1
     const urlObj = new URL(req.url);
     if (urlObj.searchParams.get('probe') === '1') {
-      const probeSymbols = ['AAPL', '0700.HK', 'BTC-USD'];
+      const { data: sampleAssets } = await supabase
+        .from('assets')
+        .select('symbol')
+        .not('symbol', 'is', null)
+        .order('updated_at', { ascending: false })
+        .limit(10);
+
+      const sampleSymbols = (sampleAssets || []).map((a: any) => String(a.symbol)).filter(Boolean).slice(0, 5);
+      const probeSymbols = Array.from(new Set(['AAPL', '0700.HK', 'BTC-USD', ...sampleSymbols]));
+
       const yahoo = await fetchYahooQuotes(probeSymbols);
       const bull = await fetchBullawareQuotes(probeSymbols);
       return new Response(
@@ -243,17 +279,13 @@ serve(async (req) => {
       );
     }
 
-    const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-
     console.log('[fetch-daily-prices] Starting daily price fetch...');
 
-    // Get all assets
+    // Get assets that look "real" (avoid placeholder symbols that will never resolve)
     const { data: assets, error: assetsError } = await supabase
       .from('assets')
       .select('id, symbol, name, asset_type, exchange, country')
+      .or('instrument_id.not.is.null,market_cap.not.is.null,exchange.not.is.null,sector.not.is.null')
       .order('symbol');
 
     if (assetsError) {
