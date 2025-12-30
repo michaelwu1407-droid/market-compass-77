@@ -16,51 +16,75 @@ interface YahooQuote {
 
 async function fetchYahooQuotes(symbols: string[]): Promise<Map<string, YahooQuote>> {
   const results = new Map<string, YahooQuote>();
-  
-  // Use Yahoo Finance v8 chart API which doesn't require authentication
-  // Fetch each symbol individually as v8 doesn't support batch
-  for (const symbol of symbols) {
-    try {
-      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=2d`;
-      
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'application/json'
-        }
-      });
-      
-      if (!response.ok) {
-        console.log(`[fetch-daily-prices] Yahoo API error for ${symbol}: ${response.status}`);
+
+  if (symbols.length === 0) {
+    return results;
+  }
+
+  // Use Yahoo Finance v7 quote endpoint which supports batching and doesn't require authentication.
+  // This is dramatically faster than per-symbol v8 chart calls and helps stay within edge runtime limits.
+  const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(
+    symbols.join(","),
+  )}`;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15_000);
+
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        Accept: "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      console.log(
+        `[fetch-daily-prices] Yahoo API error (batch): ${response.status}`,
+      );
+      return results;
+    }
+
+    const data = await response.json();
+    const quotes: Array<Record<string, unknown>> =
+      data?.quoteResponse?.result ?? [];
+
+    for (const quote of quotes) {
+      const symbol = String(quote.symbol ?? "");
+      if (!symbol) continue;
+
+      const currentPrice = Number(quote.regularMarketPrice);
+      const previousClose = Number(quote.regularMarketPreviousClose);
+
+      if (!Number.isFinite(currentPrice) || !Number.isFinite(previousClose)) {
         continue;
       }
-      
-      const data = await response.json();
-      const meta = data?.chart?.result?.[0]?.meta;
-      
-      if (meta && meta.regularMarketPrice !== undefined) {
-        const currentPrice = meta.regularMarketPrice;
-        const previousClose = meta.chartPreviousClose || meta.previousClose;
-        
-        if (previousClose && previousClose > 0) {
-          const priceChange = currentPrice - previousClose;
-          const priceChangePercent = (priceChange / previousClose) * 100;
-          
-          results.set(symbol.toUpperCase(), {
-            symbol: symbol,
-            regularMarketPrice: currentPrice,
-            regularMarketChange: priceChange,
-            regularMarketChangePercent: priceChangePercent,
-            regularMarketPreviousClose: previousClose,
-          });
-        }
+
+      if (previousClose <= 0) {
+        continue;
       }
-    } catch (error) {
-      console.log(`[fetch-daily-prices] Error fetching ${symbol}:`, error);
+
+      const priceChange = currentPrice - previousClose;
+      const priceChangePercent = (priceChange / previousClose) * 100;
+
+      results.set(symbol.toUpperCase(), {
+        symbol,
+        regularMarketPrice: currentPrice,
+        regularMarketChange: priceChange,
+        regularMarketChangePercent: priceChangePercent,
+        regularMarketPreviousClose: previousClose,
+      });
     }
+
+    return results;
+  } catch (error) {
+    console.log(`[fetch-daily-prices] Error fetching quotes (batch):`, error);
+    return results;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  
-  return results;
 }
 
 serve(async (req) => {
@@ -97,8 +121,8 @@ serve(async (req) => {
 
     console.log(`[fetch-daily-prices] Found ${assets.length} assets to update`);
 
-    // Process in smaller batches with rate limiting
-    const batchSize = 10;
+    // Batch quotes to reduce Yahoo calls and stay within edge runtime limits
+    const batchSize = 25;
     let totalUpdated = 0;
     let totalFailed = 0;
 
@@ -137,9 +161,9 @@ serve(async (req) => {
         }
       }
       
-      // Rate limiting - wait between batches
+      // Light rate limiting - wait between batches
       if (i + batchSize < assets.length) {
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise((resolve) => setTimeout(resolve, 200));
       }
     }
 
