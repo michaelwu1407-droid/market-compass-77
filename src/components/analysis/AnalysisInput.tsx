@@ -36,9 +36,10 @@ interface AnalysisInputProps {
   isLoading?: boolean;
   preselectedTrader?: PreselectedTrader;
   preselectedAsset?: string;
+  preselectedMode?: string;
 }
 
-export function AnalysisInput({ onSubmit, isLoading, preselectedTrader, preselectedAsset }: AnalysisInputProps) {
+export function AnalysisInput({ onSubmit, isLoading, preselectedTrader, preselectedAsset, preselectedMode }: AnalysisInputProps) {
   const [reportType, setReportType] = useState<ReportType>('single_stock');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
@@ -63,6 +64,13 @@ export function AnalysisInput({ onSubmit, isLoading, preselectedTrader, preselec
       setSearchQuery(preselectedTrader.etoro_username);
     }
   }, [preselectedTrader]);
+
+  // Handle preselected mode
+  useEffect(() => {
+    if (preselectedMode === 'trader_portfolio') {
+      setReportType('trader_portfolio');
+    }
+  }, [preselectedMode]);
 
   // Handle preselected asset
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RefreshCw, Clock } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
@@ -15,6 +15,7 @@ import { useSavedPosts, useSavePost, useUnsavePost } from '@/hooks/useSavedPosts
 import { isValidPostContent } from '@/components/feed/MarkdownContent';
 import { formatDistanceToNow } from 'date-fns';
 import type { FeedItem, Post as FeedPost, Trader as FeedTrader } from '@/types';
+import { toast } from '@/hooks/use-toast';
 
 type FilterType = 'all' | 'following' | 'assets' | 'traders' | 'saved';
 
@@ -24,6 +25,7 @@ export default function FeedPage() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [isRefreshingLocal, setIsRefreshingLocal] = useState(false);
+  const usernameCache = useRef<Map<string, string>>(new Map());
   
   const { data: posts, isLoading: postsLoading, refetch: refetchPosts, isFetching } = usePosts();
   const { data: tradersData, isLoading: tradersLoading, refetch: refetchTraders } = useTraders();
@@ -203,8 +205,111 @@ export default function FeedPage() {
 
   const handleSavePost = (postId: string) => savePost.mutate(postId);
   const handleUnsavePost = (postId: string) => unsavePost.mutate(postId);
-  const handleViewTrader = (traderId: string) => navigate(`/traders/${traderId}`);
-  const handleAnalyse = () => navigate('/analysis');
+
+  const handleViewTrader = async (traderId?: string, username?: string) => {
+    if (traderId) {
+      navigate(`/traders/${traderId}`);
+      return;
+    }
+
+    if (username) {
+      const normalizedUsername = username.toLowerCase();
+      // Check cache first
+      if (usernameCache.current.has(normalizedUsername)) {
+        navigate(`/traders/${usernameCache.current.get(normalizedUsername)}`);
+        return;
+      }
+
+      try {
+        const { data } = await supabase
+          .from('traders')
+          .select('id')
+          .ilike('etoro_username', normalizedUsername)
+          .maybeSingle();
+
+        if (data?.id) {
+          usernameCache.current.set(normalizedUsername, data.id);
+          navigate(`/traders/${data.id}`);
+        } else {
+          toast({
+            title: 'Trader not available',
+            description: 'This trader profile is not yet available in the system.',
+            variant: 'destructive',
+          });
+        }
+      } catch (error) {
+        console.error('Error resolving trader:', error);
+        toast({
+          title: 'Error',
+          description: 'Failed to resolve trader profile.',
+          variant: 'destructive',
+        });
+      }
+      return;
+    }
+
+    toast({
+      title: 'Trader not available',
+      description: 'Trader information is missing.',
+      variant: 'destructive',
+    });
+  };
+
+  const handleAnalyse = (item?: FeedItem) => {
+    if (!item) {
+      navigate('/analysis');
+      return;
+    }
+
+    // Extract trader info from item
+    let traderId: string | undefined;
+    let username: string | undefined;
+
+    if (item.type === 'post') {
+      const data = item.data as FeedPost;
+      traderId = data.trader_id || data.trader?.id;
+      username = data.etoro_username || data.trader?.etoro_trader_id;
+    } else if (item.type === 'trade') {
+      const data = item.data as any; // Trade type needs update in some places, casting to any for safety
+      traderId = data.trader_id || data.trader?.id;
+      username = data.trader?.etoro_trader_id; // Trade might not have etoro_username directly
+    }
+
+    if (traderId) {
+      navigate(`/analysis?trader=${traderId}&mode=trader_portfolio`);
+    } else if (username) {
+      // Attempt to resolve or just navigate with username?
+      // Requirement: "if only etoro_username exists, resolve UUID"
+      // Re-using logic similar to handleViewTrader but we need to await it.
+      // Since this is sync handler usually, we can make it async.
+
+      const resolveAndNavigate = async () => {
+        const normalizedUsername = username!.toLowerCase();
+        if (usernameCache.current.has(normalizedUsername)) {
+           navigate(`/analysis?trader=${usernameCache.current.get(normalizedUsername)}&mode=trader_portfolio`);
+           return;
+        }
+
+        const { data } = await supabase
+          .from('traders')
+          .select('id')
+          .ilike('etoro_username', normalizedUsername)
+          .maybeSingle();
+
+        if (data?.id) {
+          usernameCache.current.set(normalizedUsername, data.id);
+          navigate(`/analysis?trader=${data.id}&mode=trader_portfolio`);
+        } else {
+          // Fallback to normal analysis if trader not found
+           navigate('/analysis');
+        }
+      };
+      resolveAndNavigate();
+    } else {
+      navigate('/analysis');
+    }
+  };
+
   const handleStarForIC = () => navigate('/ic');
 
   const isLoading = postsLoading || tradersLoading || followsLoading || savedLoading;
@@ -289,11 +394,12 @@ export default function FeedPage() {
                 <FeedCard
                   key={item.id}
                   item={item}
-                  onAnalyse={handleAnalyse}
+                  onAnalyse={() => handleAnalyse(item)}
                   onStarForIC={handleStarForIC}
                   onSave={handleSavePost}
                   onUnsave={handleUnsavePost}
                   isSaved={item.type === 'post' && savedPostIds.has(item.id)}
+                  onViewTrader={handleViewTrader}
                 />
               ))}
             </div>

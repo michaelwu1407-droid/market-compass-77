@@ -208,7 +208,9 @@ export default function DailyPage() {
     
     const topGainerText = topGainer?.asset
       ? `${topGainer.asset.name} (${topGainer.asset.ticker}) leads with ${topGainer.pct_change >= 0 ? '+' : ''}${topGainer.pct_change.toFixed(1)}%`
-      : 'Loading daily movers...';
+      : moversLoading
+        ? 'Loading daily movers...'
+        : 'No daily movers available today';
 
     // Find recent followed trader move
     const followedTrade = transformedTrades.find(t => followedTraderIds.includes(t.trader_id));

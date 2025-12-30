@@ -16,9 +16,10 @@ interface FeedCardProps {
   onSave?: (postId: string) => void;
   onUnsave?: (postId: string) => void;
   isSaved?: boolean;
+  onViewTrader?: (traderId?: string, username?: string) => void;
 }
 
-export function FeedCard({ item, onAnalyse, onStarForIC, onSave, onUnsave, isSaved }: FeedCardProps) {
+export function FeedCard({ item, onAnalyse, onStarForIC, onSave, onUnsave, isSaved, onViewTrader }: FeedCardProps) {
   const navigate = useNavigate();
   const timeAgo = useMemo(() => {
     const d = item.created_at ? new Date(item.created_at) : null;
@@ -34,8 +35,12 @@ export function FeedCard({ item, onAnalyse, onStarForIC, onSave, onUnsave, isSav
     }
   };
 
-  const handleViewTrader = (traderId: string) => {
-    navigate(`/traders/${traderId}`);
+  const handleViewTrader = (traderId?: string, username?: string) => {
+    if (onViewTrader) {
+      onViewTrader(traderId, username);
+    } else if (traderId) {
+      navigate(`/traders/${traderId}`);
+    }
   };
 
   const handleViewAsset = (assetId: string) => {
@@ -50,7 +55,7 @@ export function FeedCard({ item, onAnalyse, onStarForIC, onSave, onUnsave, isSav
         <div className="flex items-start gap-3 mb-3">
             <Avatar 
             className="h-10 w-10 cursor-pointer hover:ring-2 hover:ring-primary transition-all" 
-            onClick={() => post.trader && handleViewTrader(post.trader.id)}
+            onClick={() => handleViewTrader(post.trader?.id || post.trader_id || undefined, post.etoro_username || post.trader?.etoro_trader_id || undefined)}
           >
             <AvatarImage src={post.poster_avatar || post.trader?.avatar_url} />
             <AvatarFallback>{(post.poster_first?.[0] || post.poster_last?.[0] || post.trader?.display_name?.[0] || 'T')}</AvatarFallback>
@@ -59,7 +64,7 @@ export function FeedCard({ item, onAnalyse, onStarForIC, onSave, onUnsave, isSav
             <div className="flex items-center gap-2 flex-wrap">
               <span 
                 className="font-semibold text-sm cursor-pointer hover:text-primary transition-colors"
-                onClick={() => post.trader && handleViewTrader(post.trader.id)}
+                onClick={() => handleViewTrader(post.trader?.id || post.trader_id || undefined, post.etoro_username || post.trader?.etoro_trader_id || undefined)}
               >
                 {post.poster_first || post.poster_last
                   ? `${post.poster_first || ''} ${post.poster_last || ''}`.trim()
@@ -118,8 +123,12 @@ export function FeedCard({ item, onAnalyse, onStarForIC, onSave, onUnsave, isSav
 
         {/* Actions */}
         <div className="flex items-center gap-2 flex-wrap">
-          {post.trader && (
-            <Button variant="secondary" size="sm" onClick={() => handleViewTrader(post.trader!.id)}>
+          {(post.trader || post.trader_id || post.etoro_username) && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => handleViewTrader(post.trader?.id || post.trader_id || undefined, post.etoro_username || post.trader?.etoro_trader_id || undefined)}
+            >
               <Eye className="h-3.5 w-3.5 mr-1" />
               View trader
             </Button>
@@ -174,7 +183,7 @@ export function FeedCard({ item, onAnalyse, onStarForIC, onSave, onUnsave, isSav
         <p className="text-sm font-medium mb-1">
           <span 
             className="cursor-pointer hover:text-primary transition-colors"
-            onClick={() => trade.trader && handleViewTrader(trade.trader.id)}
+            onClick={() => handleViewTrader(trade.trader?.id || trade.trader_id, trade.trader?.etoro_trader_id)}
           >
             {trade.trader?.display_name}
           </span>
@@ -196,8 +205,12 @@ export function FeedCard({ item, onAnalyse, onStarForIC, onSave, onUnsave, isSav
         </div>
 
         <div className="flex items-center gap-2">
-          {trade.trader && (
-            <Button variant="secondary" size="sm" onClick={() => handleViewTrader(trade.trader!.id)}>
+          {(trade.trader || trade.trader_id) && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => handleViewTrader(trade.trader?.id || trade.trader_id, trade.trader?.etoro_trader_id)}
+            >
               View trader
             </Button>
           )}
