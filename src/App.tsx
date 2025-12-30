@@ -45,6 +45,14 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/auth" element={<AuthPage />} />
+
+      {/* Public deep-links (shareable / open-in-new-tab) */}
+      <Route element={<AppLayout />}>
+        <Route path="/traders" element={<TradersPage />} />
+        <Route path="/traders/:traderId" element={<TraderDetailPage />} />
+        <Route path="/assets/:assetId" element={<AssetDetailPage />} />
+      </Route>
+
       <Route
         element={
           <ProtectedRoute>
@@ -54,9 +62,6 @@ function AppRoutes() {
       >
         <Route path="/" element={<Index />} />
         <Route path="/daily" element={<DailyPage />} />
-        <Route path="/traders" element={<TradersPage />} />
-        <Route path="/traders/:traderId" element={<TraderDetailPage />} />
-        <Route path="/assets/:assetId" element={<AssetDetailPage />} />
         <Route path="/analysis" element={<AnalysisPage />} />
         <Route path="/ic" element={<ICPage />} />
         <Route path="/discrepancies" element={<DiscrepanciesPage />} />

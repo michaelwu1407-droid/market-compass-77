@@ -198,6 +198,23 @@ Stats page does not show many segments present in the BullAware factsheet.
 - Missing ingestion for those fields.
 - UI not rendering them.
 
+---
+
+## PRICING-1 — Remaining Yahoo symbol mismatch: NVTKL.L
+
+### Status
+TODO (non-blocking)
+
+### Current behavior
+- Daily pricing pipeline now updates most assets via Yahoo v8 chart.
+- One remaining failing symbol observed: `NVTKL.L`.
+
+### Likely root cause
+- Symbol does not exist on Yahoo as-is, or requires an alternate ticker / exchange suffix.
+
+### Next steps
+- Identify the correct Yahoo ticker for this asset and add a mapping/alias rule.
+
 ### Fix plan
 - Same as TRADERS-1, but ensure each factsheet segment has:
   - schema

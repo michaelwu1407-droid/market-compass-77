@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import type { Trader } from '@/hooks/useTraders';
 import { cn } from '@/lib/utils';
+import { Link } from 'react-router-dom';
 
 interface TraderCardProps {
   trader: Trader;
@@ -31,9 +32,12 @@ export function TraderCard({
   const displayName = String(trader.display_name || trader.etoro_username || 'Trader');
   const fallbackInitial = (displayName.trim()[0] || 'T').toUpperCase();
 
+  const to = `/traders/${trader.id}`;
+
   return (
-    <Card className="card-hover cursor-pointer" onClick={onClick}>
-      <CardContent className="p-4">
+    <Link to={to} className="block">
+      <Card className="card-hover cursor-pointer" onClick={onClick}>
+        <CardContent className="p-4">
         {/* Header */}
         <div className="flex items-start gap-3 mb-4">
           <Avatar className="h-12 w-12">
@@ -101,7 +105,7 @@ export function TraderCard({
         )}
 
         {/* Actions */}
-        <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-2" onClick={e => { e.preventDefault(); e.stopPropagation(); }}>
           <Button 
             variant={isFollowing ? "outline" : "default"} 
             size="sm" 
@@ -117,7 +121,8 @@ export function TraderCard({
             <Star className="h-3.5 w-3.5" />
           </Button>
         </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </Link>
   );
 }

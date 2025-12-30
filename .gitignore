@@ -5,4 +5,5 @@ dist/
 
 # Local debug artifacts
 tmp_*.txt
+tmp_*.sql
 probe-etoro-*.json

@@ -1,5 +1,6 @@
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { Link } from 'react-router-dom';
 
 interface TraderMiniCardProps {
   trader: {
@@ -14,13 +15,15 @@ interface TraderMiniCardProps {
 }
 
 export function TraderMiniCard({ trader, onClick, isFollowing }: TraderMiniCardProps) {
+  const displayName = String((trader as any)?.display_name || 'Trader');
+  const fallbackInitial = (displayName.trim()[0] || 'T').toUpperCase();
+
   return (
-    <div 
+    <Link
+      to={`/traders/${trader.id}`}
       className="flex items-center gap-3 p-3 rounded-lg hover:bg-secondary/50 cursor-pointer transition-colors"
       onClick={onClick}
     >
-  const displayName = String(trader.display_name || trader.etoro_trader_id || 'Trader');
-  const fallbackInitial = (displayName.trim()[0] || 'T').toUpperCase();
       <Avatar className="h-9 w-9">
         <AvatarImage src={trader.avatar_url} />
         <AvatarFallback>{fallbackInitial}</AvatarFallback>
@@ -38,6 +41,6 @@ export function TraderMiniCard({ trader, onClick, isFollowing }: TraderMiniCardP
           <span>Risk {trader.risk_score}</span>
         </div>
       </div>
-    </div>
+    </Link>
   );
 }

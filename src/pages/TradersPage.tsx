@@ -76,8 +76,6 @@ export default function TradersPage() {
     navigate('/ic');
   };
 
-  const handleTraderClick = (traderId: string) => navigate(`/traders/${traderId}`);
-
   const filteredTraders = useMemo(() => {
     let traders = [...(allTraders || [])];
     if (filter === 'following') {
@@ -148,7 +146,7 @@ export default function TradersPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredTraders.map((trader) => (
-          <TraderCard key={trader.id} trader={trader} isFollowing={isFollowing(trader.id)} onFollow={() => toggleFollow(trader.id)} onAnalyse={() => handleAnalyse(trader.id)} onStarForIC={() => handleStarForIC(trader.id)} onClick={() => handleTraderClick(trader.id)} />
+          <TraderCard key={trader.id} trader={trader} isFollowing={isFollowing(trader.id)} onFollow={() => toggleFollow(trader.id)} onAnalyse={() => handleAnalyse(trader.id)} onStarForIC={() => handleStarForIC(trader.id)} />
         ))}
       </div>
 

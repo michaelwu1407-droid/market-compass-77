@@ -20,6 +20,47 @@ function asNumber(v: unknown): number | null {
   return null;
 }
 
+function asNumberFromValue(v: unknown): number | null {
+  const direct = asNumber(v);
+  if (direct !== null) return direct;
+  if (v && typeof v === 'object') {
+    const obj = v as Record<string, unknown>;
+    return asNumber(obj.Value ?? obj.value ?? obj.val ?? obj.number ?? null);
+  }
+  return null;
+}
+
+function extractReturnPctFromRankingsPayload(payload: any): number | null {
+  // eToro rankings response shapes vary, but often resemble:
+  // { data: { Value: { Gain: 12.3, ... } } }
+  // or { Value: { Gain: { Value: 12.3 } } }
+  const root = payload?.data ?? payload?.Data ?? payload?.value ?? payload?.Value ?? payload;
+  const v = root?.Value ?? root?.value ?? root?.Data ?? root;
+
+  const candidates: Array<unknown> = [
+    pick(v, ['Gain', 'gain', 'gainPct', 'GainPct', 'return', 'Return', 'returnPct', 'ReturnPct', 'performance', 'Performance']),
+    pick(root, ['Gain', 'gain', 'gainPct', 'GainPct', 'return', 'Return', 'returnPct', 'ReturnPct']),
+  ];
+
+  for (const c of candidates) {
+    const n = asNumberFromValue(c);
+    if (n !== null) return n;
+  }
+
+  // Last resort: scan obvious keys for gain/return values.
+  if (v && typeof v === 'object') {
+    for (const [k, rawVal] of Object.entries(v as Record<string, unknown>)) {
+      const lk = k.toLowerCase();
+      if (lk === 'gain' || lk === 'return' || lk.endsWith('gain') || lk.endsWith('return') || lk.includes('gainpct') || lk.includes('returnpct')) {
+        const n = asNumberFromValue(rawVal);
+        if (n !== null) return n;
+      }
+    }
+  }
+
+  return null;
+}
+
 function pick(obj: any, keys: string[]): any {
   for (const k of keys) {
     const v = obj?.[k];
@@ -157,7 +198,7 @@ serve(async (req: Request) => {
         JSON.stringify({
           success: false,
           error: 'Unable to resolve username for CID',
-          cid: requestedCid || null,
+          cid: cid || null,
           message: 'Provide { "username": "..." } or ensure the CID endpoint returns UserName',
         }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
@@ -225,6 +266,30 @@ serve(async (req: Request) => {
     if (country) upsert.country = String(country);
     if (winRatio !== null) upsert.win_ratio = winRatio;
 
+    // Populate return metrics from stable rankings-by-CID periods.
+    // These back the Trader profile UI fields: return_1m, return_ytd, return_5y.
+    if (etoroCid) {
+      const periodToColumn: Record<string, string> = {
+        OneMonthAgo: 'return_1m',
+        YTD: 'return_ytd',
+        FiveYearsAgo: 'return_5y',
+      };
+
+      for (const [period, column] of Object.entries(periodToColumn)) {
+        try {
+          const url = `https://www.etoro.com/sapi/rankings/cid/${encodeURIComponent(String(etoroCid))}/rankings?period=${encodeURIComponent(period)}`;
+          const resp = await fetch(url, { headers: etoroHeaders, signal: AbortSignal.timeout(15000) });
+          if (!resp.ok) continue;
+          const raw = await resp.text().catch(() => '');
+          const json = raw ? JSON.parse(raw) : {};
+          const pct = extractReturnPctFromRankingsPayload(json);
+          if (pct !== null) upsert[column] = pct;
+        } catch {
+          // Best-effort only
+        }
+      }
+    }
+
     const { error } = await supabase
       .from('traders')
       .upsert(upsert, { onConflict: 'etoro_username' });
@@ -232,7 +297,15 @@ serve(async (req: Request) => {
     if (error) throw error;
 
     return new Response(
-      JSON.stringify({ success: true, username, etoro_cid: upsert.etoro_cid ?? null, updated: true }),
+      JSON.stringify({
+        success: true,
+        username,
+        etoro_cid: upsert.etoro_cid ?? null,
+        updated: true,
+        return_1m: upsert.return_1m ?? null,
+        return_ytd: upsert.return_ytd ?? null,
+        return_5y: upsert.return_5y ?? null,
+      }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     );
   } catch (e) {

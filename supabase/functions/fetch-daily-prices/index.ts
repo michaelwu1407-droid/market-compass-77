@@ -28,6 +28,7 @@ type AssetRow = {
   asset_type?: string | null;
   exchange?: string | null;
   country?: string | null;
+  sector?: string | null;
 };
 
 function mapSymbolToYahoo(symbol: string): string {
@@ -47,6 +48,7 @@ function mapSymbolToYahoo(symbol: string): string {
       '.OSL': '.OL',
       '.CPH': '.CO',
       '.SWX': '.SW',
+      '.ZU': '.SW',
       '.TSE': '.TO',
       '.NSE': '.NS',
       '.BSE': '.BO',
@@ -68,18 +70,35 @@ function yahooCandidatesForAsset(asset: AssetRow): string[] {
 
   const candidates: string[] = [];
 
+  // FX pairs: Yahoo convention is EURUSD=X.
+  // Only apply when the symbol looks like a currency pair (6 letters, both legs are common ISO codes).
+  if (/^[A-Z]{6}$/.test(raw)) {
+    const ccy = new Set(['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD']);
+    const base = raw.slice(0, 3);
+    const quote = raw.slice(3, 6);
+    if (ccy.has(base) && ccy.has(quote)) {
+      candidates.push(`${raw}=X`);
+    }
+  }
+
   // Base + suffix normalization
   candidates.push(mapSymbolToYahoo(raw));
 
   // Some data sources store HK tickers as numeric-only symbols.
-  // If we see a 5-digit symbol, also try appending .HK.
-  if (/^\d{5}$/.test(raw)) {
+  // If we see a 4-5 digit symbol, also try appending .HK.
+  if (/^\d{4,5}$/.test(raw)) {
     candidates.push(`${raw}.HK`);
+  }
+  // If it's a shorter numeric symbol, also try a zero-padded 4-digit HK ticker.
+  if (/^\d{1,3}$/.test(raw)) {
+    candidates.push(`${raw.padStart(4, '0')}.HK`);
   }
 
   // Crypto: try SYMBOL-USD (Yahoo convention) when asset_type suggests crypto.
   const assetType = String(asset.asset_type || '').toLowerCase();
-  if (assetType.includes('crypto') && !raw.includes('-') && !raw.includes('=') && !raw.includes('.')) {
+  const sector = String(asset.sector || '').toLowerCase();
+  const looksCrypto = assetType.includes('crypto') || sector.includes('crypto');
+  if (looksCrypto && !raw.includes('-') && !raw.includes('=') && !raw.includes('.')) {
     candidates.unshift(`${raw}-USD`);
   }
 
@@ -94,49 +113,43 @@ async function fetchYahooQuotes(symbols: string[]): Promise<Map<string, YahooQuo
     return results;
   }
 
-  // Use Yahoo Finance v7 quote endpoint which supports batching and doesn't require authentication.
-  // This is dramatically faster than per-symbol v8 chart calls and helps stay within edge runtime limits.
-  const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(
-    symbols.join(","),
-  )}`;
+  // Yahoo's v7 quote endpoint is returning 401 from the Supabase edge runtime.
+  // The v8 chart endpoint is currently reachable (HTTP 200) and provides both current price
+  // and previous close in `meta`, but it requires per-symbol requests.
+  const concurrency = 5;
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15_000);
+  const fetchOne = async (symbol: string): Promise<void> => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10_000);
 
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        Accept: "application/json",
-      },
-    });
+    try {
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
+        symbol,
+      )}?interval=1d&range=2d`;
 
-    if (!response.ok) {
-      console.log(
-        `[fetch-daily-prices] Yahoo API error (batch): ${response.status}`,
-      );
-      return results;
-    }
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          Accept: "application/json",
+          "Accept-Language": "en-US,en;q=0.9",
+          Referer: "https://finance.yahoo.com/",
+        },
+      });
 
-    const data = await response.json();
-    const quotes: Array<Record<string, unknown>> =
-      data?.quoteResponse?.result ?? [];
-
-    for (const quote of quotes) {
-      const symbol = String(quote.symbol ?? "");
-      if (!symbol) continue;
-
-      const currentPrice = Number(quote.regularMarketPrice);
-      const previousClose = Number(quote.regularMarketPreviousClose);
-
-      if (!Number.isFinite(currentPrice) || !Number.isFinite(previousClose)) {
-        continue;
+      if (!response.ok) {
+        return;
       }
 
-      if (previousClose <= 0) {
-        continue;
+      const data = await response.json();
+      const meta = data?.chart?.result?.[0]?.meta;
+      if (!meta) return;
+
+      const currentPrice = Number(meta.regularMarketPrice);
+      const previousClose = Number(meta.chartPreviousClose ?? meta.previousClose);
+      if (!Number.isFinite(currentPrice) || !Number.isFinite(previousClose) || previousClose <= 0) {
+        return;
       }
 
       const priceChange = currentPrice - previousClose;
@@ -149,15 +162,25 @@ async function fetchYahooQuotes(symbols: string[]): Promise<Map<string, YahooQuo
         regularMarketChangePercent: priceChangePercent,
         regularMarketPreviousClose: previousClose,
       });
+    } catch {
+      // ignore
+    } finally {
+      clearTimeout(timeoutId);
     }
+  };
 
-    return results;
-  } catch (error) {
-    console.log(`[fetch-daily-prices] Error fetching quotes (batch):`, error);
-    return results;
-  } finally {
-    clearTimeout(timeoutId);
-  }
+  // Simple async pool
+  const queue = symbols.slice();
+  const workers = Array.from({ length: Math.min(concurrency, queue.length) }).map(async () => {
+    while (queue.length > 0) {
+      const sym = queue.shift();
+      if (!sym) return;
+      await fetchOne(sym);
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
 }
 
 async function fetchBullawareQuotes(symbols: string[]): Promise<Map<string, BullawareQuote>> {
@@ -302,13 +325,52 @@ serve(async (req) => {
   }
 
   try {
+    const urlObj = new URL(req.url);
+
+    let body: any = {};
+    if (req.method !== 'GET') {
+      try {
+        body = await req.json();
+      } catch {
+        body = {};
+      }
+    }
+
+    const debugFailed =
+      urlObj.searchParams.get('debug_failed') === '1' ||
+      urlObj.searchParams.get('debug') === '1' ||
+      body?.debug_failed === true ||
+      body?.debug === true;
+
+    const failedLimitRaw =
+      urlObj.searchParams.get('failed_limit') ??
+      urlObj.searchParams.get('limit') ??
+      body?.failed_limit ??
+      body?.limit;
+    const failedLimit = Math.min(
+      500,
+      Math.max(0, Number.parseInt(String(failedLimitRaw ?? '100'), 10) || 100),
+    );
+
+    const dryRun =
+      urlObj.searchParams.get('dry_run') === '1' ||
+      body?.dry_run === true ||
+      body?.dryRun === true;
+
+    const maxAssetsRaw =
+      urlObj.searchParams.get('max_assets') ??
+      body?.max_assets ??
+      body?.maxAssets;
+    const maxAssets = maxAssetsRaw === undefined || maxAssetsRaw === null
+      ? null
+      : Math.max(0, Number.parseInt(String(maxAssetsRaw), 10) || 0);
+
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     // Probe should work even if Yahoo is blocked.
-    const urlObj = new URL(req.url);
     if (urlObj.searchParams.get('probe') === '1') {
       const { data: sampleAssets } = await supabase
         .from('assets')
@@ -474,8 +536,8 @@ serve(async (req) => {
     // Get assets that look "real" (avoid placeholder symbols that will never resolve)
     const { data: assets, error: assetsError } = await supabase
       .from('assets')
-      .select('id, symbol, name, asset_type, exchange, country')
-      .or('instrument_id.not.is.null,market_cap.not.is.null,exchange.not.is.null,sector.not.is.null')
+      .select('id, symbol, name, asset_type, exchange, country, sector')
+      .or('instrument_id.not.is.null,market_cap.not.is.null,exchange.not.is.null,and(sector.not.is.null,sector.neq.Unknown)')
       .order('symbol');
 
     if (assetsError) {
@@ -493,6 +555,11 @@ serve(async (req) => {
 
     console.log(`[fetch-daily-prices] Found ${assets.length} assets to update`);
 
+    const assetsToProcess = maxAssets !== null ? assets.slice(0, maxAssets) : assets;
+    if (maxAssets !== null) {
+      console.log(`[fetch-daily-prices] Limiting to ${assetsToProcess.length} assets (max_assets=${maxAssets})`);
+    }
+
     // Batch quotes to reduce Yahoo calls and stay within edge runtime limits
     const batchSize = 25;
     let totalUpdated = 0;
@@ -500,8 +567,14 @@ serve(async (req) => {
     let yahooUpdated = 0;
     let bullawareUpdated = 0;
 
-    for (let i = 0; i < assets.length; i += batchSize) {
-      const batch = assets.slice(i, i + batchSize) as AssetRow[];
+    const failedAssets: Array<{ symbol: string; candidates: string[]; reason: string }> = [];
+
+    for (let i = 0; i < assetsToProcess.length; i += batchSize) {
+      if (debugFailed && dryRun && failedLimit > 0 && failedAssets.length >= failedLimit) {
+        break;
+      }
+
+      const batch = assetsToProcess.slice(i, i + batchSize) as AssetRow[];
 
       const assetToCandidates = new Map<string, string[]>();
       const allCandidates: string[] = [];
@@ -514,7 +587,7 @@ serve(async (req) => {
 
       const symbols = Array.from(new Set(allCandidates));
       
-      console.log(`[fetch-daily-prices] Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(assets.length / batchSize)}: ${symbols.join(', ')}`);
+      console.log(`[fetch-daily-prices] Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(assetsToProcess.length / batchSize)}: ${symbols.join(', ')}`);
       
       const quotes = await fetchYahooQuotes(symbols);
 
@@ -528,50 +601,81 @@ serve(async (req) => {
         const bull = bullawareQuotes.get(String(asset.symbol || '').trim().toUpperCase());
         
         if (quote && quote.regularMarketPrice !== undefined) {
-          const { error: updateError } = await supabase
-            .from('assets')
-            .update({
-              current_price: quote.regularMarketPrice,
-              price_change: quote.regularMarketChange || 0,
-              price_change_pct: quote.regularMarketChangePercent || 0,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', asset.id);
-
-          if (updateError) {
-            console.error(`[fetch-daily-prices] Error updating ${asset.symbol}:`, updateError);
-            totalFailed++;
-          } else {
-            console.log(`[fetch-daily-prices] Updated ${asset.symbol}: $${quote.regularMarketPrice} (${quote.regularMarketChangePercent?.toFixed(2)}%)`);
+          if (dryRun) {
             totalUpdated++;
             yahooUpdated++;
+          } else {
+            const { error: updateError } = await supabase
+              .from('assets')
+              .update({
+                current_price: quote.regularMarketPrice,
+                price_change: quote.regularMarketChange || 0,
+                price_change_pct: quote.regularMarketChangePercent || 0,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', asset.id);
+
+            if (updateError) {
+              console.error(`[fetch-daily-prices] Error updating ${asset.symbol}:`, updateError);
+              totalFailed++;
+              if (debugFailed && failedAssets.length < failedLimit) {
+                failedAssets.push({
+                  symbol: String(asset.symbol || '').trim().toUpperCase(),
+                  candidates,
+                  reason: 'update_error_yahoo',
+                });
+              }
+            } else {
+              console.log(`[fetch-daily-prices] Updated ${asset.symbol}: $${quote.regularMarketPrice} (${quote.regularMarketChangePercent?.toFixed(2)}%)`);
+              totalUpdated++;
+              yahooUpdated++;
+            }
           }
         } else if (bull?.price !== undefined) {
-          const { error: updateError } = await supabase
-            .from('assets')
-            .update({
-              current_price: bull.price,
-              price_change: bull.change ?? 0,
-              price_change_pct: bull.changePct ?? 0,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', asset.id);
-
-          if (updateError) {
-            console.error(`[fetch-daily-prices] Error updating ${asset.symbol} (BullAware):`, updateError);
-            totalFailed++;
-          } else {
+          if (dryRun) {
             totalUpdated++;
             bullawareUpdated++;
+          } else {
+            const { error: updateError } = await supabase
+              .from('assets')
+              .update({
+                current_price: bull.price,
+                price_change: bull.change ?? 0,
+                price_change_pct: bull.changePct ?? 0,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', asset.id);
+
+            if (updateError) {
+              console.error(`[fetch-daily-prices] Error updating ${asset.symbol} (BullAware):`, updateError);
+              totalFailed++;
+              if (debugFailed && failedAssets.length < failedLimit) {
+                failedAssets.push({
+                  symbol: String(asset.symbol || '').trim().toUpperCase(),
+                  candidates,
+                  reason: 'update_error_bullaware',
+                });
+              }
+            } else {
+              totalUpdated++;
+              bullawareUpdated++;
+            }
           }
         } else {
           console.log(`[fetch-daily-prices] No quote data for ${asset.symbol} (tried: ${(assetToCandidates.get(asset.id) || []).join(', ')})`);
           totalFailed++;
+          if (debugFailed && failedAssets.length < failedLimit) {
+            failedAssets.push({
+              symbol: String(asset.symbol || '').trim().toUpperCase(),
+              candidates,
+              reason: 'no_quote',
+            });
+          }
         }
       }
       
       // Light rate limiting - wait between batches
-      if (i + batchSize < assets.length) {
+      if (i + batchSize < assetsToProcess.length) {
         await new Promise((resolve) => setTimeout(resolve, 200));
       }
     }
@@ -583,9 +687,10 @@ serve(async (req) => {
         success: true,
         updated: totalUpdated,
         failed: totalFailed,
-        total: assets.length,
+        total: assetsToProcess.length,
         yahoo_updated: yahooUpdated,
         bullaware_updated: bullawareUpdated,
+        ...(debugFailed ? { failed_assets: failedAssets } : {}),
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
