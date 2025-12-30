@@ -327,6 +327,8 @@ serve(async (req) => {
       // Extra diagnostics: see if Yahoo is returning HTML/captcha/blocked responses.
       let yahooHttpStatus: number | null = null;
       let yahooBodyPrefix: string | null = null;
+      let yahooChartStatus: number | null = null;
+      let yahooChartBodyPrefix: string | null = null;
       try {
         const diagUrl = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(
           ['AAPL', 'BTC-USD'].join(','),
@@ -339,11 +341,38 @@ serve(async (req) => {
             "User-Agent":
               "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             Accept: "application/json",
+            "Accept-Language": "en-US,en;q=0.9",
+            Referer: "https://finance.yahoo.com/",
           },
         });
         yahooHttpStatus = res.status;
         const bodyText = await res.text();
         yahooBodyPrefix = bodyText.slice(0, 200);
+        clearTimeout(timeoutId);
+      } catch {
+        // ignore
+      }
+
+      // Also try the v8 chart endpoint (historically less restricted than quote).
+      try {
+        const chartUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
+          'AAPL',
+        )}?interval=1d&range=2d`;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10_000);
+        const res = await fetch(chartUrl, {
+          signal: controller.signal,
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            Accept: "application/json",
+            "Accept-Language": "en-US,en;q=0.9",
+            Referer: "https://finance.yahoo.com/",
+          },
+        });
+        yahooChartStatus = res.status;
+        const bodyText = await res.text();
+        yahooChartBodyPrefix = bodyText.slice(0, 200);
         clearTimeout(timeoutId);
       } catch {
         // ignore
@@ -358,6 +387,8 @@ serve(async (req) => {
           bullawareDefaultCount: bullDefault.size,
           yahooHttpStatus,
           yahooBodyPrefix,
+          yahooChartStatus,
+          yahooChartBodyPrefix,
           sampleYahoo: Array.from(yahoo.values()).slice(0, 3),
           sampleBullaware: Array.from(bull.values()).slice(0, 3),
           sampleBullawareDefault: Array.from(bullDefault.values()).slice(0, 3),
