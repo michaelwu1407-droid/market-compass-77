@@ -41,3 +41,30 @@ verify_jwt = false
 
 [functions.probe-etoro]
 verify_jwt = false
+
+[functions.enrich-assets-yahoo]
+verify_jwt = false
+
+[functions.backfill-asset-history]
+verify_jwt = false
+
+[functions.backfill-post-links]
+verify_jwt = false
+
+[functions.check-system-health]
+verify_jwt = false
+
+[functions.inspect-db]
+verify_jwt = false
+
+[functions.verify-deployment]
+verify_jwt = false
+
+[functions.fetch-daily-prices]
+verify_jwt = false
+
+[functions.fetch-market-movers]
+verify_jwt = false
+
+[functions.scrape-daily-movers]
+verify_jwt = false

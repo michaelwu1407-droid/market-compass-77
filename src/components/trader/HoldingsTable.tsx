@@ -14,7 +14,7 @@ export function HoldingsTable({ holdings }: HoldingsTableProps) {
 
   if (!holdings || holdings.length === 0) {
     return (
-      <p className="p-4 text-muted-foreground text-sm">No holdings data available</p>
+      <p className="p-4 text-muted-foreground text-sm">No holdings data available yet</p>
     );
   }
 
@@ -60,7 +60,7 @@ export function HoldingsTable({ holdings }: HoldingsTableProps) {
                   </div>
                 </TableCell>
                 <TableCell className="text-muted-foreground">
-                  {holding.assets?.sector || '-'}
+                  {holding.assets?.sector || 'Unknown (enriching...)'}
                 </TableCell>
                 <TableCell className="text-center">
                   <Badge 
@@ -84,7 +84,7 @@ export function HoldingsTable({ holdings }: HoldingsTableProps) {
                   {pnl >= 0 ? '+' : ''}{pnl.toFixed(1)}%
                 </TableCell>
                 <TableCell className="text-right text-muted-foreground">
-                  {holding.avg_open_price ? `$${Number(holding.avg_open_price).toFixed(2)}` : '-'}
+                  {holding.avg_open_price ? `$${Number(holding.avg_open_price).toFixed(2)}` : 'Not synced'}
                 </TableCell>
               </TableRow>
             );

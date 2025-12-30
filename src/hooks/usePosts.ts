@@ -55,22 +55,39 @@ export function usePosts() {
   });
 }
 
-export function useTraderPosts(traderId: string | undefined) {
+export function useTraderPosts(traderId: string | undefined, etoroUsername?: string | null) {
   return useQuery({
-    queryKey: ['trader-posts', traderId],
+    queryKey: ['trader-posts', traderId, etoroUsername ?? null],
     queryFn: async () => {
-      if (!traderId) return [];
-      
+      const select = '*, traders:traders!posts_trader_id_fkey(*)';
+
+      // Primary path: posts are linked to the trader via trader_id.
+      if (traderId) {
+        const { data, error } = await supabase
+          .from('posts')
+          .select(select)
+          .eq('trader_id', traderId)
+          .order('posted_at', { ascending: false })
+          .limit(20);
+
+        if (error) throw error;
+        if ((data?.length ?? 0) > 0) return data as Post[];
+      }
+
+      // Fallback path: some environments ingest posts with etoro_username but do not backfill trader_id.
+      const normalized = (etoroUsername || '').trim().toLowerCase();
+      if (!normalized) return [];
+
       const { data, error } = await supabase
         .from('posts')
-        .select('*, traders:traders!posts_trader_id_fkey(*)')
-        .eq('trader_id', traderId)
+        .select(select)
+        .ilike('etoro_username', normalized)
         .order('posted_at', { ascending: false })
         .limit(20);
-      
+
       if (error) throw error;
       return data as Post[];
     },
-    enabled: !!traderId,
+    enabled: !!traderId || !!(etoroUsername && etoroUsername.trim()),
   });
 }

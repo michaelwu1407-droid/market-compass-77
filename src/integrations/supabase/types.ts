@@ -994,10 +994,14 @@ export type Database = {
           gain_24m: number | null
           id: string
           information_ratio: number | null
+          last_sync_error: string | null
           max_drawdown: number | null
           omega_ratio: number | null
           profitable_months_pct: number | null
           profitable_weeks_pct: number | null
+          return_1m: number | null
+          return_5y: number | null
+          return_ytd: number | null
           risk_score: number | null
           sharpe_ratio: number | null
           sortino_ratio: number | null
@@ -1029,10 +1033,14 @@ export type Database = {
           gain_24m?: number | null
           id?: string
           information_ratio?: number | null
+          last_sync_error?: string | null
           max_drawdown?: number | null
           omega_ratio?: number | null
           profitable_months_pct?: number | null
           profitable_weeks_pct?: number | null
+          return_1m?: number | null
+          return_5y?: number | null
+          return_ytd?: number | null
           risk_score?: number | null
           sharpe_ratio?: number | null
           sortino_ratio?: number | null
@@ -1064,10 +1072,14 @@ export type Database = {
           gain_24m?: number | null
           id?: string
           information_ratio?: number | null
+          last_sync_error?: string | null
           max_drawdown?: number | null
           omega_ratio?: number | null
           profitable_months_pct?: number | null
           profitable_weeks_pct?: number | null
+          return_1m?: number | null
+          return_5y?: number | null
+          return_ytd?: number | null
           risk_score?: number | null
           sharpe_ratio?: number | null
           sortino_ratio?: number | null

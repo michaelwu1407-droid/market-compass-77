@@ -41,6 +41,11 @@ export default function AssetDetailPage() {
   const hasNoData = asset && (!asset.current_price || asset.current_price === 0);
   const hasNoPriceHistory = !priceHistoryLoading && (!priceHistory || priceHistory.length === 0);
 
+  const priceHistorySyncedAt = (asset as any)?.price_history_synced_at as string | null | undefined;
+  const lastPriceHistoryDate = (priceHistory && priceHistory.length > 0)
+    ? priceHistory[priceHistory.length - 1].date
+    : null;
+
   if (assetLoading) {
     return (
       <div className="max-w-5xl mx-auto">
@@ -207,6 +212,17 @@ export default function AssetDetailPage() {
               Last updated: {formatDistanceToNow(new Date(asset.updated_at), { addSuffix: true })}
             </div>
           )}
+
+          {/* Price History Freshness */}
+          {priceHistorySyncedAt ? (
+            <div className="mt-1 text-xs text-muted-foreground">
+              Price history synced: {formatDistanceToNow(new Date(priceHistorySyncedAt), { addSuffix: true })}
+            </div>
+          ) : lastPriceHistoryDate ? (
+            <div className="mt-1 text-xs text-muted-foreground">
+              Price history through: {lastPriceHistoryDate}
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 

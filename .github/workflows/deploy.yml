@@ -43,6 +43,15 @@ jobs:
       - name: Deploy scrape-posts
         run: supabase functions deploy scrape-posts --project-ref $PROJECT_ID
 
+      - name: Deploy scrape-daily-movers
+        run: supabase functions deploy scrape-daily-movers --project-ref $PROJECT_ID
+
+      - name: Deploy fetch-daily-prices
+        run: supabase functions deploy fetch-daily-prices --project-ref $PROJECT_ID
+
+      - name: Deploy fetch-market-movers
+        run: supabase functions deploy fetch-market-movers --project-ref $PROJECT_ID
+
       - name: Deploy fix-posts
         run: supabase functions deploy fix-posts --project-ref $PROJECT_ID
 
@@ -67,6 +76,9 @@ jobs:
       - name: Deploy inspect-sync-jobs
         run: supabase functions deploy inspect-sync-jobs --project-ref $PROJECT_ID
 
+      - name: Deploy inspect-db
+        run: supabase functions deploy inspect-db --project-ref $PROJECT_ID
+
       - name: Deploy investigate-root-cause
         run: supabase functions deploy investigate-root-cause --project-ref $PROJECT_ID
 
@@ -75,6 +87,15 @@ jobs:
 
       - name: Deploy check-system-health
         run: supabase functions deploy check-system-health --project-ref $PROJECT_ID
+
+      - name: Deploy enrich-assets-yahoo
+        run: supabase functions deploy enrich-assets-yahoo --project-ref $PROJECT_ID
+
+      - name: Deploy backfill-asset-history
+        run: supabase functions deploy backfill-asset-history --project-ref $PROJECT_ID
+
+      - name: Deploy backfill-post-links
+        run: supabase functions deploy backfill-post-links --project-ref $PROJECT_ID
 
       - name: Deploy reset-all-traders
         run: supabase functions deploy reset-all-traders --project-ref $PROJECT_ID

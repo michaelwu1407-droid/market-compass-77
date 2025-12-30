@@ -15,7 +15,7 @@ serve(async (req) => {
         const QUEUE_LOW_WATERMARK = 20;
         const FOLLOWED_ENQUEUE_LIMIT = 50;
         const FOLLOWED_STALE_MINUTES = 30;
-        const FOLLOWED_BULLAWARE_JOB_TYPES = ['investor_details', 'risk_score', 'metrics', 'portfolio'] as const;
+        const FOLLOWED_BULLAWARE_JOB_TYPES = ['investor_details', 'risk_score', 'metrics', 'portfolio', 'trades'] as const;
         // Prefer injected env; fall back to request origin to avoid "supabaseUrl is required".
         const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? new URL(req.url).origin;
         const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -154,24 +154,60 @@ serve(async (req) => {
                 const followedIds = Array.from(new Set((followed || []).map((r: any) => r.trader_id).filter(Boolean)));
 
                 if (followedIds.length > 0) {
-                    // Only enqueue for traders that are stale.
-                    const { data: staleTraders, error: staleErr } = await supabase
+                    // Enqueue for followed traders if they are stale OR if key data is missing.
+                    // This avoids a trap where details_synced_at was updated by some job types,
+                    // but holdings/trades were never enqueued previously.
+
+                    const { data: followedTraders, error: followedTradersErr } = await supabase
                         .from('traders')
                         .select('id, details_synced_at')
                         .in('id', followedIds)
-                        .or(`details_synced_at.is.null,details_synced_at.lt.${cutoffIso}`)
-                        .order('details_synced_at', { ascending: true, nullsFirst: true })
-                        .limit(FOLLOWED_ENQUEUE_LIMIT);
+                        .limit(500);
 
-                    if (staleErr) {
-                        console.warn('Warning: failed to load stale followed traders:', staleErr);
+                    if (followedTradersErr) {
+                        console.warn('Warning: failed to load followed traders:', followedTradersErr);
                     } else {
-                        const staleIds = (staleTraders || []).map((t: any) => t.id).filter(Boolean);
-                        if (staleIds.length > 0) {
+                        const sortedByStale = (followedTraders || [])
+                            .filter((t: any) => !!t?.id)
+                            .sort((a: any, b: any) => {
+                                const aTime = a?.details_synced_at ? new Date(a.details_synced_at).getTime() : 0;
+                                const bTime = b?.details_synced_at ? new Date(b.details_synced_at).getTime() : 0;
+                                return aTime - bTime;
+                            });
+
+                        const staleIds = sortedByStale
+                            .filter((t: any) => !t?.details_synced_at || t.details_synced_at < cutoffIso)
+                            .map((t: any) => t.id);
+
+                        // If holdings are missing entirely, treat as needing sync even if details_synced_at is recent.
+                        let missingHoldingsIds: string[] = [];
+                        try {
+                            const { data: holdingsRows, error: holdingsErr } = await supabase
+                                .from('holdings')
+                                .select('trader_id')
+                                .in('trader_id', followedIds)
+                                .limit(5000);
+
+                            if (holdingsErr) {
+                                console.warn('Warning: failed loading holdings for followed traders:', holdingsErr);
+                            } else {
+                                const hasHoldings = new Set((holdingsRows || []).map((r: any) => r.trader_id).filter(Boolean));
+                                missingHoldingsIds = followedIds.filter((id: string) => !hasHoldings.has(id));
+                            }
+                        } catch (e: any) {
+                            console.warn('Warning: holdings presence check failed:', e?.message || e);
+                        }
+
+                        const candidateIds = Array.from(new Set([
+                            ...missingHoldingsIds,
+                            ...staleIds,
+                        ])).slice(0, FOLLOWED_ENQUEUE_LIMIT);
+
+                        if (candidateIds.length > 0) {
                             const { data: existing, error: existingErr } = await supabase
                                 .from('sync_jobs')
                                 .select('trader_id, job_type, status')
-                                .in('trader_id', staleIds)
+                                .in('trader_id', candidateIds)
                                 .in('job_type', Array.from(FOLLOWED_BULLAWARE_JOB_TYPES))
                                 .in('status', ['pending', 'in_progress']);
 
@@ -183,7 +219,7 @@ serve(async (req) => {
                                 console.warn('Warning: failed checking existing jobs for followed traders:', existingErr);
                             }
 
-                            const jobsToInsert = staleIds.flatMap((trader_id: string) =>
+                            const jobsToInsert = candidateIds.flatMap((trader_id: string) =>
                                 Array.from(FOLLOWED_BULLAWARE_JOB_TYPES)
                                     .filter((job_type) => !existingKey.has(`${trader_id}:${job_type}`))
                                     .map((job_type) => ({ trader_id, status: 'pending', job_type }))
@@ -197,7 +233,7 @@ serve(async (req) => {
                                 if (insertErr) {
                                     console.warn('Warning: failed inserting followed-trader jobs:', insertErr);
                                 } else {
-                                    console.log(`Enqueued ${jobsToInsert.length} jobs for stale followed traders.`);
+                                    console.log(`Enqueued ${jobsToInsert.length} jobs for followed traders (stale or missing holdings).`);
                                 }
                             }
                         }

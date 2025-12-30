@@ -38,6 +38,32 @@ To get stock sectors/fundamentals and 5Y price history filled in faster, add two
 - Schedule: staggered every 15 minutes (`7,22,37,52 * * * *`)
 - Body: `{}`
 
+## Post Linking (Recommended)
+
+To prevent Trader profile Posts tabs from being empty due to missing `posts.trader_id`, add:
+
+3) **Backfill posts → traders linkage**
+- URL: `https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/fix-posts?only_missing_trader_id=true&limit=200&offset=0`
+- Method: POST
+- Schedule: every 10 minutes (`*/10 * * * *`)
+- Body: `{}`
+
+## Daily Page Data (Recommended)
+
+If the Daily page is empty, schedule these once per day (timing depends on your market and timezone):
+
+4) **Fetch Daily Prices**
+- URL: `https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/fetch-daily-prices`
+- Method: POST
+- Schedule: daily (after market close)
+- Body: `{}`
+
+5) **Scrape Daily Movers**
+- URL: `https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/scrape-daily-movers`
+- Method: POST
+- Schedule: daily (shortly after Fetch Daily Prices)
+- Body: `{}`
+
 ## Option 2: Contact Supabase Support
 
 Ask them to:

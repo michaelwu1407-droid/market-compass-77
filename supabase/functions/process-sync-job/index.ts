@@ -207,17 +207,27 @@ serve(async (req: Request) => {
         });
     }
 
-    // 3. Mark job as complete
-        // Mark job as complete; support both finished_at and completed_at columns.
+        // 3. Mark job as complete
+        // Always set finished_at (canonical). Only set completed_at if the column exists.
         const finishedAt = new Date().toISOString();
-        const { error: completeErr } = await supabase
+
+        const { error: completeErr1 } = await supabase
             .from('sync_jobs')
-            .update({ status: 'completed', finished_at: finishedAt, completed_at: finishedAt })
+            .update({ status: 'completed', finished_at: finishedAt })
             .eq('id', job.id);
 
-        if (completeErr) {
-            // Older schema may not have completed_at/finished_at.
+        if (completeErr1) {
+            // Extremely old schema might not have finished_at; at least mark completed.
             await supabase.from('sync_jobs').update({ status: 'completed' }).eq('id', job.id);
+        } else {
+            // Best-effort back-compat for schemas that also have completed_at.
+            const { error: completeErr2 } = await supabase
+                .from('sync_jobs')
+                .update({ completed_at: finishedAt })
+                .eq('id', job.id);
+            if (completeErr2) {
+                // Ignore: most current schemas do not have completed_at.
+            }
         }
     console.log(`[process-sync-job] Successfully processed job ${job.id}`);
 

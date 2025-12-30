@@ -17,6 +17,9 @@ The deployment workflow has been updated to include all new functions. To deploy
    - Watch the "Deploy Supabase Functions" workflow run
    - All functions will be deployed automatically
 
+   3. **Validate the deploy:**
+      - Run the production smoke test: `SMOKE_TEST.md`
+
 ## Option 2: Deploy Manually via Supabase CLI
 
 If you have Supabase CLI installed locally:
@@ -30,6 +33,9 @@ supabase functions deploy sync-traders --project-ref $PROJECT_ID
 supabase functions deploy sync-trader-details --project-ref $PROJECT_ID
 supabase functions deploy sync-worker --project-ref $PROJECT_ID
 supabase functions deploy scrape-posts --project-ref $PROJECT_ID
+supabase functions deploy scrape-daily-movers --project-ref $PROJECT_ID
+supabase functions deploy fetch-daily-prices --project-ref $PROJECT_ID
+supabase functions deploy fetch-market-movers --project-ref $PROJECT_ID
 supabase functions deploy fix-posts --project-ref $PROJECT_ID
 supabase functions deploy trigger-sync --project-ref $PROJECT_ID
 supabase functions deploy enqueue-sync-jobs --project-ref $PROJECT_ID
@@ -38,6 +44,11 @@ supabase functions deploy dispatch-sync-jobs --project-ref $PROJECT_ID
 supabase functions deploy verify-deployment --project-ref $PROJECT_ID
 supabase functions deploy force-process-queue --project-ref $PROJECT_ID
 supabase functions deploy sync-diagnostics --project-ref $PROJECT_ID
+supabase functions deploy inspect-db --project-ref $PROJECT_ID
+supabase functions deploy check-system-health --project-ref $PROJECT_ID
+supabase functions deploy enrich-assets-yahoo --project-ref $PROJECT_ID
+supabase functions deploy backfill-asset-history --project-ref $PROJECT_ID
+supabase functions deploy fix-posts --project-ref $PROJECT_ID
 ```
 
 ## Option 3: Deploy via Supabase Dashboard
@@ -52,6 +63,14 @@ supabase functions deploy sync-diagnostics --project-ref $PROJECT_ID
 - ✅ `verify-deployment` - Checks deployment status
 - ✅ `force-process-queue` - Processes all pending jobs
 - ✅ `sync-diagnostics` - Real-time monitoring
+- ✅ `check-system-health` - System health summary
+- ✅ `inspect-db` - Basic DB inspection
+- ✅ `enrich-assets-yahoo` - Asset fundamentals/sector enrichment
+- ✅ `backfill-asset-history` - 5Y price history backfill
+- ✅ `fix-posts` - Repairs posts and backfills `posts.trader_id` (call with `?only_missing_trader_id=true`)
+- ✅ `fetch-daily-prices` - Daily OHLC refresh
+- ✅ `fetch-market-movers` - Market movers ingestion
+- ✅ `scrape-daily-movers` - Daily movers table refresh
 
 ### Updated Functions:
 - ✅ `sync-trader-details` - Fixed incomplete implementation
@@ -70,6 +89,9 @@ supabase functions deploy sync-diagnostics --project-ref $PROJECT_ID
 2. Click "Verify Deployment" to confirm all functions are working
 3. Click "Force Process Queue" to clear pending jobs
 4. Monitor the trader count - it should start increasing!
+
+5. Run the smoke test and confirm PASS/WARN/FAIL results:
+   - `SMOKE_TEST.md`
 
 ## Troubleshooting
 

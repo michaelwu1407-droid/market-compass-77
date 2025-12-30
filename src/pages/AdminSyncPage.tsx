@@ -844,6 +844,23 @@ export default function AdminSyncPage() {
 
   const anyRunning = domainStatuses?.some(s => s.status === 'running');
 
+  const domains: Domain[] = ['discussion_feed', 'trader_profiles', 'stock_data'];
+
+  const getDatapointsToSyncForDomain = (domain: Domain): number | string => {
+    const status = getStatusForDomain(domain);
+    if (status?.items_total != null && status.items_total > 0) {
+      const completed = status.items_completed || 0;
+      return Math.max(0, status.items_total - completed);
+    }
+
+    const dps = getDatapointsForDomain(domain);
+    if (dps.length > 0) {
+      return dps.filter((dp) => dp.status === 'pending' || dp.status === 'running').length;
+    }
+
+    return '-';
+  };
+
   return (
     <div className="max-w-7xl mx-auto space-y-8 p-6">
       {/* Header */}
@@ -886,6 +903,36 @@ export default function AdminSyncPage() {
           </Button>
         </div>
       </div>
+
+      {/* Summary */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Sync Summary</CardTitle>
+          <CardDescription>Datapoints remaining and ETA per domain</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {domains.map((domain) => {
+              const config = DOMAIN_CONFIG[domain];
+              const status = getStatusForDomain(domain);
+
+              return (
+                <div key={domain} className="space-y-2">
+                  <div className="font-medium">{config.label}</div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Datapoints to be synced</span>
+                    <span className="font-medium tabular-nums">{getDatapointsToSyncForDomain(domain)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">ETA for sync</span>
+                    <span className="font-medium">{formatEta(status?.eta_seconds ?? null)}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Domain Panels */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

@@ -127,6 +127,7 @@ export default function FeedPage() {
         id: post.id,
         source: 'etoro',
         source_post_id: post.etoro_post_id || '',
+        etoro_username: traderUsername || null,
         trader_id: post.trader_id,
         asset_id: null,
         text: post.content,
@@ -394,7 +395,7 @@ export default function FeedPage() {
                 <FeedCard
                   key={item.id}
                   item={item}
-                  onAnalyse={() => handleAnalyse(item)}
+                  onAnalyse={handleAnalyse}
                   onStarForIC={handleStarForIC}
                   onSave={handleSavePost}
                   onUnsave={handleUnsavePost}

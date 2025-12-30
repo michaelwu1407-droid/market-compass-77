@@ -171,12 +171,29 @@ serve(async (req) => {
       console.log(`[item${i}] postKeys=${JSON.stringify(postKeys)}, messageKeys=${JSON.stringify(messageKeys)}, metadataKeys=${JSON.stringify(Object.keys(metadata))}, shareKeys=${JSON.stringify(Object.keys(share))}, sharedOriginKeys=${sharedOrigin ? JSON.stringify(Object.keys(sharedOrigin)) : 'null'}, sharedOriginMsgKeys=${JSON.stringify(sharedOriginMsgKeys)}, hasMessageText=${hasMessageText} len=${lenMessageText}, hasContent=${hasContent} len=${lenContent}, hasText=${hasText} len=${lenText}, hasShareOrigin=${hasShareOrigin} originLen=${lenShareOrigin}`);
     }
 
-    // Get all traders to map usernames to IDs
-    const { data: traders } = await supabase
-      .from('traders')
-      .select('id, etoro_username');
-    
-    const traderMap = new Map((traders || []).map(t => [t.etoro_username.toLowerCase(), t.id]));
+    // Get all traders to map usernames to IDs.
+    // PostgREST results are capped (commonly 1000 rows) unless we page using range().
+    const traderMap = new Map<string, string>();
+    const tradersPageSize = 1000;
+    for (let tradersOffset = 0; tradersOffset < 20000; tradersOffset += tradersPageSize) {
+      const { data: tradersPage, error: tradersErr } = await supabase
+        .from('traders')
+        .select('id, etoro_username')
+        .not('etoro_username', 'is', null)
+        .range(tradersOffset, tradersOffset + tradersPageSize - 1);
+
+      if (tradersErr) throw tradersErr;
+
+      const page = tradersPage || [];
+      for (const t of page) {
+        const username = String((t as any)?.etoro_username ?? '').trim().toLowerCase();
+        if (!username) continue;
+        traderMap.set(username, (t as any).id);
+      }
+
+      if (page.length < tradersPageSize) break;
+    }
+    console.log(`[traders] loaded usernames=${traderMap.size}`);
 
     const postsToInsert = [];
     let trackedTraderPosts = 0;

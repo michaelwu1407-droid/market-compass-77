@@ -11,7 +11,46 @@ Confirmed requirements:
 
 ---
 
+## OPS-1 — Deploy workflow missing required functions
+
+Status: Implemented (2025-12-31)
+
+### Problem
+Production behavior can look “broken” even when code is correct if GitHub Actions deploy does not deploy the Edge Functions that power Daily + asset backfills + diagnostics.
+
+### Fix
+- Updated `.github/workflows/deploy.yml` to deploy required functions used by cron + validation:
+  - `fetch-daily-prices`, `fetch-market-movers`, `scrape-daily-movers`
+  - `enrich-assets-yahoo`, `backfill-asset-history`, `backfill-post-links`
+  - `inspect-db`
+
+### Definition of Done
+- After push to `main`, the GitHub Actions deploy run is green and the above functions return 200 at `/functions/v1/<name>`.
+
+---
+
+## OPS-2 — External cron calls failing due to JWT requirements
+
+Status: Implemented (2025-12-31)
+
+### Problem
+External cron services typically call functions without auth headers; if a function is not public (`verify_jwt = true`), cron will fail with 401.
+
+### Fix
+- Updated `supabase/config.toml` to ensure scheduled/validation functions are public (`verify_jwt = false`), including:
+  - `fetch-daily-prices`, `fetch-market-movers`, `scrape-daily-movers`
+  - `enrich-assets-yahoo`, `backfill-asset-history`, `backfill-post-links`
+  - `check-system-health`, `inspect-db`, `verify-deployment`
+
+### Definition of Done
+- Cron endpoints return 200 without Authorization headers (when invoked from external cron).
+
+
+---
+
 ## FEED-1 — Feed “View trader” routes to internal trader profile
+
+Status: Implemented (2025-12-31)
 
 ### Problem
 Clicking “View trader” on Discussion Feed should always route to the internal trader profile page under Copy Traders.
@@ -50,6 +89,10 @@ Clicking “View trader” on Discussion Feed should always route to the interna
   - 100% navigate to a valid `/traders/<uuid>` OR show a clear “Trader not available yet” toast (no crash).
   - No ErrorBoundary screen.
 
+### Implementation notes
+- Feed now passes `etoro_username` into the mapped post object so click handlers can resolve UUID even when `trader_id` is missing.
+- Feed uses username→UUID resolution via `traders.etoro_username` and only navigates when a UUID is resolved.
+
 ### Verification steps
 - Manual: browse Feed → click “View trader” repeatedly.
 - Data: confirm `posts.trader_id` is populated (or username→UUID lookup works reliably).
@@ -57,6 +100,8 @@ Clicking “View trader” on Discussion Feed should always route to the interna
 ---
 
 ## FEED-2 — Feed “Analyse” pre-fills Analysis for Trader Portfolio
+
+Status: Implemented (2025-12-31)
 
 ### Problem
 Clicking “Analyse” in the Feed should open the Analysis page with:
@@ -92,6 +137,10 @@ Clicking “Analyse” in the Feed should open the Analysis page with:
   - trader is already selected
 - Refreshing the analysis page URL preserves that state.
 
+### Implementation notes
+- Feed “Analyse” now navigates to `/analysis?trader=<uuid>&mode=trader_portfolio` when a trader can be resolved.
+- Analysis reads `mode=trader_portfolio` and defaults the report type accordingly.
+
 ### Verification steps
 - Manual: click Analyse from Feed on multiple items.
 - URL: confirm query params drive UI state.
@@ -99,6 +148,8 @@ Clicking “Analyse” in the Feed should open the Analysis page with:
 ---
 
 ## DAILY-1 — Daily page stuck showing “Loading daily movers…”
+
+Status: Implemented (2025-12-31)
 
 ### Problem
 Top summary text keeps saying “Loading daily movers…” and the page shows no daily trader/mover data.
@@ -122,6 +173,9 @@ Top summary text keeps saying “Loading daily movers…” and the page shows n
 
 ### Definition of Done
 - When `moversLoading=false` and there are 0 movers for today, UI shows “No daily movers available today” (not “Loading…”).
+
+### Implementation notes
+- Daily hero summary now distinguishes loading vs empty vs populated states.
 
 ### Verification
 - Manual: open Daily page when table is empty; confirm messaging.
@@ -155,6 +209,184 @@ Daily Movers and Recent Trader Moves are empty.
 ### Verification
 - DB: query counts for today’s movers and recent trades.
 - UI: confirm both sections display non-empty states.
+
+---
+
+## TRADER-0 — Acceptance criteria (non-negotiable)
+
+These are requirements for trader profiles and related asset/portfolio views.
+
+- Blank values are not acceptable for key factsheet/profile fields; if a value is unknown, the UI must show a clear reason and/or the backend must backfill.
+- “Unknown/Other” classifications must not dominate (target: <20%), otherwise breakdown must be improved (more granular sectors/categories).
+- Autosync must be visible (timestamps), so it’s obvious that refreshes are happening without manual intervention.
+
+---
+
+## TRADER-1 — Trader profile factsheet parity (BullAware-style)
+
+Status: Partially implemented (2025-12-31)
+
+### Problem
+Trader profile pages are missing multiple factsheet datapoints and visualizations expected for a production-grade copy-trader profile.
+
+### Expected behavior
+- Overview includes: AUM, copiers, risk score, returns (1M/YTD/1Y/5Y), track record, and a clear last-synced indicator.
+- Factsheet section includes monthly returns, annualized returns, drawdowns, and key performance metrics with minimal duplication.
+
+### Implementation notes
+- Trader page now renders 1M / YTD / 5Y return fields directly from `traders.return_1m`, `traders.return_ytd`, `traders.return_5y` (when present), and shows “Not synced” instead of a blank dash.
+- Trader page shows “Last synced …” from `traders.details_synced_at` (fallback `updated_at`).
+
+### Still missing (pipeline/data dependent)
+- Full factsheet parity (track record section, annualized returns breakdown, and tighter layout parity).
+
+### Notes
+- Some returns columns exist in DB (e.g., return_1m/return_ytd/return_5y) but must be populated and displayed.
+
+---
+
+## TRADER-2 — Posts tab empty (posts not linked to trader)
+
+Status: Implemented (2025-12-31)
+
+### Problem
+Posts can exist in the DB but the Trader profile Posts tab can be empty because posts are not always linked via posts.trader_id.
+
+### Expected behavior
+- Posts tab shows posts for that trader consistently.
+- If trader_id linkage is missing, fallback to username-based matching and/or backfill posts.trader_id.
+
+### Work started
+
+### Implementation notes
+- Frontend falls back to username matching when `posts.trader_id` is missing.
+- Added scheduled backfill job: `backfill-post-links` links `posts.trader_id` from `posts.etoro_username`.
+
+---
+
+## TRADER-3 — Activity tab empty / incomplete
+
+Status: Improved UX + still data-dependent (2025-12-31)
+
+### Problem
+Activity (closed trades) can be empty even when the trader has known activity.
+
+### Expected behavior
+- Activity shows recent closed trades (and/or other activity types if supported) reliably.
+- If the DB doesn’t store trades for a trader, the sync pipeline must backfill.
+
+### Implementation notes
+- Activity tab now has a clear empty-state message prompting refresh when no trades are present.
+
+### Still missing (pipeline/data dependent)
+- Some traders may legitimately have no trades ingested yet (provider coverage/rate-limits). This requires continued improvements to the sync pipeline and/or additional eToro endpoints.
+
+---
+
+## TRADER-4 — Portfolio holdings completeness (sector, P/L, avg price)
+
+Status: Improved UX + still data-dependent (2025-12-31)
+
+### Problem
+Holdings tables can show missing sector, missing P/L, and missing average price/cost basis.
+
+### Expected behavior
+- Holdings list includes sector, allocation, average price, and P/L (or a clear reason why unavailable).
+
+### Implementation notes
+- Holdings now shows explicit placeholders (e.g., “Unknown (enriching…)”, “Not synced”) instead of bare dashes.
+
+---
+
+## TRADER-5 — Allocation top-5 table and category breakdown
+
+### Problem
+Allocation breakdown can be too coarse ("Other" heavy) and missing a clear top-5 breakdown.
+
+### Expected behavior
+- Show top-5 holdings table alongside allocation charts.
+- Sector/category mapping should reduce Unknown/Other over time.
+
+---
+
+## TRADER-6 — Reduce duplicate metrics in Stats tab
+
+### Problem
+Stats page has duplicated metrics and isn’t aligned to a single authoritative factsheet layout.
+
+### Expected behavior
+- Consolidate metrics display so each metric appears once in the appropriate section.
+
+---
+
+## TRADER-7 — Prefer eToro endpoints where BullAware is limited
+
+### Problem
+BullAware has rate limits/coverage gaps, leading to incomplete trader profiles.
+
+### Expected behavior
+- Explore and integrate additional eToro endpoints to fill gaps where possible.
+- Ensure ingestion remains stable and rate-limit aware.
+
+---
+
+## TRADER-8 — Autosync visibility on trader pages
+
+### Problem
+Users cannot easily tell whether a trader is being refreshed automatically.
+
+### Expected behavior
+- Trader page shows “Last synced …” and updates after background sync runs.
+
+---
+
+## ASSET-1 — Asset page timestamps and freshness
+
+### Problem
+Asset pages do not clearly show whether fundamentals/sector/price history were recently refreshed.
+
+### Expected behavior
+- Show clear “Last updated” / “Last price history sync” timestamps.
+
+---
+
+## ASSET-2 — Price chart ranges (5Y/All) axis/ticks correctness
+
+Status: Implemented (2025-12-31)
+
+### Problem
+Chart range selection can appear to not change axes/ticks appropriately.
+
+### Expected behavior
+- Range changes adjust domain and tick strategy appropriately, especially for 5Y and All.
+
+### Implementation notes
+- PriceChart now computes tick interval based on selected range + number of points, making 5Y/All visibly change the x-axis density.
+
+---
+
+## ASSET-3 — Highlights correctness (beta/metrics blanks or wrong)
+
+### Problem
+Highlights section can be blank or show incorrect values.
+
+### Expected behavior
+- Highlights show populated, consistent fundamentals where available; missing values must be clearly handled.
+
+---
+
+## ASSET-4 — News fetch reliability
+
+Status: Implemented (2025-12-31)
+
+### Problem
+“Recent news failed to fetch” appears too often.
+
+### Expected behavior
+- News fetch succeeds reliably or degrades gracefully with a clear explanation.
+
+### Implementation notes
+- StockNews now tries multiple fetch strategies/proxies before showing an error.
 
 ---
 
@@ -286,6 +518,24 @@ Data freshness requires manual refresh / manual invocation.
 1. Confirm cron is configured and enabled for the deployed environment.
 2. If Supabase cron is not available, configure an external cron fallback.
 3. Add basic health/visibility:
+
+### Implementation notes
+- Added `supabase/cron.yaml` schedules for core background automation:
+  - `sync-worker` (every 2 min)
+  - `enrich-assets-yahoo` (every 15 min)
+  - `backfill-asset-history` (staggered every 15 min)
+  - `backfill-post-links` (every 10 min)
+  - `fetch-daily-prices` (daily, default 20:10 UTC)
+  - `scrape-daily-movers` (daily, default 20:30 UTC)
+- Updated external-cron fallback docs:
+  - `SETUP_EXTERNAL_CRON.md`
+  - `WORKAROUND_NO_CRON.md`
+
+### Verification
+- Run `scripts/smoke-validate.ps1` twice ~10 minutes apart and confirm:
+  - `sync_jobs completed (last N min)` increases
+  - `assets updated in last N min` increases after scheduled jobs
+  - `daily_movers` has rows on market days after daily jobs run
    - last-run timestamps
    - error logging
 

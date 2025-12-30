@@ -44,8 +44,33 @@ function makeNotInFilter(ids: string[]) {
 }
 
 async function acquireLock(supabase: any, lockHolder: string) {
-    const staleCutoff = new Date(Date.now() - LOCK_TTL_MINUTES * 60 * 1000).toISOString();
+    const staleCutoffMs = Date.now() - LOCK_TTL_MINUTES * 60 * 1000;
     const now = new Date().toISOString();
+
+    const parsePgTimestamptzMs = (value: any): number => {
+        if (!value) return NaN;
+        if (typeof value !== 'string') {
+            const ms = new Date(value).getTime();
+            return ms;
+        }
+
+        // Supabase may return timestamptz as:
+        // - 2025-12-30T14:24:01.507+00:00 (ISO)
+        // - 2025-12-30 14:24:01.507+00 (Postgres-ish)
+        // Normalize into ISO8601 when possible.
+        const raw = value.trim();
+        const direct = new Date(raw).getTime();
+        if (Number.isFinite(direct)) return direct;
+
+        let normalized = raw.replace(' ', 'T');
+        // +00 -> Z
+        if (normalized.endsWith('+00')) normalized = normalized.slice(0, -3) + 'Z';
+        // +0000 -> +00:00
+        normalized = normalized.replace(/([+-]\d\d)(\d\d)$/, '$1:$2');
+        const ms2 = new Date(normalized).getTime();
+        if (Number.isFinite(ms2)) return ms2;
+        return NaN;
+    };
 
     const { data: current, error: fetchError } = await supabase
         .from('sync_domain_status')
@@ -64,10 +89,12 @@ async function acquireLock(supabase: any, lockHolder: string) {
     }
 
     const lockAcquiredAt = current.lock_acquired_at;
-    const lockAgeMinutes = lockAcquiredAt
-        ? Math.floor((Date.now() - new Date(lockAcquiredAt).getTime()) / 60000)
+    const lockAcquiredMs = parsePgTimestamptzMs(lockAcquiredAt);
+    const lockAgeMinutes = Number.isFinite(lockAcquiredMs)
+        ? Math.floor((Date.now() - lockAcquiredMs) / 60000)
         : 0;
-    const isStale = lockAcquiredAt && lockAcquiredAt < staleCutoff;
+    // If we can't parse the timestamp, treat it as stale to avoid permanent deadlocks.
+    const isStale = (Number.isFinite(lockAcquiredMs) && lockAcquiredMs < staleCutoffMs) || (!Number.isFinite(lockAcquiredMs) && !!lockAcquiredAt);
 
     if (current.status === 'running' && !isStale) {
         return {
@@ -123,6 +150,9 @@ serve(async (req) => {
 
     const invocationId = crypto.randomUUID();
 
+    let supabase: any = null;
+    let lockAcquired = false;
+    let lockReleased = false;
     try {
         // Use native SUPABASE_URL - functions are deployed on this project
         const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? new URL(req.url).origin;
@@ -135,10 +165,11 @@ serve(async (req) => {
         const forwardedAuth = callerAuth || `Bearer ${supabaseAnonKey}`;
         const forwardedApiKey = callerApiKey || supabaseAnonKey;
         
-                const supabase = createClient(supabaseUrl, supabaseServiceKey);
+                supabase = createClient(supabaseUrl, supabaseServiceKey);
 
                 const lockHolder = req.headers.get('x-dispatch-invocation') || `dispatch-sync-jobs:${invocationId}`;
                 const lock = await acquireLock(supabase, lockHolder);
+                lockAcquired = lock.acquired;
 
                 if (!lock.acquired) {
                     await supabase.from('sync_logs').insert({
@@ -374,6 +405,7 @@ serve(async (req) => {
                 });
 
                 await releaseLock(supabase, 'idle');
+                lockReleased = true;
 
         return new Response(JSON.stringify({ 
             success: true, 
@@ -387,8 +419,16 @@ serve(async (req) => {
 
     } catch (error: any) {
         console.error("Dispatch error:", error);
-        // Always return 200 with error details instead of 500, so force-process-queue can continue
-        return new Response(JSON.stringify({ 
+        if (supabase && lockAcquired && !lockReleased) {
+            try {
+                await releaseLock(supabase, 'error', error?.message || error?.toString() || 'Unknown error');
+                lockReleased = true;
+            } catch (e) {
+                console.warn('Warning: failed to release dispatch lock after error:', e);
+            }
+        }
+        // Always return 200 with error details instead of 500, so callers can continue.
+        return new Response(JSON.stringify({
             success: false,
             error: error?.message || error?.toString() || 'Unknown error',
             dispatched_jobs: 0,
@@ -396,7 +436,17 @@ serve(async (req) => {
             errors: [{ error: error?.message || error?.toString() || 'Unknown error' }]
         }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
-            status: 200, // Return 200 so caller can see the error details
+            status: 200,
         });
+    } finally {
+        // Prevent permanent deadlocks: if we acquired the lock, release it even on errors/early exits.
+        try {
+            if (supabase && lockAcquired && !lockReleased) {
+                await releaseLock(supabase, 'idle');
+                lockReleased = true;
+            }
+        } catch (e) {
+            console.warn('Warning: failed to release dispatch lock:', e);
+        }
     }
 });

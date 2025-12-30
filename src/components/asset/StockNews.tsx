@@ -22,14 +22,45 @@ export function StockNews({ symbol }: { symbol: string }) {
       try {
         setLoading(true);
         setError(null);
-        const rssUrl = `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${symbol}&region=US&lang=en-US`;
-        const response = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(rssUrl)}`);
+        const normalized = symbol.trim();
+        const rssUrl = `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${encodeURIComponent(normalized)}&region=US&lang=en-US`;
 
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
+        const tryFetchXml = async (): Promise<string> => {
+          // 1) allorigins raw
+          try {
+            const r1 = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(rssUrl)}`);
+            if (r1.ok) return await r1.text();
+          } catch {
+            // ignore
+          }
 
-        const text = await response.text();
+          // 2) allorigins get wrapper
+          try {
+            const r2 = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(rssUrl)}`);
+            if (r2.ok) {
+              const json = await r2.json().catch(() => null);
+              const contents = json?.contents;
+              if (typeof contents === 'string' && contents.length > 0) return contents;
+            }
+          } catch {
+            // ignore
+          }
+
+          // 3) jina.ai plain fetch (last resort)
+          try {
+            const r3 = await fetch(`https://r.jina.ai/http://feeds.finance.yahoo.com/rss/2.0/headline?s=${encodeURIComponent(normalized)}&region=US&lang=en-US`);
+            if (r3.ok) {
+              const t = await r3.text();
+              if (t.includes('<rss') || t.includes('<channel')) return t;
+            }
+          } catch {
+            // ignore
+          }
+
+          throw new Error('Unable to fetch RSS feed via available proxies.');
+        };
+
+        const text = await tryFetchXml();
         const parser = new DOMParser();
         const xml = parser.parseFromString(text, 'text/xml');
 
@@ -52,7 +83,7 @@ export function StockNews({ symbol }: { symbol: string }) {
         setNews(items);
       } catch (e: any) {
         console.error(e);
-        setError('Failed to fetch news.');
+        setError('Recent news failed to fetch.');
       } finally {
         setLoading(false);
       }

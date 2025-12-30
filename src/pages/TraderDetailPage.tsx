@@ -57,7 +57,7 @@ export default function TraderDetailPage() {
   const { data: performance, refetch: refetchPerformance } = useTraderPerformance(traderId);
   const { data: equityHistory, refetch: refetchEquity } = useTraderEquityHistory(traderId);
   const { data: portfolioHistory, refetch: refetchPortfolio } = useTraderPortfolioHistory(traderId);
-  const { data: posts } = useTraderPosts(traderId);
+  const { data: posts } = useTraderPosts(traderId, trader?.etoro_username);
 
   const following = traderId ? isFollowing(traderId) : false;
 
@@ -209,6 +209,13 @@ export default function TraderDetailPage() {
                       <span>Active since {safeFormatDate(trader.active_since, 'MMM yyyy')}</span>
                     </div>
                   )}
+
+                  <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
+                    <Clock className="h-3.5 w-3.5" />
+                    <span>
+                      Last synced {safeDistanceToNow(trader.details_synced_at || trader.updated_at)}
+                    </span>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <Button 
@@ -270,11 +277,11 @@ export default function TraderDetailPage() {
             </div>
             <div className="stat-card">
               <div className="text-xs text-muted-foreground mb-1">5Y Return</div>
-              {(trader as any).return_5y === null || (trader as any).return_5y === undefined ? (
-                <span className="font-bold text-xl text-muted-foreground">-</span>
+              {trader.return_5y === null || trader.return_5y === undefined ? (
+                <span className="text-sm text-muted-foreground">Not synced</span>
               ) : (
-                <span className={cn("font-bold text-xl", (trader as any).return_5y >= 0 ? "text-gain" : "text-loss")}>
-                  {(trader as any).return_5y >= 0 ? '+' : ''}{Number((trader as any).return_5y).toFixed(1)}%
+                <span className={cn("font-bold text-xl", trader.return_5y >= 0 ? "text-gain" : "text-loss")}>
+                  {trader.return_5y >= 0 ? '+' : ''}{Number(trader.return_5y).toFixed(1)}%
                 </span>
               )}
             </div>
@@ -293,21 +300,21 @@ export default function TraderDetailPage() {
             </div>
             <div className="stat-card">
               <div className="text-xs text-muted-foreground mb-1">1M Return</div>
-              {(trader as any).return_1m === null || (trader as any).return_1m === undefined ? (
-                <span className="font-bold text-xl text-muted-foreground">-</span>
+              {trader.return_1m === null || trader.return_1m === undefined ? (
+                <span className="text-sm text-muted-foreground">Not synced</span>
               ) : (
-                <span className={cn("font-bold text-xl", (trader as any).return_1m >= 0 ? "text-gain" : "text-loss")}>
-                  {(trader as any).return_1m >= 0 ? '+' : ''}{Number((trader as any).return_1m).toFixed(1)}%
+                <span className={cn("font-bold text-xl", trader.return_1m >= 0 ? "text-gain" : "text-loss")}>
+                  {trader.return_1m >= 0 ? '+' : ''}{Number(trader.return_1m).toFixed(1)}%
                 </span>
               )}
             </div>
             <div className="stat-card">
               <div className="text-xs text-muted-foreground mb-1">YTD Return</div>
-              {(trader as any).return_ytd === null || (trader as any).return_ytd === undefined ? (
-                <span className="font-bold text-xl text-muted-foreground">-</span>
+              {trader.return_ytd === null || trader.return_ytd === undefined ? (
+                <span className="text-sm text-muted-foreground">Not synced</span>
               ) : (
-                <span className={cn("font-bold text-xl", (trader as any).return_ytd >= 0 ? "text-gain" : "text-loss")}>
-                  {(trader as any).return_ytd >= 0 ? '+' : ''}{Number((trader as any).return_ytd).toFixed(1)}%
+                <span className={cn("font-bold text-xl", trader.return_ytd >= 0 ? "text-gain" : "text-loss")}>
+                  {trader.return_ytd >= 0 ? '+' : ''}{Number(trader.return_ytd).toFixed(1)}%
                 </span>
               )}
             </div>
@@ -672,7 +679,10 @@ export default function TraderDetailPage() {
                             <td className="py-3 px-2 text-right">
                               {trade.close_price ? `$${trade.close_price.toFixed(2)}` : '-'}
                             </td>
-                            <td className={`py-3 px-2 text-right font-medium ${isProfit ? 'text-green-500' : isLoss ? 'text-red-500' : ''}`}>
+                            <td className={cn(
+                              "py-3 px-2 text-right font-medium",
+                              isProfit ? "text-gain" : isLoss ? "text-loss" : ""
+                            )}>
                               {pnl !== null ? `${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}%` : '-'}
                             </td>
                           </tr>
@@ -716,7 +726,13 @@ export default function TraderDetailPage() {
                   ))}
                 </div>
               ) : (
-                <p className="text-muted-foreground text-sm">No posts available</p>
+                <div className="text-center py-8">
+                  <Clock className="h-10 w-10 text-muted-foreground/50 mx-auto mb-3" />
+                  <p className="text-muted-foreground text-sm mb-2">No posts available yet</p>
+                  <p className="text-xs text-muted-foreground/70">
+                    Posts sync periodically. Click the refresh button above to update.
+                  </p>
+                </div>
               )}
             </CardContent>
           </Card>

@@ -81,6 +81,23 @@ export function PriceChart({
     return d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
   };
 
+  // Make tick density match the selected range so 5Y/All clearly changes the axis.
+  const tickInterval = (() => {
+    const n = displayData.length;
+    if (n <= 0) return 'preserveStartEnd' as const;
+    if (selectedDays <= 30) return 'preserveStartEnd' as const;
+
+    const targetTicks =
+      selectedDays <= 90 ? 6 :
+      selectedDays <= 180 ? 7 :
+      selectedDays <= 365 ? 8 :
+      selectedDays <= 365 * 5 ? 10 :
+      12;
+
+    const step = Math.max(1, Math.floor(n / targetTicks));
+    return step;
+  })();
+
   const formatValue = (value: number) => {
     if (valueKey === 'price') {
       return `${currencySymbol}${value.toFixed(2)}`;
@@ -143,8 +160,8 @@ export function PriceChart({
               tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
               axisLine={false}
               tickLine={false}
-              interval="preserveStartEnd"
-              minTickGap={24}
+              interval={tickInterval as any}
+              minTickGap={selectedDays > 365 ? 32 : 24}
             />
             <YAxis 
               domain={[minValue, maxValue]}
@@ -171,8 +188,8 @@ export function PriceChart({
               tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
               axisLine={false}
               tickLine={false}
-              interval="preserveStartEnd"
-              minTickGap={24}
+              interval={tickInterval as any}
+              minTickGap={selectedDays > 365 ? 32 : 24}
             />
             <YAxis 
               domain={[minValue, maxValue]}

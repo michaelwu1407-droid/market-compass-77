@@ -23,6 +23,13 @@ curl -X POST \
   https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/sync-diagnostics
 ```
 
+## Option 3: Run the Smoke Test Script
+
+If you want a repeatable way to validate production end-to-end (without guessing from UI), run the local smoke test:
+
+- See `SMOKE_TEST.md`
+- Script: `scripts/smoke-validate.ps1`
+
 ## What to Look For in Logs
 
 ### For `enqueue-sync-jobs`:

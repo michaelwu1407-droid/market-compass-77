@@ -158,13 +158,26 @@ serve(async (req: Request) => {
     const url = new URL(req.url);
     const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit') || '200')));
     const offset = Math.max(0, Number(url.searchParams.get('offset') || '0'));
+    const onlyMissingTraderId = (url.searchParams.get('only_missing_trader_id') || '').toLowerCase() === 'true'
+      || (url.searchParams.get('mode') || '').toLowerCase() === 'backfill_links';
 
     // Fetch a single batch of posts to avoid timeouts.
-    const { data: posts, error } = await supabase
+    let query = supabase
       .from('posts')
-      .select('*')
-      .order('created_at', { ascending: true })
-      .range(offset, offset + limit - 1);
+      .select('*');
+
+    if (onlyMissingTraderId) {
+      query = query
+        .is('trader_id', null)
+        .not('etoro_username', 'is', null)
+        .order('posted_at', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false });
+    } else {
+      query = query
+        .order('created_at', { ascending: true });
+    }
+
+    const { data: posts, error } = await query.range(offset, offset + limit - 1);
     if (error) throw error;
 
     if (!posts || posts.length === 0) {
@@ -174,7 +187,34 @@ serve(async (req: Request) => {
       );
     }
 
+    // Build a username -> trader_id map for backfilling posts.trader_id.
+    // PostgREST responses are capped (commonly 1000 rows) unless we page with range().
+    const traderIdByUsername = new Map<string, string>();
+
+    const needsTraderLookup = (posts ?? []).some((p: any) => !p?.trader_id && p?.etoro_username);
+    if (needsTraderLookup) {
+      const tradersPageSize = 1000;
+      for (let tradersOffset = 0; tradersOffset < 20000; tradersOffset += tradersPageSize) {
+        const { data: tradersPage, error: tradersErr } = await supabase
+          .from('traders')
+          .select('id, etoro_username')
+          .not('etoro_username', 'is', null)
+          .range(tradersOffset, tradersOffset + tradersPageSize - 1);
+        if (tradersErr) throw tradersErr;
+
+        const page = tradersPage ?? [];
+        for (const t of page) {
+          const key = String((t as any)?.etoro_username ?? '').trim().toLowerCase();
+          if (!key) continue;
+          traderIdByUsername.set(key, (t as any).id);
+        }
+
+        if (page.length < tradersPageSize) break;
+      }
+    }
+
     const updates: any[] = [];
+    let backfilledTraderId = 0;
     for (const row of posts) {
       // Use raw_json if available, else fallback to content
       let postObj: any = {};
@@ -238,7 +278,14 @@ serve(async (req: Request) => {
       const mentioned_symbols = extractSymbols(cleanText);
       const sentiment = analyzeSentiment(cleanText);
 
-      updates.push({
+      // Backfill trader_id if missing and we can resolve from username.
+      const usernameKey = String(poster_username ?? '').trim().toLowerCase();
+      const resolvedTraderId = (!row.trader_id && usernameKey)
+        ? (traderIdByUsername.get(usernameKey) ?? null)
+        : null;
+
+
+      const update: any = {
         id: row.id,
         content: cleanText,
         _classif: ext.classif,
@@ -254,7 +301,14 @@ serve(async (req: Request) => {
         comments: comments,
         mentioned_symbols,
         sentiment,
-      });
+      };
+
+      if (resolvedTraderId) {
+        update.trader_id = resolvedTraderId;
+        backfilledTraderId++;
+      }
+
+      updates.push(update);
     }
 
     const { error: upsertError } = await supabase
@@ -265,7 +319,16 @@ serve(async (req: Request) => {
     const nextOffset = offset + posts.length;
     const done = posts.length < limit;
     return new Response(
-      JSON.stringify({ success: true, processed: posts.length, updated: updates.length, offset, limit, next_offset: nextOffset, done }),
+      JSON.stringify({
+        success: true,
+        processed: posts.length,
+        updated: updates.length,
+        backfilled_trader_id: backfilledTraderId,
+        offset,
+        limit,
+        next_offset: nextOffset,
+        done,
+      }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error) {

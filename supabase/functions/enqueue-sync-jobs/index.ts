@@ -89,7 +89,7 @@ serve(async (req) => {
     if (sync_bullaware_jobs) {
       // One API request per job to respect Bullaware 10 req/min.
       // These job types map 1:1 to endpoints in sync-trader-details.
-      const jobTypes = ['investor_details', 'risk_score', 'metrics', 'portfolio'] as const;
+      const jobTypes = ['investor_details', 'risk_score', 'metrics', 'portfolio', 'trades'] as const;
 
       // De-dupe: do not enqueue jobs that are already pending or in_progress.
       const { data: existing, error: existingErr } = await supabase

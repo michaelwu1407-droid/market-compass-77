@@ -3,6 +3,9 @@
 node_modules/
 dist/
 
+# Local secrets (never commit)
+secrets/
+
 # Local debug artifacts
 tmp_*.txt
 tmp_*.sql
