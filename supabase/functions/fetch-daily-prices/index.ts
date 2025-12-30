@@ -218,9 +218,9 @@ async function fetchBullawareQuotes(symbols: string[]): Promise<Map<string, Bull
       const symbol = String(item?.symbol || item?.ticker || '').trim().toUpperCase();
       if (!symbol) continue;
 
-      const price = Number(item?.price ?? item?.lastPrice);
-      const change = Number(item?.change ?? item?.priceChange);
-      const changePct = Number(item?.changePct ?? item?.changePercent);
+      const price = Number(item?.price ?? item?.lastPrice ?? item?.rate ?? item?.value ?? item?.currentPrice ?? item?.current_price);
+      const change = Number(item?.change ?? item?.priceChange ?? item?.price_change);
+      const changePct = Number(item?.changePct ?? item?.changePercent ?? item?.change_pct ?? item?.priceChangePct ?? item?.price_change_pct);
 
       results.set(symbol, {
         symbol,
@@ -275,9 +275,9 @@ async function fetchBullawareDefaultQuotes(): Promise<Map<string, BullawareQuote
       const symbol = String(item?.symbol || item?.ticker || '').trim().toUpperCase();
       if (!symbol) continue;
 
-      const price = Number(item?.price ?? item?.lastPrice);
-      const change = Number(item?.change ?? item?.priceChange);
-      const changePct = Number(item?.changePct ?? item?.changePercent);
+      const price = Number(item?.price ?? item?.lastPrice ?? item?.rate ?? item?.value ?? item?.currentPrice ?? item?.current_price);
+      const change = Number(item?.change ?? item?.priceChange ?? item?.price_change);
+      const changePct = Number(item?.changePct ?? item?.changePercent ?? item?.change_pct ?? item?.priceChangePct ?? item?.price_change_pct);
 
       results.set(symbol, {
         symbol,
@@ -306,6 +306,38 @@ serve(async (req) => {
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    // Probe should work even if Yahoo is blocked.
+    const urlObj = new URL(req.url);
+    if (urlObj.searchParams.get('probe') === '1') {
+      const { data: sampleAssets } = await supabase
+        .from('assets')
+        .select('symbol')
+        .not('symbol', 'is', null)
+        .order('updated_at', { ascending: false })
+        .limit(10);
+
+      const sampleSymbols = (sampleAssets || []).map((a: any) => String(a.symbol)).filter(Boolean).slice(0, 5);
+      const probeSymbols = Array.from(new Set(['AAPL', '0700.HK', 'BTC-USD', ...sampleSymbols]));
+
+      const yahoo = await fetchYahooQuotes(probeSymbols);
+      const bull = await fetchBullawareQuotes(probeSymbols);
+      const bullDefault = await fetchBullawareDefaultQuotes();
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          probeSymbols,
+          yahooCount: yahoo.size,
+          bullawareCount: bull.size,
+          bullawareDefaultCount: bullDefault.size,
+          sampleYahoo: Array.from(yahoo.values()).slice(0, 3),
+          sampleBullaware: Array.from(bull.values()).slice(0, 3),
+          sampleBullawareDefault: Array.from(bullDefault.values()).slice(0, 3),
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
+    }
 
     const yahooProbe = await fetchYahooQuotes(['AAPL']);
     const yahooAvailable = yahooProbe.size > 0;
@@ -346,7 +378,7 @@ serve(async (req) => {
       for (const asset of assets || []) {
         const sym = String((asset as any).symbol || '').trim().toUpperCase();
         const quote = bullDefault.get(sym);
-        if (!quote?.price) continue;
+        if (quote?.price === undefined) continue;
 
         const { error: updateError } = await supabase
           .from('assets')
@@ -374,38 +406,6 @@ serve(async (req) => {
           yahoo_updated: 0,
           bullaware_updated: updated,
           bullaware_default_count: bullDefault.size,
-        }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-      );
-    }
-
-    // Optional diagnostic probe to confirm outbound access + parsing.
-    // Example: /functions/v1/fetch-daily-prices?probe=1
-    const urlObj = new URL(req.url);
-    if (urlObj.searchParams.get('probe') === '1') {
-      const { data: sampleAssets } = await supabase
-        .from('assets')
-        .select('symbol')
-        .not('symbol', 'is', null)
-        .order('updated_at', { ascending: false })
-        .limit(10);
-
-      const sampleSymbols = (sampleAssets || []).map((a: any) => String(a.symbol)).filter(Boolean).slice(0, 5);
-      const probeSymbols = Array.from(new Set(['AAPL', '0700.HK', 'BTC-USD', ...sampleSymbols]));
-
-      const yahoo = await fetchYahooQuotes(probeSymbols);
-      const bull = await fetchBullawareQuotes(probeSymbols);
-      const bullDefault = await fetchBullawareDefaultQuotes();
-      return new Response(
-        JSON.stringify({
-          success: true,
-          probeSymbols,
-          yahooCount: yahoo.size,
-          bullawareCount: bull.size,
-          bullawareDefaultCount: bullDefault.size,
-          sampleYahoo: Array.from(yahoo.values()).slice(0, 3),
-          sampleBullaware: Array.from(bull.values()).slice(0, 3),
-          sampleBullawareDefault: Array.from(bullDefault.values()).slice(0, 3),
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
       );
