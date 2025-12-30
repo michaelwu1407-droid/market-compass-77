@@ -570,15 +570,23 @@ export default function TraderDetailPage() {
                 </div>
                 <div className="flex justify-between py-2 border-b border-border">
                   <span className="text-muted-foreground">12 Month Return</span>
-                  <span className={cn("font-medium", gain12m >= 0 ? "text-gain" : "text-loss")}>
-                    {gain12m >= 0 ? '+' : ''}{gain12m.toFixed(1)}%
-                  </span>
+                  {gain12m == null ? (
+                    <span className="font-medium">-</span>
+                  ) : (
+                    <span className={cn("font-medium", gain12m >= 0 ? "text-gain" : "text-loss")}>
+                      {gain12m >= 0 ? '+' : ''}{gain12m.toFixed(1)}%
+                    </span>
+                  )}
                 </div>
                 <div className="flex justify-between py-2">
                   <span className="text-muted-foreground">24 Month Return</span>
-                  <span className={cn("font-medium", gain24m >= 0 ? "text-gain" : "text-loss")}>
-                    {gain24m >= 0 ? '+' : ''}{gain24m.toFixed(1)}%
-                  </span>
+                  {gain24m == null ? (
+                    <span className="font-medium">-</span>
+                  ) : (
+                    <span className={cn("font-medium", gain24m >= 0 ? "text-gain" : "text-loss")}>
+                      {gain24m >= 0 ? '+' : ''}{gain24m.toFixed(1)}%
+                    </span>
+                  )}
                 </div>
               </CardContent>
             </Card>
