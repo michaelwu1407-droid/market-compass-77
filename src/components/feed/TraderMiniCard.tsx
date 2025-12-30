@@ -19,9 +19,11 @@ export function TraderMiniCard({ trader, onClick, isFollowing }: TraderMiniCardP
       className="flex items-center gap-3 p-3 rounded-lg hover:bg-secondary/50 cursor-pointer transition-colors"
       onClick={onClick}
     >
+  const displayName = String(trader.display_name || trader.etoro_trader_id || 'Trader');
+  const fallbackInitial = (displayName.trim()[0] || 'T').toUpperCase();
       <Avatar className="h-9 w-9">
         <AvatarImage src={trader.avatar_url} />
-        <AvatarFallback>{trader.display_name[0]}</AvatarFallback>
+        <AvatarFallback>{fallbackInitial}</AvatarFallback>
       </Avatar>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">

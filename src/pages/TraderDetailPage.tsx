@@ -150,6 +150,9 @@ export default function TraderDetailPage() {
     return `$${(aum / 1e3).toFixed(0)}K`;
   };
 
+  const displayName = String(trader.display_name || trader.etoro_username || 'Trader');
+  const fallbackInitial = (displayName.trim()[0] || 'T').toUpperCase();
+
   // Transform holdings for allocation pie chart
   // Use current_value as allocation if allocation_pct is null (API stores it there)
   const holdingsForChart = (holdings || []).map(h => ({
@@ -183,7 +186,7 @@ export default function TraderDetailPage() {
             <div className="relative">
               <Avatar className="h-20 w-20">
                 <AvatarImage src={trader.avatar_url || undefined} />
-                <AvatarFallback className="text-2xl">{trader.display_name[0]}</AvatarFallback>
+                <AvatarFallback className="text-2xl">{fallbackInitial}</AvatarFallback>
               </Avatar>
               {trader.verified && (
                 <div className="absolute -bottom-1 -right-1 bg-primary rounded-full p-0.5">

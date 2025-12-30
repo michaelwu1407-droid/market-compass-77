@@ -33,9 +33,11 @@ export function TraderCard({
       <CardContent className="p-4">
         {/* Header */}
         <div className="flex items-start gap-3 mb-4">
+    const displayName = String(trader.display_name || trader.etoro_username || 'Trader');
+    const fallbackInitial = (displayName.trim()[0] || 'T').toUpperCase();
           <Avatar className="h-12 w-12">
             <AvatarImage src={trader.avatar_url || undefined} />
-            <AvatarFallback>{trader.display_name[0]}</AvatarFallback>
+              <AvatarFallback>{fallbackInitial}</AvatarFallback>
           </Avatar>
           <div className="flex-1 min-w-0">
             <h3 className="font-semibold truncate">{trader.display_name}</h3>
