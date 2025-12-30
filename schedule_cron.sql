@@ -1,5 +1,25 @@
--- Enable pg_cron if available
-CREATE EXTENSION IF NOT EXISTS pg_cron;
+-- NOTE: On Supabase, `pg_cron` and `pg_net` are typically already installed.
+-- If you attempt `CREATE EXTENSION` on a managed project, it may fail due to
+-- privilege scripts. This file intentionally does NOT run CREATE EXTENSION.
+
+-- Idempotency: remove existing jobs (if any) before scheduling
+DO $$
+DECLARE
+  job record;
+BEGIN
+  FOR job IN
+    SELECT jobid
+    FROM cron.job
+    WHERE jobname IN (
+      'scrape-posts-hourly',
+      'fetch-daily-prices-daily',
+      'scrape-daily-movers-daily',
+      'sync-trader-details-4h'
+    )
+  LOOP
+    PERFORM cron.unschedule(job.jobid);
+  END LOOP;
+END $$;
 
 -- Schedule scrape-posts every hour
 -- Calls the edge function 'scrape-posts'
@@ -10,7 +30,10 @@ SELECT cron.schedule(
   SELECT
     net.http_post(
       url:='https://<PROJECT_REF>.supabase.co/functions/v1/scrape-posts',
-      headers:='{"Content-Type": "application/json", "Authorization": "Bearer <SERVICE_ROLE_KEY>"}'::jsonb,
+      headers:=jsonb_build_object(
+        'Content-Type','application/json',
+        'Authorization','Bearer ' || '<SERVICE_ROLE_KEY>'
+      ),
       body:='{}'::jsonb
     ) as request_id;
   $$
@@ -24,7 +47,10 @@ SELECT cron.schedule(
   SELECT
     net.http_post(
       url:='https://<PROJECT_REF>.supabase.co/functions/v1/fetch-daily-prices',
-      headers:='{"Content-Type": "application/json", "Authorization": "Bearer <SERVICE_ROLE_KEY>"}'::jsonb,
+      headers:=jsonb_build_object(
+        'Content-Type','application/json',
+        'Authorization','Bearer ' || '<SERVICE_ROLE_KEY>'
+      ),
       body:='{}'::jsonb
     ) as request_id;
   $$
@@ -38,7 +64,10 @@ SELECT cron.schedule(
   SELECT
     net.http_post(
       url:='https://<PROJECT_REF>.supabase.co/functions/v1/scrape-daily-movers',
-      headers:='{"Content-Type": "application/json", "Authorization": "Bearer <SERVICE_ROLE_KEY>"}'::jsonb,
+      headers:=jsonb_build_object(
+        'Content-Type','application/json',
+        'Authorization','Bearer ' || '<SERVICE_ROLE_KEY>'
+      ),
       body:='{}'::jsonb
     ) as request_id;
   $$
@@ -52,7 +81,10 @@ SELECT cron.schedule(
   SELECT
     net.http_post(
       url:='https://<PROJECT_REF>.supabase.co/functions/v1/sync-trader-details',
-      headers:='{"Content-Type": "application/json", "Authorization": "Bearer <SERVICE_ROLE_KEY>"}'::jsonb,
+      headers:=jsonb_build_object(
+        'Content-Type','application/json',
+        'Authorization','Bearer ' || '<SERVICE_ROLE_KEY>'
+      ),
       body:='{}'::jsonb
     ) as request_id;
   $$
