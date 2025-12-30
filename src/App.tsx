@@ -18,6 +18,7 @@ import AdminSyncPage from "./pages/AdminSyncPage";
 import TemplatesPage from "./pages/TemplatesPage";
 import NotFound from "./pages/NotFound";
 import { Loader2 } from "lucide-react";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 // Force rebuild
 const queryClient = new QueryClient();
@@ -74,7 +75,9 @@ const App = () => (
         <AuthProvider>
           <Toaster />
           <Sonner />
-          <AppRoutes />
+          <ErrorBoundary>
+            <AppRoutes />
+          </ErrorBoundary>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>

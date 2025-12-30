@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 
 interface MarkdownContentProps {
@@ -175,7 +176,7 @@ export function isValidPostContent(content: string): boolean {
 }
 
 export function MarkdownContent({ content, className = '' }: MarkdownContentProps) {
-  const cleanedContent = cleanContent(content);
+  const cleanedContent = useMemo(() => cleanContent(content), [content]);
   
   return (
     <div className={`prose prose-sm dark:prose-invert max-w-none ${className}`}>

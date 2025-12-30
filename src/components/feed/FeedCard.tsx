@@ -1,5 +1,6 @@
+import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow, isValid } from 'date-fns';
 import { Heart, MessageCircle, TrendingUp, Eye, Sparkles, Star, Bookmark, BookmarkCheck, ExternalLink } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -19,7 +20,11 @@ interface FeedCardProps {
 
 export function FeedCard({ item, onAnalyse, onStarForIC, onSave, onUnsave, isSaved }: FeedCardProps) {
   const navigate = useNavigate();
-  const timeAgo = formatDistanceToNow(new Date(item.created_at), { addSuffix: true });
+  const timeAgo = useMemo(() => {
+    const d = item.created_at ? new Date(item.created_at) : null;
+    if (!d || !isValid(d)) return 'recently';
+    return formatDistanceToNow(d, { addSuffix: true });
+  }, [item.created_at]);
 
   const handleSaveToggle = (postId: string) => {
     if (isSaved) {
