@@ -269,6 +269,16 @@ export default function TraderDetailPage() {
               )}
             </div>
             <div className="stat-card">
+              <div className="text-xs text-muted-foreground mb-1">5Y Return</div>
+              {(trader as any).return_5y === null || (trader as any).return_5y === undefined ? (
+                <span className="font-bold text-xl text-muted-foreground">-</span>
+              ) : (
+                <span className={cn("font-bold text-xl", (trader as any).return_5y >= 0 ? "text-gain" : "text-loss")}>
+                  {(trader as any).return_5y >= 0 ? '+' : ''}{Number((trader as any).return_5y).toFixed(1)}%
+                </span>
+              )}
+            </div>
+            <div className="stat-card">
               <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
                 <TrendingUp className="h-3 w-3" />
                 12M Return
@@ -278,6 +288,26 @@ export default function TraderDetailPage() {
               ) : (
                 <span className={cn("font-bold text-xl", gain12m >= 0 ? "text-gain" : "text-loss")}>
                   {gain12m >= 0 ? '+' : ''}{gain12m.toFixed(1)}%
+                </span>
+              )}
+            </div>
+            <div className="stat-card">
+              <div className="text-xs text-muted-foreground mb-1">1M Return</div>
+              {(trader as any).return_1m === null || (trader as any).return_1m === undefined ? (
+                <span className="font-bold text-xl text-muted-foreground">-</span>
+              ) : (
+                <span className={cn("font-bold text-xl", (trader as any).return_1m >= 0 ? "text-gain" : "text-loss")}>
+                  {(trader as any).return_1m >= 0 ? '+' : ''}{Number((trader as any).return_1m).toFixed(1)}%
+                </span>
+              )}
+            </div>
+            <div className="stat-card">
+              <div className="text-xs text-muted-foreground mb-1">YTD Return</div>
+              {(trader as any).return_ytd === null || (trader as any).return_ytd === undefined ? (
+                <span className="font-bold text-xl text-muted-foreground">-</span>
+              ) : (
+                <span className={cn("font-bold text-xl", (trader as any).return_ytd >= 0 ? "text-gain" : "text-loss")}>
+                  {(trader as any).return_ytd >= 0 ? '+' : ''}{Number((trader as any).return_ytd).toFixed(1)}%
                 </span>
               )}
             </div>

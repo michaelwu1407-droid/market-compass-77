@@ -12,6 +12,7 @@ export default function AnalysisPage() {
   const [searchParams] = useSearchParams();
   const preselectedTraderId = searchParams.get('trader');
   const preselectedAsset = searchParams.get('asset');
+  const preselectedMode = searchParams.get('mode');
   
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<Partial<Report> | null>(null);
@@ -121,6 +122,7 @@ export default function AnalysisPage() {
             avatar_url: preselectedTrader.avatar_url,
           } : undefined}
           preselectedAsset={preselectedAsset || undefined}
+          preselectedMode={preselectedMode || undefined}
         />
         
         {result && (
