@@ -324,6 +324,31 @@ serve(async (req) => {
       const bull = await fetchBullawareQuotes(probeSymbols);
       const bullDefault = await fetchBullawareDefaultQuotes();
 
+      // Extra diagnostics: see if Yahoo is returning HTML/captcha/blocked responses.
+      let yahooHttpStatus: number | null = null;
+      let yahooBodyPrefix: string | null = null;
+      try {
+        const diagUrl = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(
+          ['AAPL', 'BTC-USD'].join(','),
+        )}`;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10_000);
+        const res = await fetch(diagUrl, {
+          signal: controller.signal,
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            Accept: "application/json",
+          },
+        });
+        yahooHttpStatus = res.status;
+        const bodyText = await res.text();
+        yahooBodyPrefix = bodyText.slice(0, 200);
+        clearTimeout(timeoutId);
+      } catch {
+        // ignore
+      }
+
       return new Response(
         JSON.stringify({
           success: true,
@@ -331,6 +356,8 @@ serve(async (req) => {
           yahooCount: yahoo.size,
           bullawareCount: bull.size,
           bullawareDefaultCount: bullDefault.size,
+          yahooHttpStatus,
+          yahooBodyPrefix,
           sampleYahoo: Array.from(yahoo.values()).slice(0, 3),
           sampleBullaware: Array.from(bull.values()).slice(0, 3),
           sampleBullawareDefault: Array.from(bullDefault.values()).slice(0, 3),
