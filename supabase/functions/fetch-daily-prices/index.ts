@@ -14,6 +14,72 @@ interface YahooQuote {
   regularMarketPreviousClose?: number;
 }
 
+type AssetRow = {
+  id: string;
+  symbol: string;
+  name: string;
+  asset_type?: string | null;
+  exchange?: string | null;
+  country?: string | null;
+};
+
+function mapSymbolToYahoo(symbol: string): string {
+  // Already has a suffix, apply conversions (keep in sync with enrich-assets-yahoo)
+  if (symbol.includes('.')) {
+    const suffixMappings: Record<string, string> = {
+      '.ASX': '.AX',
+      '.LON': '.L',
+      '.PAR': '.PA',
+      '.FRA': '.F',
+      '.MIL': '.MI',
+      '.MAD': '.MC',
+      '.AMS': '.AS',
+      '.BRU': '.BR',
+      '.STO': '.ST',
+      '.HEL': '.HE',
+      '.OSL': '.OL',
+      '.CPH': '.CO',
+      '.SWX': '.SW',
+      '.TSE': '.TO',
+      '.NSE': '.NS',
+      '.BSE': '.BO',
+    };
+
+    for (const [from, to] of Object.entries(suffixMappings)) {
+      if (symbol.endsWith(from)) {
+        return symbol.replace(from, to);
+      }
+    }
+  }
+
+  return symbol;
+}
+
+function yahooCandidatesForAsset(asset: AssetRow): string[] {
+  const raw = String(asset.symbol || '').trim().toUpperCase();
+  if (!raw) return [];
+
+  const candidates: string[] = [];
+
+  // Base + suffix normalization
+  candidates.push(mapSymbolToYahoo(raw));
+
+  // Some data sources store HK tickers as numeric-only symbols.
+  // If we see a 5-digit symbol, also try appending .HK.
+  if (/^\d{5}$/.test(raw)) {
+    candidates.push(`${raw}.HK`);
+  }
+
+  // Crypto: try SYMBOL-USD (Yahoo convention) when asset_type suggests crypto.
+  const assetType = String(asset.asset_type || '').toLowerCase();
+  if (assetType.includes('crypto') && !raw.includes('-') && !raw.includes('=') && !raw.includes('.')) {
+    candidates.unshift(`${raw}-USD`);
+  }
+
+  // De-dupe while preserving order
+  return Array.from(new Set(candidates.filter(Boolean)));
+}
+
 async function fetchYahooQuotes(symbols: string[]): Promise<Map<string, YahooQuote>> {
   const results = new Map<string, YahooQuote>();
 
@@ -103,7 +169,7 @@ serve(async (req) => {
     // Get all assets
     const { data: assets, error: assetsError } = await supabase
       .from('assets')
-      .select('id, symbol, name')
+      .select('id, symbol, name, asset_type, exchange, country')
       .order('symbol');
 
     if (assetsError) {
@@ -127,15 +193,27 @@ serve(async (req) => {
     let totalFailed = 0;
 
     for (let i = 0; i < assets.length; i += batchSize) {
-      const batch = assets.slice(i, i + batchSize);
-      const symbols = batch.map(a => a.symbol);
+      const batch = assets.slice(i, i + batchSize) as AssetRow[];
+
+      const assetToCandidates = new Map<string, string[]>();
+      const allCandidates: string[] = [];
+
+      for (const asset of batch) {
+        const candidates = yahooCandidatesForAsset(asset);
+        assetToCandidates.set(asset.id, candidates);
+        allCandidates.push(...candidates);
+      }
+
+      const symbols = Array.from(new Set(allCandidates));
       
       console.log(`[fetch-daily-prices] Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(assets.length / batchSize)}: ${symbols.join(', ')}`);
       
       const quotes = await fetchYahooQuotes(symbols);
       
       for (const asset of batch) {
-        const quote = quotes.get(asset.symbol.toUpperCase());
+        const candidates = assetToCandidates.get(asset.id) || [];
+        const quoteSymbol = candidates.map((c) => c.toUpperCase()).find((c) => quotes.has(c));
+        const quote = quoteSymbol ? quotes.get(quoteSymbol) : undefined;
         
         if (quote && quote.regularMarketPrice !== undefined) {
           const { error: updateError } = await supabase
@@ -156,7 +234,7 @@ serve(async (req) => {
             totalUpdated++;
           }
         } else {
-          console.log(`[fetch-daily-prices] No quote data for ${asset.symbol}`);
+          console.log(`[fetch-daily-prices] No quote data for ${asset.symbol} (tried: ${(assetToCandidates.get(asset.id) || []).join(', ')})`);
           totalFailed++;
         }
       }
