@@ -36,7 +36,7 @@ export function PerformanceMetrics({ performance, gain12m, gain24m }: Performanc
   
   const last60Months = sortedPerf.slice(0, 60);
   const calc5YReturn = last60Months.reduce((acc, p) => acc * (1 + (p.return_pct || 0) / 100), 1);
-  const fiveYearPct = last60Months.length >= 24 ? (calc5YReturn - 1) * 100 : null;
+  const fiveYearPct = last60Months.length >= 60 ? (calc5YReturn - 1) * 100 : null;
 
   // Use gain_12m for annualized return
   const annualizedReturn = gain12m;

@@ -94,7 +94,7 @@ export function AdvancedMetricsCard({
   const hasAnyPrimaryData = primaryMetrics.some(m => m.value !== null && m.value !== undefined);
   const hasAnySecondaryData = secondaryMetrics.some(m => m.value !== null && m.value !== undefined);
 
-  if (!hasAnyPrimaryData && !hasAnySecondaryData && volatility === null) {
+  if (!hasAnyPrimaryData && !hasAnySecondaryData && (volatility === null || volatility === undefined)) {
     return (
       <Card>
         <CardHeader>

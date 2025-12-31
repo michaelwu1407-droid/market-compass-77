@@ -8,6 +8,14 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+function normalizeUsername(raw: unknown): string {
+  const s = String(raw ?? '')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim();
+  const withoutAt = s.startsWith('@') ? s.slice(1) : s;
+  return withoutAt.trim().toLowerCase();
+}
+
 function extractSymbols(text: string | undefined | null): string[] {
   if (typeof text !== 'string' || text.length === 0) return [];
   const dollarSymbols = text.match(/\$([A-Z]{1,5})/g) || [];
@@ -204,7 +212,7 @@ serve(async (req: Request) => {
 
         const page = tradersPage ?? [];
         for (const t of page) {
-          const key = String((t as any)?.etoro_username ?? '').trim().toLowerCase();
+          const key = normalizeUsername((t as any)?.etoro_username);
           if (!key) continue;
           traderIdByUsername.set(key, (t as any).id);
         }
@@ -234,6 +242,12 @@ serve(async (req: Request) => {
       // Poster info: prefer existing DB values; only fill gaps from raw JSON.
       const owner = postObj?.post?.owner || {};
       let poster_username = row.etoro_username || owner?.username || 'unknown';
+      // Normalize the stored username so linking is consistent (strip leading @, trim).
+      const normalizedUsernameForStore = String(poster_username ?? '')
+        .replace(/[\u200B-\u200D\uFEFF]/g, '')
+        .trim()
+        .replace(/^@+/, '');
+      poster_username = normalizedUsernameForStore || poster_username;
       let poster_id = row.poster_id || owner?.id || null;
       let poster_first = row.poster_first
         || owner?.firstName
@@ -279,7 +293,7 @@ serve(async (req: Request) => {
       const sentiment = analyzeSentiment(cleanText);
 
       // Backfill trader_id if missing and we can resolve from username.
-      const usernameKey = String(poster_username ?? '').trim().toLowerCase();
+      const usernameKey = normalizeUsername(poster_username);
       const resolvedTraderId = (!row.trader_id && usernameKey)
         ? (traderIdByUsername.get(usernameKey) ?? null)
         : null;

@@ -676,7 +676,7 @@ serve(async (req) => {
           if (rows.length > 0) {
             const { error: upsertTradesErr } = await supabase
               .from('trades')
-              .upsert(rows as any, { onConflict: 'position_id' });
+              .upsert(rows as any, { onConflict: 'trader_id,position_id' });
             if (upsertTradesErr) {
               const msg = `Error upserting trades for ${trader.etoro_username}: ${upsertTradesErr.message}`;
               await supabase.from('traders').update({ last_sync_error: msg }).eq('id', trader.id);

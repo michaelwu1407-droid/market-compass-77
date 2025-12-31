@@ -14,12 +14,20 @@ jobs:
       SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
     
     steps:
+      - name: Validate secrets
+        run: |
+          if [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "Missing GitHub secret: SUPABASE_ANON_KEY" >&2
+            exit 1
+          fi
+
       - name: Call sync-worker
         run: |
           echo "Calling sync-worker at $(date)"
-          curl -X POST \
+          curl -sS -f -X POST \
             -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
             -H "Content-Type: application/json" \
             -w "\nHTTP Status: %{http_code}\n" \
-            "$SUPABASE_FUNCTIONS_BASE_URL/sync-worker" || echo "Error calling sync-worker"
+            "$SUPABASE_FUNCTIONS_BASE_URL/sync-worker"
 

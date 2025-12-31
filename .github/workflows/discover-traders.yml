@@ -14,15 +14,23 @@ jobs:
       SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
     
     steps:
+      - name: Validate secrets
+        run: |
+          if [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "Missing GitHub secret: SUPABASE_ANON_KEY" >&2
+            exit 1
+          fi
+
       - name: Discover new traders (1 page per call)
         run: |
           echo "Discovering new traders at $(date)"
           # Call sync-traders directly to fetch 1 page
           # It will automatically paginate based on what's already in the database
-          curl -X POST \
+          curl -sS -f -X POST \
             -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
             -H "Content-Type: application/json" \
             -d '{"max_pages": 1}' \
             -w "\nHTTP Status: %{http_code}\n" \
-            "$SUPABASE_FUNCTIONS_BASE_URL/sync-traders" || echo "Error discovering traders"
+            "$SUPABASE_FUNCTIONS_BASE_URL/sync-traders"
 

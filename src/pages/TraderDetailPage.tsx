@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, TrendingUp, AlertTriangle, Users, Sparkles, Star, CheckCircle2, Calendar, Target, Clock, BarChart3, PieChart, LineChart, RefreshCw } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -25,6 +25,7 @@ import { useTraderHoldings } from '@/hooks/useTraderHoldings';
 import { useTraderTrades } from '@/hooks/useTraderTrades';
 import { useTraderPerformance } from '@/hooks/useTraderPerformance';
 import { useTraderEquityHistory } from '@/hooks/useTraderEquityHistory';
+import type { TraderEquityPoint } from '@/hooks/useTraderEquityHistory';
 import { useTraderPortfolioHistory } from '@/hooks/useTraderPortfolioHistory';
 import { useTraderPosts } from '@/hooks/usePosts';
 import { useAnalyse } from '@/hooks/useAnalyse';
@@ -118,6 +119,99 @@ export default function TraderDetailPage() {
     return formatDistanceToNow(d, { addSuffix: true });
   };
 
+  const formatMaybePct = (value: number | null | undefined, digits = 0) => {
+    if (value === null || value === undefined) return '-';
+    if (!Number.isFinite(value)) return '-';
+    return `${value.toFixed(digits)}%`;
+  };
+
+  type DrawdownPeriod = {
+    start_date: string;
+    end_date?: string | null;
+    depth_pct: number;
+    recovery_days?: number | null;
+  };
+
+  const computeDrawdownsFromEquity = (points: TraderEquityPoint[] | null | undefined): DrawdownPeriod[] => {
+    if (!points || points.length < 2) return [];
+
+    const sorted = [...points]
+      .filter((p) => p?.date)
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    if (sorted.length < 2) return [];
+
+    const toIndex = (pct: number) => 1 + pct / 100;
+
+    let peakIndex = Number.NEGATIVE_INFINITY;
+    let peakDate: string | null = null;
+
+    let inDrawdown = false;
+    let ddStartDate: string | null = null;
+    let troughIndex = Number.POSITIVE_INFINITY;
+    let troughDate: string | null = null;
+
+    const drawdowns: DrawdownPeriod[] = [];
+
+    for (const point of sorted) {
+      const r = point.equity_value;
+      if (r === null || r === undefined || !Number.isFinite(r)) continue;
+
+      const idx = toIndex(r);
+      if (!Number.isFinite(idx) || idx <= 0) continue;
+
+      if (idx >= peakIndex) {
+        if (inDrawdown && ddStartDate && troughDate && peakIndex !== Number.NEGATIVE_INFINITY) {
+          const depthPct = (troughIndex / peakIndex - 1) * 100;
+          const recoveryDays = Math.max(
+            0,
+            Math.round((new Date(point.date).getTime() - new Date(troughDate).getTime()) / (1000 * 60 * 60 * 24))
+          );
+          drawdowns.push({
+            start_date: ddStartDate,
+            end_date: point.date,
+            depth_pct: depthPct,
+            recovery_days: recoveryDays,
+          });
+        }
+
+        peakIndex = idx;
+        peakDate = point.date;
+        inDrawdown = false;
+        ddStartDate = null;
+        troughIndex = Number.POSITIVE_INFINITY;
+        troughDate = null;
+        continue;
+      }
+
+      if (!inDrawdown && peakDate) {
+        inDrawdown = true;
+        ddStartDate = peakDate;
+        troughIndex = idx;
+        troughDate = point.date;
+      }
+
+      if (inDrawdown && idx < troughIndex) {
+        troughIndex = idx;
+        troughDate = point.date;
+      }
+    }
+
+    if (inDrawdown && ddStartDate && troughDate && peakIndex !== Number.NEGATIVE_INFINITY) {
+      const depthPct = (troughIndex / peakIndex - 1) * 100;
+      drawdowns.push({
+        start_date: ddStartDate,
+        end_date: null,
+        depth_pct: depthPct,
+        recovery_days: null,
+      });
+    }
+
+    return drawdowns
+      .sort((a, b) => Math.abs(b.depth_pct) - Math.abs(a.depth_pct))
+      .slice(0, 10);
+  };
+
   if (traderLoading) {
     return (
       <div className="max-w-5xl mx-auto">
@@ -170,6 +264,8 @@ export default function TraderDetailPage() {
   const gain12m = trader.gain_12m ?? null;
   const gain24m = trader.gain_24m ?? null;
   const tags = trader.tags || [];
+
+  const computedDrawdowns = useMemo(() => computeDrawdownsFromEquity(equityHistory), [equityHistory]);
 
   return (
     <div className="max-w-5xl mx-auto">
@@ -425,11 +521,11 @@ export default function TraderDetailPage() {
               <div className="space-y-2">
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">Profitable Weeks</span>
-                  <span className="font-medium">{trader.profitable_weeks_pct || '-'}%</span>
+                  <span className="font-medium">{formatMaybePct(trader.profitable_weeks_pct)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">Profitable Months</span>
-                  <span className="font-medium">{trader.profitable_months_pct || '-'}%</span>
+                  <span className="font-medium">{formatMaybePct(trader.profitable_months_pct)}</span>
                 </div>
               </div>
             </Card>
@@ -438,11 +534,11 @@ export default function TraderDetailPage() {
               <div className="space-y-2">
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">Avg Holding Time</span>
-                  <span className="font-medium">{trader.avg_holding_time_days || '-'} days</span>
+                  <span className="font-medium">{trader.avg_holding_time_days ?? '-'} days</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">Trades per Week</span>
-                  <span className="font-medium">{trader.avg_trades_per_week || '-'}</span>
+                  <span className="font-medium">{trader.avg_trades_per_week ?? '-'}</span>
                 </div>
               </div>
             </Card>
@@ -496,49 +592,97 @@ export default function TraderDetailPage() {
         </TabsContent>
 
         <TabsContent value="stats" className="space-y-6">
-          {/* Performance Metrics */}
-          <PerformanceMetrics 
+          {/* Returns */}
+          <PerformanceMetrics
             performance={performance || []}
             gain12m={trader.gain_12m}
             gain24m={trader.gain_24m}
           />
 
-          {/* Advanced Metrics */}
+          {/* Factsheet */}
           <div className="grid md:grid-cols-2 gap-6">
-            <AdvancedMetricsCard 
+            <AdvancedMetricsCard
               sharpeRatio={trader.sharpe_ratio}
               sortinoRatio={trader.sortino_ratio}
               beta={trader.beta}
               alpha={trader.alpha}
               volatility={trader.volatility}
-              omegaRatio={(trader as any).omega_ratio}
-              treynorRatio={(trader as any).treynor_ratio}
-              calmarRatio={(trader as any).calmar_ratio}
-              informationRatio={(trader as any).information_ratio}
+              omegaRatio={trader.omega_ratio}
+              treynorRatio={trader.treynor_ratio}
+              calmarRatio={trader.calmar_ratio}
+              informationRatio={trader.information_ratio}
             />
-            <DrawdownsTable 
-              drawdowns={[]} 
-              maxDrawdown={trader.max_drawdown} 
+            <DrawdownsTable
+              drawdowns={computedDrawdowns}
+              maxDrawdown={trader.max_drawdown}
               dailyDrawdown={trader.daily_drawdown}
             />
           </div>
 
-          {/* Diversification Section */}
-          <DiversificationSection holdings={holdings || []} />
+          {/* Trading Facts */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Target className="h-4 w-4" />
+                Trading Facts
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="grid md:grid-cols-3 gap-6">
+              <div className="space-y-3">
+                <div className="flex justify-between">
+                  <span className="text-sm text-muted-foreground">Avg Holding Time</span>
+                  <span className="font-medium">{trader.avg_holding_time_days ?? '-'} days</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-muted-foreground">Trades per Week</span>
+                  <span className="font-medium">{trader.avg_trades_per_week ?? '-'}</span>
+                </div>
+              </div>
+              <div className="space-y-3">
+                <div className="flex justify-between">
+                  <span className="text-sm text-muted-foreground">Profitable Weeks</span>
+                  <span className="font-medium">{formatMaybePct(trader.profitable_weeks_pct)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-muted-foreground">Profitable Months</span>
+                  <span className="font-medium">{formatMaybePct(trader.profitable_months_pct)}</span>
+                </div>
+              </div>
+              <div className="space-y-3">
+                <div className="flex justify-between">
+                  <span className="text-sm text-muted-foreground">Active Since</span>
+                  <span className="font-medium">{safeFormatDate(trader.active_since, 'MMM yyyy')}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-muted-foreground">Last Synced</span>
+                  <span className="font-medium">{safeDistanceToNow(trader.details_synced_at || trader.updated_at)}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-          {/* Dividends */}
-          <DividendsSection
-            portfolioDividendYield={null}
-            totalHoldings={holdings?.length}
-          />
+          {/* Performance vs Benchmark */}
+          {equityHistory && equityHistory.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <LineChart className="h-4 w-4" />
+                  Performance vs S&P 500
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <PerformanceVsBenchmarkChart data={equityHistory} height={280} />
+              </CardContent>
+            </Card>
+          )}
 
-          {/* Performance Chart */}
+          {/* Monthly Performance */}
           {performance && performance.length > 0 && (
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
+                <CardTitle className="text-base flex items-center gap-2">
                   <BarChart3 className="h-4 w-4" />
-                  Historical Performance
+                  Monthly Performance
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -558,76 +702,6 @@ export default function TraderDetailPage() {
               </CardContent>
             </Card>
           )}
-
-          {/* Current Holdings */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Portfolio Holdings</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <HoldingsTable holdings={holdings || []} />
-            </CardContent>
-          </Card>
-
-          <div className="grid md:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Target className="h-4 w-4" />
-                  Trading Statistics
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex justify-between py-2 border-b border-border">
-                  <span className="text-muted-foreground">Avg Holding Time</span>
-                  <span className="font-medium">{trader.avg_holding_time_days || '-'} days</span>
-                </div>
-                <div className="flex justify-between py-2 border-b border-border">
-                  <span className="text-muted-foreground">Trades per Week</span>
-                  <span className="font-medium">{trader.avg_trades_per_week || '-'}</span>
-                </div>
-                <div className="flex justify-between py-2">
-                  <span className="text-muted-foreground">Profitable Weeks</span>
-                  <span className="font-medium">{trader.profitable_weeks_pct || '-'}%</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <BarChart3 className="h-4 w-4" />
-                  Performance Metrics
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex justify-between py-2 border-b border-border">
-                  <span className="text-muted-foreground">Max Drawdown</span>
-                  <span className="font-medium text-loss">{trader.max_drawdown || '-'}%</span>
-                </div>
-                <div className="flex justify-between py-2 border-b border-border">
-                  <span className="text-muted-foreground">12 Month Return</span>
-                  {gain12m == null ? (
-                    <span className="font-medium">-</span>
-                  ) : (
-                    <span className={cn("font-medium", gain12m >= 0 ? "text-gain" : "text-loss")}>
-                      {gain12m >= 0 ? '+' : ''}{gain12m.toFixed(1)}%
-                    </span>
-                  )}
-                </div>
-                <div className="flex justify-between py-2">
-                  <span className="text-muted-foreground">24 Month Return</span>
-                  {gain24m == null ? (
-                    <span className="font-medium">-</span>
-                  ) : (
-                    <span className={cn("font-medium", gain24m >= 0 ? "text-gain" : "text-loss")}>
-                      {gain24m >= 0 ? '+' : ''}{gain24m.toFixed(1)}%
-                    </span>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
         </TabsContent>
 
         <TabsContent value="activity">
