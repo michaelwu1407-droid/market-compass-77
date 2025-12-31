@@ -198,8 +198,28 @@ serve(async (req) => {
                             console.warn('Warning: holdings presence check failed:', e?.message || e);
                         }
 
+                        // If trades are missing entirely, also treat as needing sync.
+                        let missingTradesIds: string[] = [];
+                        try {
+                            const { data: tradeRows, error: tradesErr } = await supabase
+                                .from('trades')
+                                .select('trader_id')
+                                .in('trader_id', followedIds)
+                                .limit(5000);
+
+                            if (tradesErr) {
+                                console.warn('Warning: failed loading trades for followed traders:', tradesErr);
+                            } else {
+                                const hasTrades = new Set((tradeRows || []).map((r: any) => r.trader_id).filter(Boolean));
+                                missingTradesIds = followedIds.filter((id: string) => !hasTrades.has(id));
+                            }
+                        } catch (e: any) {
+                            console.warn('Warning: trades presence check failed:', e?.message || e);
+                        }
+
                         const candidateIds = Array.from(new Set([
                             ...missingHoldingsIds,
+                            ...missingTradesIds,
                             ...staleIds,
                         ])).slice(0, FOLLOWED_ENQUEUE_LIMIT);
 

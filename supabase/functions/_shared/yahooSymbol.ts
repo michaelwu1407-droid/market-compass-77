@@ -127,6 +127,17 @@ export function yahooSymbolCandidates(hint: YahooSymbolHint): string[] {
   // Always try the stored symbol first.
   candidates.push(raw);
 
+  // Some upstream sources can produce a duplicated suffix letter, e.g. "NVTKL.L".
+  // If the base ends with the same letter as the suffix ("L.L"), try stripping it.
+  if (/^[A-Z0-9]+\.[A-Z]{1,3}$/.test(raw)) {
+    const dot = raw.lastIndexOf('.');
+    const base = raw.slice(0, dot);
+    const suffix = raw.slice(dot + 1);
+    if (suffix.length === 1 && base.endsWith(suffix) && base.length > 1) {
+      candidates.push(`${base.slice(0, -1)}.${suffix}`);
+    }
+  }
+
   // Try known suffix conversions / cleanup.
   const mapped = mapKnownSuffixes(raw);
   if (mapped !== raw) candidates.push(mapped);

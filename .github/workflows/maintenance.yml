@@ -1,0 +1,51 @@
+name: Maintenance Cron - Posts + Assets
+
+on:
+  schedule:
+    - cron: "*/15 * * * *" # Every 15 minutes
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SUPABASE_FUNCTIONS_BASE_URL: https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+
+    steps:
+      - name: Scrape posts
+        run: |
+          echo "Calling scrape-posts at $(date)"
+          curl -sS -X POST \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            -H "Content-Type: application/json" \
+            -w "\nHTTP Status: %{http_code}\n" \
+            "$SUPABASE_FUNCTIONS_BASE_URL/scrape-posts" || echo "Error calling scrape-posts"
+
+      - name: Backfill post links (fix-posts)
+        run: |
+          echo "Calling fix-posts backfill at $(date)"
+          curl -sS -X POST \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            -H "Content-Type: application/json" \
+            -w "\nHTTP Status: %{http_code}\n" \
+            "$SUPABASE_FUNCTIONS_BASE_URL/fix-posts?only_missing_trader_id=true&limit=200&offset=0" || echo "Error calling fix-posts"
+
+      - name: Enrich assets (Yahoo)
+        run: |
+          echo "Calling enrich-assets-yahoo at $(date)"
+          curl -sS -X POST \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            -H "Content-Type: application/json" \
+            -w "\nHTTP Status: %{http_code}\n" \
+            "$SUPABASE_FUNCTIONS_BASE_URL/enrich-assets-yahoo" || echo "Error calling enrich-assets-yahoo"
+
+      - name: Backfill asset history
+        run: |
+          echo "Calling backfill-asset-history at $(date)"
+          curl -sS -X POST \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            -H "Content-Type: application/json" \
+            -w "\nHTTP Status: %{http_code}\n" \
+            "$SUPABASE_FUNCTIONS_BASE_URL/backfill-asset-history" || echo "Error calling backfill-asset-history"

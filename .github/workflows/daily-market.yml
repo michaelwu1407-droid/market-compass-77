@@ -1,0 +1,33 @@
+name: Daily Market Data
+
+on:
+  schedule:
+    - cron: "10 20 * * 1-5" # Weekdays 20:10 UTC
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SUPABASE_FUNCTIONS_BASE_URL: https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+
+    steps:
+      - name: Fetch daily prices
+        run: |
+          echo "Calling fetch-daily-prices at $(date)"
+          curl -sS -X POST \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            -H "Content-Type: application/json" \
+            -w "\nHTTP Status: %{http_code}\n" \
+            "$SUPABASE_FUNCTIONS_BASE_URL/fetch-daily-prices" || echo "Error calling fetch-daily-prices"
+
+      - name: Scrape daily movers
+        run: |
+          echo "Calling scrape-daily-movers at $(date)"
+          curl -sS -X POST \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            -H "Content-Type: application/json" \
+            -w "\nHTTP Status: %{http_code}\n" \
+            "$SUPABASE_FUNCTIONS_BASE_URL/scrape-daily-movers" || echo "Error calling scrape-daily-movers"
