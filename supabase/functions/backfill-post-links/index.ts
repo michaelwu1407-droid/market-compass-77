@@ -1,10 +1,12 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import { extractEtoroUsername, normalizeEtoroUsernameKey } from "../_shared/etoroUsername.ts";
 
 type BackfillRequest = {
   limit?: number;
   dry_run?: boolean;
+  create_missing_traders?: boolean;
 };
 
 serve(async (req) => {
@@ -28,6 +30,7 @@ serve(async (req) => {
     const body = (await req.json().catch(() => ({}))) as BackfillRequest;
     const limit = Math.max(1, Math.min(2000, Number(body.limit ?? 500)));
     const dryRun = Boolean(body.dry_run);
+    const createMissingTraders = Boolean(body.create_missing_traders);
 
     // Fetch a batch of posts that are missing trader_id but have etoro_username.
     const { data: posts, error: postsErr } = await supabase
@@ -40,10 +43,10 @@ serve(async (req) => {
 
     if (postsErr) throw postsErr;
 
-    const usernames = Array.from(
-      new Set(
+    const usernames: string[] = Array.from(
+      new Set<string>(
         (posts ?? [])
-          .map((p) => (p.etoro_username ?? "").trim().toLowerCase())
+          .map((p) => normalizeEtoroUsernameKey(p.etoro_username))
           .filter(Boolean),
       ),
     );
@@ -62,26 +65,53 @@ serve(async (req) => {
       );
     }
 
-    // Load traders once and map username -> id (case-insensitive).
-    const { data: traders, error: tradersErr } = await supabase
-      .from("traders")
-      .select("id, etoro_username")
-      .not("etoro_username", "is", null);
-
-    if (tradersErr) throw tradersErr;
-
-    const traderMap = new Map<string, string>();
-    for (const trader of traders ?? []) {
-      const key = String(trader.etoro_username ?? "").trim().toLowerCase();
-      if (key) traderMap.set(key, trader.id);
-    }
-
     let updatedPosts = 0;
     const updatedUsernames: string[] = [];
     const skippedUsernames: string[] = [];
+    const createdTraders: string[] = [];
+
+    const resolveTraderId = async (usernameKey: string): Promise<string | null> => {
+      if (!usernameKey) return null;
+
+      // Exact case-insensitive match.
+      const { data, error } = await supabase
+        .from('traders')
+        .select('id, etoro_username')
+        .ilike('etoro_username', usernameKey)
+        .limit(1);
+      if (error) throw error;
+      const first = data?.[0] as any;
+      if (first?.id) return String(first.id);
+
+      // Sometimes usernames are stored with a leading '@'
+      const { data: dataAt, error: errAt } = await supabase
+        .from('traders')
+        .select('id, etoro_username')
+        .ilike('etoro_username', `@${usernameKey}`)
+        .limit(1);
+      if (errAt) throw errAt;
+      const firstAt = dataAt?.[0] as any;
+      if (firstAt?.id) return String(firstAt.id);
+
+      return null;
+    };
 
     for (const username of usernames) {
-      const traderId = traderMap.get(username);
+      let traderId = await resolveTraderId(username);
+      if (!traderId && createMissingTraders && !dryRun) {
+        const extracted = extractEtoroUsername(username);
+        if (extracted) {
+          const { data: created, error: createErr } = await supabase
+            .from('traders')
+            .upsert({ etoro_username: extracted, display_name: extracted }, { onConflict: 'etoro_username' })
+            .select('id')
+            .single();
+          if (createErr) throw createErr;
+          traderId = created?.id ?? null;
+          if (traderId) createdTraders.push(extracted);
+        }
+      }
+
       if (!traderId) {
         skippedUsernames.push(username);
         continue;
@@ -96,7 +126,7 @@ serve(async (req) => {
         .from("posts")
         .update({ trader_id: traderId })
         .is("trader_id", null)
-        .ilike("etoro_username", username)
+        .or(`etoro_username.ilike.${username},etoro_username.ilike.@${username}`)
         .select("id");
 
       if (updateErr) throw updateErr;
@@ -113,6 +143,7 @@ serve(async (req) => {
         updated_posts: updatedPosts,
         updated_usernames: updatedUsernames,
         skipped_usernames: skippedUsernames,
+        created_traders: createdTraders,
         dry_run: dryRun,
         limit,
       }),

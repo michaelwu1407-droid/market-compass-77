@@ -2,6 +2,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { extractEtoroUsername, normalizeEtoroUsernameKey } from "../_shared/etoroUsername.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -9,11 +10,7 @@ const corsHeaders = {
 };
 
 function normalizeUsername(raw: unknown): string {
-  const s = String(raw ?? '')
-    .replace(/[\u200B-\u200D\uFEFF]/g, '')
-    .trim();
-  const withoutAt = s.startsWith('@') ? s.slice(1) : s;
-  return withoutAt.trim().toLowerCase();
+  return normalizeEtoroUsernameKey(raw);
 }
 
 function extractSymbols(text: string | undefined | null): string[] {
@@ -242,11 +239,8 @@ serve(async (req: Request) => {
       // Poster info: prefer existing DB values; only fill gaps from raw JSON.
       const owner = postObj?.post?.owner || {};
       let poster_username = row.etoro_username || owner?.username || 'unknown';
-      // Normalize the stored username so linking is consistent (strip leading @, trim).
-      const normalizedUsernameForStore = String(poster_username ?? '')
-        .replace(/[\u200B-\u200D\uFEFF]/g, '')
-        .trim()
-        .replace(/^@+/, '');
+      // Normalize the stored username so linking is consistent (strip leading @, urls, trim).
+      const normalizedUsernameForStore = extractEtoroUsername(poster_username);
       poster_username = normalizedUsernameForStore || poster_username;
       let poster_id = row.poster_id || owner?.id || null;
       let poster_first = row.poster_first

@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { extractEtoroUsername, normalizeEtoroUsernameKey } from "../_shared/etoroUsername.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -186,7 +187,7 @@ serve(async (req) => {
 
       const page = tradersPage || [];
       for (const t of page) {
-        const username = String((t as any)?.etoro_username ?? '').trim().toLowerCase();
+        const username = normalizeEtoroUsernameKey((t as any)?.etoro_username);
         if (!username) continue;
         traderMap.set(username, (t as any).id);
       }
@@ -257,8 +258,8 @@ serve(async (req) => {
       if (!post) { summary.missing++; continue; }
 
       const username = post.owner?.username;
-      const usernameLower = username?.toLowerCase();
-      const traderId = usernameLower ? traderMap.get(usernameLower) : null;
+      const usernameKey = normalizeEtoroUsernameKey(username);
+      const traderId = usernameKey ? traderMap.get(usernameKey) : null;
 
       if (traderId) trackedTraderPosts++; else unknownTraderPosts++;
 
@@ -270,7 +271,7 @@ serve(async (req) => {
       cleanText = cleanText.replace(/\n{3,}/g, '\n\n');
       // Poster info
       const poster = post.owner || {};
-      const poster_username = poster.username || 'unknown';
+      const poster_username = extractEtoroUsername(poster.username || 'unknown') || (poster.username || 'unknown');
       const poster_id = poster.id || null;
       const poster_first = poster.firstName || poster.first_name || poster.firstname || poster_username || '';
       const poster_last = poster.lastName || poster.last_name || poster.lastname || '';
