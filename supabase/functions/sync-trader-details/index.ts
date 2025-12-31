@@ -674,9 +674,18 @@ serve(async (req) => {
             .filter(Boolean);
 
           if (rows.length > 0) {
-            const { error: upsertTradesErr } = await supabase
-              .from('trades')
-              .upsert(rows as any, { onConflict: 'trader_id,position_id' });
+            const upsertWith = async (onConflict: string) =>
+              await supabase.from('trades').upsert(rows as any, { onConflict });
+
+            // Prefer composite key to avoid cross-trader overwrites, but fall back gracefully
+            // if the remote DB hasn't had the migration applied yet.
+            let { error: upsertTradesErr } = await upsertWith('trader_id,position_id');
+            if (
+              upsertTradesErr &&
+              /no unique|no exclusion|matching the ON CONFLICT/i.test(upsertTradesErr.message)
+            ) {
+              ({ error: upsertTradesErr } = await upsertWith('position_id'));
+            }
             if (upsertTradesErr) {
               const msg = `Error upserting trades for ${trader.etoro_username}: ${upsertTradesErr.message}`;
               await supabase.from('traders').update({ last_sync_error: msg }).eq('id', trader.id);
