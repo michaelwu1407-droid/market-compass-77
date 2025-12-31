@@ -63,7 +63,7 @@ $key = Read-ServiceRoleKey -Path $keyPath
 $base = "https://$ProjectRef.supabase.co".TrimEnd('/')
 $uri = "$base/functions/v1/fetch-daily-prices"
 if ($MaxAssets -gt 0) {
-  $uri = "$uri?max_assets=$MaxAssets"
+  $uri = "${uri}?max_assets=$MaxAssets"
 }
 
 $headers = @{
