@@ -14,6 +14,9 @@ param(
   [string]$JobType = 'trades',
 
   [Parameter(Mandatory = $false)]
+  [switch]$DebugLite,
+
+  [Parameter(Mandatory = $false)]
   [int]$TimeoutSec = 120
 )
 
@@ -60,12 +63,17 @@ $headers = @{
   'Content-Type' = 'application/json'
 }
 
-$body = @{ username = $Username; job_type = $JobType } | ConvertTo-Json
+$bodyObj = @{ username = $Username; job_type = $JobType }
+if ($DebugLite) { $bodyObj.debug_lite = $true }
+$body = $bodyObj | ConvertTo-Json
 
 Write-Host "Calling sync-trader-details..." -ForegroundColor Cyan
 Write-Host "- URL: $uri" -ForegroundColor Cyan
 Write-Host "- Key file: $keyPath" -ForegroundColor Cyan
 Write-Host "- username=$Username job_type=$JobType" -ForegroundColor Cyan
+if ($DebugLite) {
+  Write-Host "- debug_lite=true" -ForegroundColor Yellow
+}
 
 $resp = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $body -TimeoutSec $TimeoutSec
 "sync-trader-details response:"

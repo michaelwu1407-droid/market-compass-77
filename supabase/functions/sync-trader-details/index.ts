@@ -90,6 +90,34 @@ serve(async (req) => {
       }
     };
 
+    const fnv1a64 = (input: string): bigint => {
+      let hash = 0xcbf29ce484222325n;
+      const prime = 0x100000001b3n;
+      for (let i = 0; i < input.length; i++) {
+        hash ^= BigInt(input.charCodeAt(i));
+        hash = BigInt.asUintN(64, hash * prime);
+      }
+      return hash;
+    };
+
+    const stablePositionId = (raw: any): string | null => {
+      if (raw === null || raw === undefined) return null;
+
+      if (typeof raw === 'number' && Number.isFinite(raw)) {
+        return String(Math.trunc(raw));
+      }
+
+      const s = String(raw).trim();
+      if (!s) return null;
+
+      const asNum = Number(s);
+      if (Number.isFinite(asNum)) return String(Math.trunc(asNum));
+
+      const h = fnv1a64(s);
+      const positive = BigInt.asUintN(63, h);
+      return positive === 0n ? '1' : positive.toString();
+    };
+
     let syncedCount = 0;
     for (let i = 0; i < tradersToSync.length; i++) {
         const trader = tradersToSync[i];
@@ -632,15 +660,40 @@ serve(async (req) => {
             }
           };
 
+          const debugStats = {
+            raw_trades: Array.isArray(trades) ? trades.length : 0,
+            mapped_rows: 0,
+            skipped_missing_asset: 0,
+            skipped_invalid_action: 0,
+            skipped_missing_position_id: 0,
+            sample_raw: [] as any[],
+            sample_mapped: [] as any[],
+            missing_asset_symbols: [] as string[],
+          };
+
+          if (debug || debugLite) {
+            debugStats.sample_raw = (Array.isArray(trades) ? trades.slice(0, 3) : []);
+          }
+
           const rows = trades
             .map((t: any) => {
               const candidates = normalizeSymbol(t?.symbol || t?.ticker || t?.asset || t?.assetSymbol || t?.instrument);
               const assetId = candidates.map((c) => symbolToAssetId.get(c)).find(Boolean) || null;
-              if (!assetId) return null;
+              if (!assetId) {
+                debugStats.skipped_missing_asset++;
+                if ((debug || debugLite) && debugStats.missing_asset_symbols.length < 10) {
+                  const first = candidates?.[0] ? String(candidates[0]) : '';
+                  if (first) debugStats.missing_asset_symbols.push(first);
+                }
+                return null;
+              }
 
               const rawAction = (t?.action ?? t?.side ?? t?.type ?? '').toString().toLowerCase();
               const action = rawAction.includes('sell') ? 'sell' : (rawAction.includes('buy') ? 'buy' : null);
-              if (!action) return null;
+              if (!action) {
+                debugStats.skipped_invalid_action++;
+                return null;
+              }
 
               const executedAt =
                 toIso(t?.executed_at) ||
@@ -653,8 +706,11 @@ serve(async (req) => {
               const openDate = toIso(t?.open_date) || toIso(t?.openDate) || null;
 
               const positionId = t?.position_id ?? t?.positionId ?? t?.id ?? null;
-              const positionIdNum = positionId === null ? null : Number(positionId);
-              if (!Number.isFinite(positionIdNum)) return null;
+              const positionIdStable = stablePositionId(positionId);
+              if (!positionIdStable) {
+                debugStats.skipped_missing_position_id++;
+                return null;
+              }
 
               return {
                 trader_id: trader.id,
@@ -668,10 +724,15 @@ serve(async (req) => {
                 close_price: t?.close_price ?? t?.closePrice ?? null,
                 profit_loss_pct: t?.profit_loss_pct ?? t?.profitLossPct ?? t?.pnl_pct ?? t?.pnlPct ?? null,
                 open_date: openDate,
-                position_id: positionIdNum,
+                position_id: positionIdStable,
               };
             })
             .filter(Boolean);
+
+          debugStats.mapped_rows = rows.length;
+          if ((debug || debugLite) && rows.length > 0) {
+            debugStats.sample_mapped = (rows as any[]).slice(0, 3);
+          }
 
           if (rows.length > 0) {
             const upsertWith = async (onConflict: string) =>
@@ -696,6 +757,15 @@ serve(async (req) => {
 
           await supabase.from('traders').update({ details_synced_at: nowIso, last_sync_error: null }).eq('id', trader.id);
           syncedCount++;
+
+          if ((debug || debugLite) && username) {
+            return new Response(JSON.stringify({
+              success: true,
+              message: `Trades sync debug for ${trader.etoro_username}`,
+              trader_id: trader.id,
+              debug: debugStats,
+            }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+          }
           continue;
         }
 
