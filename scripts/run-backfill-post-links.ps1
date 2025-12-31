@@ -19,6 +19,9 @@ param(
   [switch]$DryRun,
 
   [Parameter(Mandatory = $false)]
+  [switch]$CreateMissingTraders,
+
+  [Parameter(Mandatory = $false)]
   [int]$TimeoutSec = 90
 )
 
@@ -85,6 +88,9 @@ Write-Host "- limit=$limitClamped offset=$offsetClamped max_pages=$pagesClamped 
 if ($DryRun) {
   Write-Host "- Note: fix-posts does not support dry-run; this flag has no effect." -ForegroundColor Yellow
 }
+if ($CreateMissingTraders) {
+  Write-Host "- create_missing_traders=true" -ForegroundColor Yellow
+}
 
 $currentOffset = $offsetClamped
 for ($page = 1; $page -le $pagesClamped; $page++) {
@@ -93,7 +99,8 @@ for ($page = 1; $page -le $pagesClamped; $page++) {
   } | ConvertTo-Json
 
   Write-Host "\nPage $page/$pagesClamped (offset=$currentOffset, limit=$limitClamped)" -ForegroundColor Cyan
-  $uri = "${uriBase}?only_missing_trader_id=true&limit=$limitClamped&offset=$currentOffset"
+  $createParam = if ($CreateMissingTraders) { '&create_missing_traders=true' } else { '' }
+  $uri = "${uriBase}?only_missing_trader_id=true&limit=$limitClamped&offset=$currentOffset$createParam"
   $resp = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $body -TimeoutSec $TimeoutSec
   $resp | ConvertTo-Json -Depth 10
 

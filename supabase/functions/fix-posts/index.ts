@@ -165,6 +165,7 @@ serve(async (req: Request) => {
     const offset = Math.max(0, Number(url.searchParams.get('offset') || '0'));
     const onlyMissingTraderId = (url.searchParams.get('only_missing_trader_id') || '').toLowerCase() === 'true'
       || (url.searchParams.get('mode') || '').toLowerCase() === 'backfill_links';
+    const createMissingTraders = (url.searchParams.get('create_missing_traders') || '').toLowerCase() === 'true';
 
     // Fetch a single batch of posts to avoid timeouts.
     let query = supabase
@@ -288,9 +289,26 @@ serve(async (req: Request) => {
 
       // Backfill trader_id if missing and we can resolve from username.
       const usernameKey = normalizeUsername(poster_username);
-      const resolvedTraderId = (!row.trader_id && usernameKey)
+      let resolvedTraderId = (!row.trader_id && usernameKey)
         ? (traderIdByUsername.get(usernameKey) ?? null)
         : null;
+
+      // If the post has a username but that trader row doesn't exist yet, optionally create a stub.
+      // This unblocks post->trader linking and lets downstream sync fill details later.
+      if (!resolvedTraderId && !row.trader_id && usernameKey && createMissingTraders) {
+        const extracted = extractEtoroUsername(poster_username);
+        const extractedKey = normalizeUsername(extracted);
+        if (extracted && extractedKey === usernameKey && extractedKey !== 'unknown') {
+          const { data: created, error: createErr } = await supabase
+            .from('traders')
+            .upsert({ etoro_username: extracted, display_name: extracted }, { onConflict: 'etoro_username' })
+            .select('id')
+            .single();
+          if (createErr) throw createErr;
+          resolvedTraderId = created?.id ?? null;
+          if (resolvedTraderId) traderIdByUsername.set(usernameKey, String(resolvedTraderId));
+        }
+      }
 
 
       const update: any = {
