@@ -19,6 +19,10 @@ import { cn } from '@/lib/utils';
 type Domain = 'discussion_feed' | 'trader_profiles' | 'stock_data';
 type SyncStatus = 'idle' | 'running' | 'queued' | 'error' | 'rate_limited' | 'completed';
 
+function getNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
 interface DomainStatus {
   domain: Domain;
   status: SyncStatus;
@@ -283,6 +287,10 @@ function DomainPanel({
     ? (status.items_completed / status.items_total) * 100 
     : 0;
 
+  const etaSeconds = domain === 'trader_profiles'
+    ? (getNumber((diagnostics as any)?.eta_seconds) ?? (status?.eta_seconds ?? null))
+    : (status?.eta_seconds ?? null);
+
   const borderColor = {
     pink: 'border-t-pink-500',
     blue: 'border-t-blue-500',
@@ -389,6 +397,38 @@ function DomainPanel({
             </div>
           </div>
         )}
+
+        {domain === 'trader_profiles' && diagnostics && (typeof diagnostics.pending === 'number' || typeof diagnostics.in_progress === 'number') && (
+          <div className="border rounded-lg overflow-hidden mb-4 bg-white dark:bg-zinc-900">
+            <div className="bg-muted/50 px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider border-b">
+              Sync Queue Summary
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-2 p-3 text-sm">
+              <div className="flex flex-col">
+                <span className="text-xs text-muted-foreground">Pending</span>
+                <span className="font-semibold tabular-nums">{diagnostics.pending ?? '-'}</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs text-muted-foreground">In Progress</span>
+                <span className="font-semibold tabular-nums">{diagnostics.in_progress ?? '-'}</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs text-muted-foreground">Completed</span>
+                <span className="font-semibold tabular-nums">{diagnostics.completed ?? '-'}</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs text-muted-foreground">Failed</span>
+                <span className="font-semibold tabular-nums">{diagnostics.failed ?? '-'}</span>
+              </div>
+              {diagnostics.oldest_pending && (
+                <div className="flex flex-col md:col-span-4">
+                  <span className="text-xs text-muted-foreground">Oldest Pending</span>
+                  <span className="font-semibold">{formatDistanceToNow(new Date(diagnostics.oldest_pending), { addSuffix: true })}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         {domain !== 'discussion_feed' && currentDatapoints.length > 0 && (
           <div className="border rounded-lg overflow-hidden">
             <div className="bg-muted/50 px-3 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">
@@ -414,7 +454,7 @@ function DomainPanel({
           </div>
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground uppercase tracking-wider">ETA</p>
-            <p className="font-medium">{formatEta(status?.eta_seconds || null)}</p>
+            <p className="font-medium">{formatEta(etaSeconds)}</p>
           </div>
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground uppercase tracking-wider">Next Scheduled</p>
@@ -847,6 +887,15 @@ export default function AdminSyncPage() {
   const domains: Domain[] = ['discussion_feed', 'trader_profiles', 'stock_data'];
 
   const getDatapointsToSyncForDomain = (domain: Domain): number | string => {
+    // trader_profiles uses the sync_jobs queue; the domain/datapoints tables may not reflect progress.
+    if (domain === 'trader_profiles') {
+      const pending = diagnostics?.sync_jobs?.pending;
+      const inProgress = diagnostics?.sync_jobs?.in_progress;
+      if (typeof pending === 'number' || typeof inProgress === 'number') {
+        return (typeof pending === 'number' ? pending : 0) + (typeof inProgress === 'number' ? inProgress : 0);
+      }
+    }
+
     const status = getStatusForDomain(domain);
     if (status?.items_total != null && status.items_total > 0) {
       const completed = status.items_completed || 0;
@@ -915,6 +964,7 @@ export default function AdminSyncPage() {
             {domains.map((domain) => {
               const config = DOMAIN_CONFIG[domain];
               const status = getStatusForDomain(domain);
+              const traderEtaSeconds = getNumber((diagnostics as any)?.sync_jobs?.eta_seconds);
 
               return (
                 <div key={domain} className="space-y-2">
@@ -925,7 +975,7 @@ export default function AdminSyncPage() {
                   </div>
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">ETA for sync</span>
-                    <span className="font-medium">{formatEta(status?.eta_seconds ?? null)}</span>
+                    <span className="font-medium">{formatEta(domain === 'trader_profiles' ? traderEtaSeconds : (status?.eta_seconds ?? null))}</span>
                   </div>
                 </div>
               );
@@ -957,6 +1007,7 @@ export default function AdminSyncPage() {
           rateLimit={getRateLimitForDomain('trader_profiles')}
           logs={getLogsForDomain('trader_profiles')}
           datapoints={getDatapointsForDomain('trader_profiles')}
+          diagnostics={diagnostics?.sync_jobs}
           onTriggerSync={handleSyncDomain}
           onClearLock={handleClearLock}
           onClearData={handleClearData}

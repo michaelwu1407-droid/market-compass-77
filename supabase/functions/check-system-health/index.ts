@@ -17,6 +17,25 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
+    const detectCompletionColumn = async (): Promise<string> => {
+      // Different deployments used different columns over time.
+      // Prefer an explicit completion timestamp when available.
+      const candidates = ['finished_at', 'completed_at', 'updated_at'] as const;
+      for (const col of candidates) {
+        const { data, error } = await supabase
+          .from('sync_jobs')
+          .select(col)
+          .eq('status', 'completed')
+          .not(col, 'is', null)
+          .order(col, { ascending: false, nullsFirst: false })
+          .limit(1);
+        if (!error && (data?.[0] as any)?.[col] != null) return col;
+      }
+      return 'updated_at';
+    };
+
+    const completionCol = await detectCompletionColumn();
+
     const health: any = {
       timestamp: new Date().toISOString(),
       system_status: 'checking',
@@ -42,9 +61,10 @@ serve(async (req) => {
 
     const { data: recentCompleted, error: recentError } = await supabase
       .from('sync_jobs')
-      .select('finished_at, trader_id')
+      .select(`${completionCol}, trader_id`)
       .eq('status', 'completed')
-      .order('finished_at', { ascending: false })
+      .not(completionCol, 'is', null)
+      .order(completionCol, { ascending: false, nullsFirst: false })
       .limit(1);
 
     const { data: oldestPending, error: oldestError } = await supabase
@@ -58,7 +78,8 @@ serve(async (req) => {
       traders: traderCount || 0,
       pending_jobs: pendingJobs || 0,
       completed_jobs: completedJobs || 0,
-      last_completed: recentCompleted?.[0]?.finished_at || null,
+      completion_column: completionCol,
+      last_completed: (recentCompleted?.[0] as any)?.[completionCol] || null,
       oldest_pending: oldestPending?.[0]?.created_at || null,
       errors: {
         traders: traderError?.message,
@@ -70,29 +91,38 @@ serve(async (req) => {
 
     // 2. Check if system is processing
     if (recentCompleted && recentCompleted.length > 0) {
-      const lastCompletedTime = new Date(recentCompleted[0].finished_at);
-      const minutesSinceLastCompletion = (Date.now() - lastCompletedTime.getTime()) / 1000 / 60;
-      
-      if (minutesSinceLastCompletion > 5) {
+      const lastCompletedRaw = (recentCompleted[0] as any)?.[completionCol];
+      const lastCompletedMs = lastCompletedRaw ? new Date(String(lastCompletedRaw)).getTime() : NaN;
+
+      if (Number.isFinite(lastCompletedMs)) {
+        const minutesSinceLastCompletion = (Date.now() - lastCompletedMs) / 1000 / 60;
+        if (minutesSinceLastCompletion > 10) {
+          health.issues.push({
+            severity: 'high',
+            issue: `No jobs completed in last ${Math.round(minutesSinceLastCompletion)} minutes`,
+            possible_causes: [
+              'sync-worker schedule not running',
+              'dispatch-sync-jobs failing',
+              'process-sync-job failing',
+              'Upstream API errors'
+            ]
+          });
+        }
+      } else {
         health.issues.push({
-          severity: 'high',
-          issue: `No jobs completed in last ${Math.round(minutesSinceLastCompletion)} minutes`,
-          possible_causes: [
-            'sync-worker GitHub Actions workflow not running',
-            'dispatch-sync-jobs failing',
-            'process-sync-job failing',
-            'Bullaware API errors'
-          ]
+          severity: 'medium',
+          issue: `Cannot parse last completed timestamp from column '${completionCol}'`,
+          note: 'Jobs may still be completing; verify via smoke script or sync_logs.'
         });
       }
     } else {
       health.issues.push({
         severity: 'critical',
-        issue: 'No jobs have ever completed',
+        issue: 'No completed jobs found',
         possible_causes: [
           'System has never successfully processed a job',
           'All jobs are failing',
-          'sync-worker not running'
+          'Scheduler not running'
         ]
       });
     }
@@ -150,11 +180,19 @@ serve(async (req) => {
         });
       }
 
-      // Calculate processing rate
-      const jobsPerHour = (completedJobs || 0) > 0 ? 
-        Math.round((completedJobs || 0) / Math.max(1, hoursOld)) : 0;
+      // Calculate processing rate from recent completions (more meaningful than lifetime totals)
+      const sinceIso = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+      const { count: completedRecent } = await supabase
+        .from('sync_jobs')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'completed')
+        .not(completionCol, 'is', null)
+        .gt(completionCol, sinceIso);
+
+      const jobsPerHour = Math.round(((completedRecent || 0) / 30) * 60);
       
       health.details.processing_rate = {
+        completed_last_30_min: completedRecent || 0,
         jobs_per_hour: jobsPerHour,
         estimated_time_to_clear: (pendingJobs || 0) > 0 && jobsPerHour > 0 ?
           `${Math.round((pendingJobs || 0) / jobsPerHour)} hours` : 'unknown'

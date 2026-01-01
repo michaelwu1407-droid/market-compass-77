@@ -147,6 +147,47 @@ serve(async (req: Request) => {
       failed: statusCounts.failed || 0
     };
 
+    // Processing rate + ETA (based on recent completions)
+    const detectCompletionColumn = async (): Promise<string> => {
+      const candidates = ['finished_at', 'completed_at', 'updated_at'] as const;
+      for (const col of candidates) {
+        const { data, error } = await supabase
+          .from('sync_jobs')
+          .select(col)
+          .eq('status', 'completed')
+          .not(col, 'is', null)
+          .order(col, { ascending: false, nullsFirst: false })
+          .limit(1);
+        if (!error && (data?.[0] as any)?.[col] != null) return col;
+      }
+      return 'updated_at';
+    };
+
+    try {
+      const completionCol = await detectCompletionColumn();
+      const sinceIso = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+      const { count: completedRecent } = await supabase
+        .from('sync_jobs')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'completed')
+        .not(completionCol, 'is', null)
+        .gt(completionCol, sinceIso);
+
+      const jobsPerHour = Math.round(((completedRecent || 0) / 30) * 60);
+      const queueRemaining = (diagnostics.sync_jobs.pending || 0) + (diagnostics.sync_jobs.in_progress || 0);
+      const etaSeconds = jobsPerHour > 0 ? Math.round((queueRemaining / jobsPerHour) * 3600) : null;
+
+      diagnostics.sync_jobs.processing_rate = {
+        completion_column: completionCol,
+        completed_last_30_min: completedRecent || 0,
+        jobs_per_hour: jobsPerHour,
+      };
+      diagnostics.sync_jobs.queue_remaining = queueRemaining;
+      diagnostics.sync_jobs.eta_seconds = etaSeconds;
+    } catch (e: any) {
+      diagnostics.sync_jobs.processing_rate_error = e.message;
+    }
+
     // Get recent errors
     const recentErrors = allJobs
       .filter((j: any) => j.status === 'failed' && j.error_message)
