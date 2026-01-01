@@ -60,7 +60,7 @@ Since Supabase pg_cron requires superuser access, use a free external cron servi
 
 8. **Create sixth cron job (Daily Prices):**
     - **Title:** Fetch Daily Prices
-    - **Address:** `https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/fetch-daily-prices`
+   - **Address:** `https://xgvaibxxiwfraklfbwey.supabase.co/functions/v1/fetch-daily-prices?max_assets=250`
     - **Schedule:** Once daily (recommended: after market close in UTC, adjust as needed)
     - **Request method:** POST
     - **Request headers:**
@@ -68,6 +68,8 @@ Since Supabase pg_cron requires superuser access, use a free external cron servi
        Content-Type: application/json
        ```
     - **Request body:** `{}`
+
+   Note: `fetch-daily-prices` is intentionally batched by default to avoid Edge compute limits; adjust `max_assets` if you want a bigger/smaller batch.
 
 9. **Create seventh cron job (Daily Movers):**
     - **Title:** Scrape Daily Movers

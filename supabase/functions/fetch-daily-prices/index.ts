@@ -54,11 +54,11 @@ async function fetchYahooQuotes(symbols: string[]): Promise<Map<string, YahooQuo
   // Yahoo's v7 quote endpoint is returning 401 from the Supabase edge runtime.
   // The v8 chart endpoint is currently reachable (HTTP 200) and provides both current price
   // and previous close in `meta`, but it requires per-symbol requests.
-  const concurrency = 5;
+  const concurrency = 8;
 
   const fetchOne = async (symbol: string): Promise<void> => {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10_000);
+    const timeoutId = setTimeout(() => controller.abort(), 6_000);
 
     try {
       const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
@@ -263,6 +263,8 @@ serve(async (req) => {
   }
 
   try {
+    const DEFAULT_MAX_ASSETS = 250;
+    const DEFAULT_TIME_BUDGET_MS = 55_000;
     const urlObj = new URL(req.url);
 
     let body: any = {};
@@ -295,12 +297,25 @@ serve(async (req) => {
       body?.dry_run === true ||
       body?.dryRun === true;
 
+    const timeBudgetMsRaw =
+      urlObj.searchParams.get('time_budget_ms') ??
+      body?.time_budget_ms ??
+      body?.timeBudgetMs;
+    const timeBudgetMs = Math.min(
+      110_000,
+      Math.max(
+        5_000,
+        Number.parseInt(String(timeBudgetMsRaw ?? DEFAULT_TIME_BUDGET_MS), 10) || DEFAULT_TIME_BUDGET_MS,
+      ),
+    );
+    const startedAtMs = Date.now();
+
     const maxAssetsRaw =
       urlObj.searchParams.get('max_assets') ??
       body?.max_assets ??
       body?.maxAssets;
     const maxAssets = maxAssetsRaw === undefined || maxAssetsRaw === null
-      ? null
+      ? DEFAULT_MAX_ASSETS
       : Math.max(0, Number.parseInt(String(maxAssetsRaw), 10) || 0);
 
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
@@ -493,10 +508,10 @@ serve(async (req) => {
 
     console.log(`[fetch-daily-prices] Found ${assets.length} assets to update`);
 
-    const assetsToProcess = maxAssets !== null ? assets.slice(0, maxAssets) : assets;
-    if (maxAssets !== null) {
-      console.log(`[fetch-daily-prices] Limiting to ${assetsToProcess.length} assets (max_assets=${maxAssets})`);
-    }
+    const assetsToProcess = maxAssets > 0 ? assets.slice(0, maxAssets) : assets;
+    console.log(
+      `[fetch-daily-prices] Limiting to ${assetsToProcess.length} assets (max_assets=${maxAssets})`,
+    );
 
     // Batch quotes to reduce Yahoo calls and stay within edge runtime limits
     const batchSize = 25;
@@ -504,10 +519,16 @@ serve(async (req) => {
     let totalFailed = 0;
     let yahooUpdated = 0;
     let bullawareUpdated = 0;
+    let processedAssets = 0;
+    let partial = false;
 
     const failedAssets: Array<{ symbol: string; candidates: string[]; reason: string }> = [];
 
     for (let i = 0; i < assetsToProcess.length; i += batchSize) {
+      if (Date.now() - startedAtMs > timeBudgetMs) {
+        partial = true;
+        break;
+      }
       if (debugFailed && dryRun && failedLimit > 0 && failedAssets.length >= failedLimit) {
         break;
       }
@@ -518,7 +539,8 @@ serve(async (req) => {
       const allCandidates: string[] = [];
 
       for (const asset of batch) {
-        const candidates = yahooCandidatesForAsset(asset);
+        // Prevent request fanout from exploding: each candidate becomes a Yahoo call.
+        const candidates = yahooCandidatesForAsset(asset).slice(0, 2);
         assetToCandidates.set(asset.id, candidates);
         allCandidates.push(...candidates);
       }
@@ -533,6 +555,10 @@ serve(async (req) => {
       const bullawareQuotes = await fetchBullawareQuotes(batch.map((a) => a.symbol));
       
       for (const asset of batch) {
+        if (Date.now() - startedAtMs > timeBudgetMs) {
+          partial = true;
+          break;
+        }
         const candidates = assetToCandidates.get(asset.id) || [];
         const quoteSymbol = candidates.map((c) => c.toUpperCase()).find((c) => quotes.has(c));
         const quote = quoteSymbol ? quotes.get(quoteSymbol) : undefined;
@@ -610,6 +636,12 @@ serve(async (req) => {
             });
           }
         }
+
+        processedAssets++;
+      }
+
+      if (partial) {
+        break;
       }
       
       // Light rate limiting - wait between batches
@@ -623,9 +655,14 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true,
+        partial,
         updated: totalUpdated,
         failed: totalFailed,
         total: assetsToProcess.length,
+        processed_assets: processedAssets,
+        elapsed_ms: Date.now() - startedAtMs,
+        time_budget_ms: timeBudgetMs,
+        max_assets: maxAssets,
         yahoo_updated: yahooUpdated,
         bullaware_updated: bullawareUpdated,
         ...(debugFailed ? { failed_assets: failedAssets } : {}),
