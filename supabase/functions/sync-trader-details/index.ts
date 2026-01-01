@@ -6,6 +6,20 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+const coerceNumber = (v: unknown): number | null => {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string') {
+    const t = v.trim();
+    if (!t) return null;
+    const cleaned = t
+      .replace(/[%,$\s]/g, '')
+      .replace(/(\d),(\d{3})(\b)/g, '$1$2');
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+};
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -279,17 +293,6 @@ serve(async (req) => {
             }
           };
 
-          const coerceNumber = (v: any): number | null => {
-            if (typeof v === 'number' && Number.isFinite(v)) return v;
-            if (typeof v === 'string') {
-              const t = v.trim();
-              if (!t) return null;
-              const n = Number(t);
-              return Number.isFinite(n) ? n : null;
-            }
-            return null;
-          };
-
           const traderId = trader.id;
 
           // 1) Monthly performance (trader_performance)
@@ -551,18 +554,6 @@ serve(async (req) => {
             last_sync_error: null,
           };
 
-          // If BullAware provides these returns via metrics endpoint, persist them.
-          const coerceNumber = (v: any): number | null => {
-            if (typeof v === 'number' && Number.isFinite(v)) return v;
-            if (typeof v === 'string') {
-              const t = v.trim();
-              if (!t) return null;
-              const n = Number(t);
-              return Number.isFinite(n) ? n : null;
-            }
-            return null;
-          };
-
           const ret1m = coerceNumber(m?.return_1m ?? m?.return1m ?? m?.gain1m ?? m?.gain_1m ?? m?.oneMonthReturn);
           if (ret1m !== null) update.return_1m = ret1m;
           const retYtd = coerceNumber(m?.return_ytd ?? m?.returnYtd ?? m?.ytdReturn ?? m?.gain_ytd ?? m?.gainYtd);
@@ -791,20 +782,6 @@ serve(async (req) => {
           continue;
         }
 
-        const coerceNumber = (v: any): number | null => {
-          if (typeof v === 'number' && Number.isFinite(v)) return v;
-          if (typeof v === 'string') {
-            const t = v.trim();
-            if (!t) return null;
-            // Handle "$1,234.56", "12.3%", and other loose formats.
-            const cleaned = t
-              .replace(/[%,$\s]/g, '')
-              .replace(/(\d),(\d{3})(\b)/g, '$1$2');
-            const n = Number(cleaned);
-            return Number.isFinite(n) ? n : null;
-          }
-          return null;
-        };
 
         const extractSymbol = (h: any): any =>
           h?.symbol ??

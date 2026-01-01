@@ -485,6 +485,9 @@ export default function TraderDetailPage() {
             performance={performance || []}
             gain12m={trader.gain_12m}
             gain24m={trader.gain_24m}
+            return1m={trader.return_1m}
+            returnYtd={trader.return_ytd}
+            return5y={trader.return_5y}
           />
 
           {/* Monthly Performance Chart */}
@@ -597,6 +600,9 @@ export default function TraderDetailPage() {
             performance={performance || []}
             gain12m={trader.gain_12m}
             gain24m={trader.gain_24m}
+            return1m={trader.return_1m}
+            returnYtd={trader.return_ytd}
+            return5y={trader.return_5y}
           />
 
           {/* Factsheet */}

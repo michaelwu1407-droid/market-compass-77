@@ -7,7 +7,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // Unique build fingerprint for deployment verification
-const BUILD_ID = "BUILD_2025_12_28_0209_SYD";
+const BUILD_ID = "BUILD_2026_01_01_0929_WORKER_STATUS";
 console.log("SYNC_DIAGNOSTICS_BUILD_ID", BUILD_ID);
 
 const corsHeaders = {
@@ -249,25 +249,42 @@ serve(async (req: Request) => {
   try {
     // Try to check if sync-worker was recently invoked
     // We can't directly query pg_cron, but we can check if jobs are being processed
-    const { data: recentCompleted } = await supabase
+    const completionCol: string = diagnostics?.sync_jobs?.completion_column || 'finished_at';
+
+    const { data: recentCompleted, error: recentCompletedErr } = await supabase
       .from('sync_jobs')
-      .select('finished_at')
+      .select(`${completionCol}`)
       .eq('status', 'completed')
-      .order('finished_at', { ascending: false })
+      .not(completionCol, 'is', null)
+      .order(completionCol, { ascending: false, nullsFirst: false })
       .limit(1);
 
-    if (recentCompleted && recentCompleted.length > 0) {
-      const lastCompleted = new Date(recentCompleted[0].finished_at);
-      const minutesAgo = (Date.now() - lastCompleted.getTime()) / 1000 / 60;
+    const completedLast30Min = diagnostics?.sync_jobs?.processing_rate?.completed_last_30_min ?? 0;
+    const inProgress = diagnostics?.sync_jobs?.in_progress ?? 0;
+
+    if (recentCompletedErr) {
       diagnostics.worker_status = {
-        last_job_completed: recentCompleted[0].finished_at,
-        minutes_ago: Math.round(minutesAgo),
-        appears_active: minutesAgo < 10 // If job completed in last 10 minutes, worker seems active
+        appears_active: completedLast30Min > 0 || inProgress > 0,
+        completion_column: completionCol,
+        error: recentCompletedErr.message,
+      };
+    } else if (recentCompleted && recentCompleted.length > 0) {
+      const ts = (recentCompleted[0] as any)[completionCol];
+      const lastCompleted = new Date(ts);
+      const minutesAgo = (Date.now() - lastCompleted.getTime()) / 1000 / 60;
+      const appearsActive = (Number.isFinite(minutesAgo) && minutesAgo < 10) || completedLast30Min > 0 || inProgress > 0;
+
+      diagnostics.worker_status = {
+        last_job_completed: ts,
+        minutes_ago: Number.isFinite(minutesAgo) ? Math.round(minutesAgo) : null,
+        appears_active: appearsActive,
+        completion_column: completionCol,
       };
     } else {
       diagnostics.worker_status = {
-        appears_active: false,
-        reason: "No completed jobs found"
+        appears_active: completedLast30Min > 0 || inProgress > 0,
+        completion_column: completionCol,
+        reason: "No completed jobs found with a non-null completion timestamp",
       };
     }
   } catch (e: any) {

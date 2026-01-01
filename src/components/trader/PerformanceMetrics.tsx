@@ -5,9 +5,12 @@ interface PerformanceMetricsProps {
   performance: Array<{ year: number; month: number; return_pct: number | null }>;
   gain12m?: number | null;
   gain24m?: number | null;
+  return1m?: number | null;
+  returnYtd?: number | null;
+  return5y?: number | null;
 }
 
-export function PerformanceMetrics({ performance, gain12m, gain24m }: PerformanceMetricsProps) {
+export function PerformanceMetrics({ performance, gain12m, gain24m, return1m, returnYtd, return5y }: PerformanceMetricsProps) {
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth() + 1;
@@ -22,11 +25,13 @@ export function PerformanceMetrics({ performance, gain12m, gain24m }: Performanc
     const monthReturn = p.return_pct || 0;
     return acc * (1 + monthReturn / 100);
   }, 1);
-  const ytdPct = hasYtdData ? (ytdReturn - 1) * 100 : null;
+  const ytdPctFromMonthly = hasYtdData ? (ytdReturn - 1) * 100 : null;
+  const ytdPct = returnYtd ?? ytdPctFromMonthly;
 
   // Calculate this month's return - only if we have data for this month
   const thisMonth = performance.find(p => p.year === currentYear && p.month === currentMonth);
   const thisMonthReturn = thisMonth?.return_pct ?? null;
+  const oneMonthReturn = return1m ?? thisMonthReturn;
 
   // Calculate 5Y (if we have enough data)
   const sortedPerf = [...performance].sort((a, b) => {
@@ -36,7 +41,8 @@ export function PerformanceMetrics({ performance, gain12m, gain24m }: Performanc
   
   const last60Months = sortedPerf.slice(0, 60);
   const calc5YReturn = last60Months.reduce((acc, p) => acc * (1 + (p.return_pct || 0) / 100), 1);
-  const fiveYearPct = last60Months.length >= 60 ? (calc5YReturn - 1) * 100 : null;
+  const fiveYearPctFromMonthly = last60Months.length >= 60 ? (calc5YReturn - 1) * 100 : null;
+  const fiveYearPct = return5y ?? fiveYearPctFromMonthly;
 
   // Use gain_12m for annualized return
   const annualizedReturn = gain12m;
@@ -74,7 +80,7 @@ export function PerformanceMetrics({ performance, gain12m, gain24m }: Performanc
 
   return (
     <div className="grid grid-cols-3 md:grid-cols-6 gap-4 p-4 bg-secondary/30 rounded-lg">
-      <MetricCard label="This Month" value={thisMonthReturn} />
+      <MetricCard label="1M" value={oneMonthReturn} />
       <MetricCard label="YTD" value={ytdPct} />
       <MetricCard label="1 Year" value={gain12m ?? null} />
       <MetricCard label="2 Years" value={gain24m ?? null} />
