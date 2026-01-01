@@ -20,39 +20,91 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    // Get all jobs with details
-    const { data: allJobs, error: allError } = await supabase
-      .from('sync_jobs')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(50);
+    // IMPORTANT: PostgREST caps returned rows (commonly 1000). Use count=exact for totals.
+    const [
+      { count: pendingCount, error: pendingCountErr },
+      { count: inProgressCount, error: inProgressCountErr },
+      { count: completedCount, error: completedCountErr },
+      { count: failedCount, error: failedCountErr },
+    ] = await Promise.all([
+      supabase.from('sync_jobs').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+      supabase.from('sync_jobs').select('*', { count: 'exact', head: true }).in('status', ['in_progress', 'running']),
+      supabase.from('sync_jobs').select('*', { count: 'exact', head: true }).eq('status', 'completed'),
+      supabase.from('sync_jobs').select('*', { count: 'exact', head: true }).eq('status', 'failed'),
+    ]);
 
-    // Get pending jobs specifically
+    const counts = {
+      pending: pendingCount || 0,
+      in_progress: inProgressCount || 0,
+      completed: completedCount || 0,
+      failed: failedCount || 0,
+    };
+
+    // Samples (bounded)
+    const { data: recentJobs, error: recentErr } = await supabase
+      .from('sync_jobs')
+      .select('id, status, trader_id, job_type, created_at, started_at, finished_at, retry_count, error_message')
+      .order('created_at', { ascending: false })
+      .limit(25);
+
     const { data: pendingJobs, error: pendingError } = await supabase
       .from('sync_jobs')
-      .select('id, status, trader_id, created_at, started_at')
+      .select('id, status, trader_id, job_type, created_at, started_at, retry_count')
       .eq('status', 'pending')
+      .order('created_at', { ascending: true })
       .limit(10);
 
-    // Get status counts
-    const { data: statusCounts, error: statusError } = await supabase
+    const { data: failedSample, error: failedSampleErr } = await supabase
       .from('sync_jobs')
-      .select('status');
+      .select('id, trader_id, job_type, created_at, finished_at, retry_count, error_message')
+      .eq('status', 'failed')
+      .order('created_at', { ascending: false })
+      .limit(25);
 
-    const counts = statusCounts?.reduce((acc: any, job: any) => {
-      acc[job.status] = (acc[job.status] || 0) + 1;
-      return acc;
-    }, {}) || {};
+    // Top error messages (best-effort, limited scan)
+    const topErrors: Array<{ error: string; count: number }> = [];
+    if (failedSample && failedSample.length > 0) {
+      const normalize = (s: any): string => {
+        const t = String(s || '').trim();
+        if (!t) return 'EMPTY';
+        // normalize obvious noisy parts
+        return t
+          .replace(/\s+/g, ' ')
+          .replace(/\bRay ID:\s*[a-z0-9]+\b/gi, 'Ray ID: <redacted>')
+          .slice(0, 240);
+      };
+
+      const countsMap = new Map<string, number>();
+      for (const r of failedSample) {
+        const key = normalize((r as any).error_message);
+        countsMap.set(key, (countsMap.get(key) || 0) + 1);
+      }
+
+      const sorted = Array.from(countsMap.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10);
+      for (const [error, count] of sorted) topErrors.push({ error, count });
+    }
 
     return new Response(JSON.stringify({
-      total_jobs: allJobs?.length || 0,
-      status_counts: counts,
+      totals: {
+        total_jobs: (counts.pending + counts.in_progress + counts.completed + counts.failed),
+        status_counts: counts,
+      },
+      top_errors_sample_window: topErrors,
       pending_jobs_sample: pendingJobs || [],
-      all_jobs_sample: allJobs?.slice(0, 5) || [],
+      failed_jobs_sample: failedSample || [],
+      recent_jobs_sample: recentJobs || [],
       errors: {
-        all: allError?.message,
+        counts: {
+          pending: pendingCountErr?.message,
+          in_progress: inProgressCountErr?.message,
+          completed: completedCountErr?.message,
+          failed: failedCountErr?.message,
+        },
+        recent: recentErr?.message,
         pending: pendingError?.message,
-        status: statusError?.message
+        failed_sample: failedSampleErr?.message,
       }
     }, null, 2), {
       headers: { ...corsHeaders, "Content-Type": "application/json" }
