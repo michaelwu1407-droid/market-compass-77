@@ -112,6 +112,8 @@ serve(async (req) => {
   // Dry-run mode: ?dry_run=1 or header 'x-dry-run: 1'
   const url = new URL(req.url);
   const dryRun = url.searchParams.get('dry_run') === '1' || req.headers.get('x-dry-run') === '1';
+  const take = Math.max(1, Math.min(Number(url.searchParams.get('take') ?? 200), 200));
+  const offset = Math.max(0, Math.min(Number(url.searchParams.get('offset') ?? 0), 5000));
 
   try {
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
@@ -121,21 +123,78 @@ serve(async (req) => {
 
     console.log('Fetching eToro popular investors feed...');
 
-    // Increase `take` to fetch more posts and be resilient to API changes
-    const etoroApiUrl = 'https://www.etoro.com/api/edm-streams/v1/feed/popularInvestors?take=200&offset=0&reactionsPageSize=20&badgesExperimentIsEnabled=false&client_request_id=91ee987f-1f29-4bca-873e-d78aae9bd7f4';
+    const etoroApiUrl = `https://www.etoro.com/api/edm-streams/v1/feed/popularInvestors?take=${encodeURIComponent(String(take))}&offset=${encodeURIComponent(String(offset))}&reactionsPageSize=20&badgesExperimentIsEnabled=false&client_request_id=91ee987f-1f29-4bca-873e-d78aae9bd7f4`;
     
-    const response = await fetch(etoroApiUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json',
-      }
-    });
+    const fetchEtoro = async (): Promise<{ response: Response; raw: string }> => {
+      const response = await fetch(etoroApiUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json',
+        },
+      });
 
-    const raw = await response.text().catch(() => '');
+      const raw = await response.text().catch(() => '');
+      return { response, raw };
+    };
+
+    let response: Response | null = null;
+    let raw = '';
+    let lastStatus: number | null = null;
+    let lastStatusText: string | null = null;
+
+    // Retry a few times for transient errors (429/5xx) or network hiccups.
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const r = await fetchEtoro();
+        response = r.response;
+        raw = r.raw;
+        lastStatus = response.status;
+        lastStatusText = response.statusText;
+
+        const transient = response.status === 429 || (response.status >= 500 && response.status <= 599);
+        if (response.ok || !transient || attempt === 3) break;
+      } catch (e) {
+        console.warn(`[scrape-posts] eToro fetch attempt ${attempt} failed:`, e);
+        if (attempt === 3) {
+          return new Response(
+            JSON.stringify({
+              success: false,
+              error: 'eToro fetch failed after retries',
+              take,
+              offset,
+            }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+          );
+        }
+      }
+
+      // Backoff between retries.
+      await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+    }
+
+    if (!response) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'eToro fetch did not return a response',
+          take,
+          offset,
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
+    }
 
     if (!response.ok) {
       console.error('eToro non-ok response body:', raw);
-      throw new Error(`eToro API error: ${response.status} ${response.statusText}`);
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: `eToro API error: ${lastStatus} ${lastStatusText}`,
+          take,
+          offset,
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
     }
 
     let data: any = {};
@@ -143,7 +202,15 @@ serve(async (req) => {
       data = raw ? JSON.parse(raw) : {};
     } catch (e) {
       console.error('Failed to parse eToro response JSON, raw:', raw);
-      throw new Error('Failed to parse eToro API response as JSON');
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'Failed to parse eToro API response as JSON',
+          take,
+          offset,
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
     }
 
     const discussions = data.discussions || [];

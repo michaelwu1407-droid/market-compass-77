@@ -44,6 +44,93 @@ const countryFlags: Record<string, string> = {
   JP: '🇯🇵',
 };
 
+type DrawdownPeriod = {
+  start_date: string;
+  end_date?: string | null;
+  depth_pct: number;
+  recovery_days?: number | null;
+};
+
+function computeDrawdownsFromEquity(points: TraderEquityPoint[] | null | undefined): DrawdownPeriod[] {
+  if (!points || points.length < 2) return [];
+
+  const sorted = [...points]
+    .filter((p) => p?.date)
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+  if (sorted.length < 2) return [];
+
+  const toIndex = (pct: number) => 1 + pct / 100;
+
+  let peakIndex = Number.NEGATIVE_INFINITY;
+  let peakDate: string | null = null;
+
+  let inDrawdown = false;
+  let ddStartDate: string | null = null;
+  let troughIndex = Number.POSITIVE_INFINITY;
+  let troughDate: string | null = null;
+
+  const drawdowns: DrawdownPeriod[] = [];
+
+  for (const point of sorted) {
+    const r = point.equity_value;
+    if (r === null || r === undefined || !Number.isFinite(r)) continue;
+
+    const idx = toIndex(r);
+    if (!Number.isFinite(idx) || idx <= 0) continue;
+
+    if (idx >= peakIndex) {
+      if (inDrawdown && ddStartDate && troughDate && peakIndex !== Number.NEGATIVE_INFINITY) {
+        const depthPct = (troughIndex / peakIndex - 1) * 100;
+        const recoveryDays = Math.max(
+          0,
+          Math.round((new Date(point.date).getTime() - new Date(troughDate).getTime()) / (1000 * 60 * 60 * 24))
+        );
+        drawdowns.push({
+          start_date: ddStartDate,
+          end_date: point.date,
+          depth_pct: depthPct,
+          recovery_days: recoveryDays,
+        });
+      }
+
+      peakIndex = idx;
+      peakDate = point.date;
+      inDrawdown = false;
+      ddStartDate = null;
+      troughIndex = Number.POSITIVE_INFINITY;
+      troughDate = null;
+      continue;
+    }
+
+    if (!inDrawdown && peakDate) {
+      inDrawdown = true;
+      ddStartDate = peakDate;
+      troughIndex = idx;
+      troughDate = point.date;
+    }
+
+    if (inDrawdown && idx < troughIndex) {
+      troughIndex = idx;
+      troughDate = point.date;
+    }
+  }
+
+  if (inDrawdown && ddStartDate && troughDate && peakIndex !== Number.NEGATIVE_INFINITY) {
+    const depthPct = (troughIndex / peakIndex - 1) * 100;
+    drawdowns.push({
+      start_date: ddStartDate,
+      end_date: null,
+      depth_pct: depthPct,
+      recovery_days: null,
+    });
+  }
+
+  return drawdowns
+    .sort((a, b) => Math.abs(b.depth_pct) - Math.abs(a.depth_pct))
+    .slice(0, 10);
+}
+
 export default function TraderDetailPage() {
   const { traderId } = useParams();
   const navigate = useNavigate();
@@ -125,92 +212,7 @@ export default function TraderDetailPage() {
     return `${value.toFixed(digits)}%`;
   };
 
-  type DrawdownPeriod = {
-    start_date: string;
-    end_date?: string | null;
-    depth_pct: number;
-    recovery_days?: number | null;
-  };
-
-  const computeDrawdownsFromEquity = (points: TraderEquityPoint[] | null | undefined): DrawdownPeriod[] => {
-    if (!points || points.length < 2) return [];
-
-    const sorted = [...points]
-      .filter((p) => p?.date)
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-    if (sorted.length < 2) return [];
-
-    const toIndex = (pct: number) => 1 + pct / 100;
-
-    let peakIndex = Number.NEGATIVE_INFINITY;
-    let peakDate: string | null = null;
-
-    let inDrawdown = false;
-    let ddStartDate: string | null = null;
-    let troughIndex = Number.POSITIVE_INFINITY;
-    let troughDate: string | null = null;
-
-    const drawdowns: DrawdownPeriod[] = [];
-
-    for (const point of sorted) {
-      const r = point.equity_value;
-      if (r === null || r === undefined || !Number.isFinite(r)) continue;
-
-      const idx = toIndex(r);
-      if (!Number.isFinite(idx) || idx <= 0) continue;
-
-      if (idx >= peakIndex) {
-        if (inDrawdown && ddStartDate && troughDate && peakIndex !== Number.NEGATIVE_INFINITY) {
-          const depthPct = (troughIndex / peakIndex - 1) * 100;
-          const recoveryDays = Math.max(
-            0,
-            Math.round((new Date(point.date).getTime() - new Date(troughDate).getTime()) / (1000 * 60 * 60 * 24))
-          );
-          drawdowns.push({
-            start_date: ddStartDate,
-            end_date: point.date,
-            depth_pct: depthPct,
-            recovery_days: recoveryDays,
-          });
-        }
-
-        peakIndex = idx;
-        peakDate = point.date;
-        inDrawdown = false;
-        ddStartDate = null;
-        troughIndex = Number.POSITIVE_INFINITY;
-        troughDate = null;
-        continue;
-      }
-
-      if (!inDrawdown && peakDate) {
-        inDrawdown = true;
-        ddStartDate = peakDate;
-        troughIndex = idx;
-        troughDate = point.date;
-      }
-
-      if (inDrawdown && idx < troughIndex) {
-        troughIndex = idx;
-        troughDate = point.date;
-      }
-    }
-
-    if (inDrawdown && ddStartDate && troughDate && peakIndex !== Number.NEGATIVE_INFINITY) {
-      const depthPct = (troughIndex / peakIndex - 1) * 100;
-      drawdowns.push({
-        start_date: ddStartDate,
-        end_date: null,
-        depth_pct: depthPct,
-        recovery_days: null,
-      });
-    }
-
-    return drawdowns
-      .sort((a, b) => Math.abs(b.depth_pct) - Math.abs(a.depth_pct))
-      .slice(0, 10);
-  };
+  const computedDrawdowns = useMemo(() => computeDrawdownsFromEquity(equityHistory), [equityHistory]);
 
   if (traderLoading) {
     return (
@@ -264,8 +266,6 @@ export default function TraderDetailPage() {
   const gain12m = trader.gain_12m ?? null;
   const gain24m = trader.gain_24m ?? null;
   const tags = trader.tags || [];
-
-  const computedDrawdowns = useMemo(() => computeDrawdownsFromEquity(equityHistory), [equityHistory]);
 
   return (
     <div className="max-w-5xl mx-auto">

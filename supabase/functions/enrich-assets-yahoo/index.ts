@@ -11,6 +11,51 @@ const BATCH_SIZE = 50;
 const DELAY_MS = 500;
 const UNKNOWN_RETRY_DAYS = 7;
 
+function clampInt(raw: unknown, min: number, max: number, fallback: number): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.min(max, Math.trunc(value)));
+}
+
+function missingColumnNameFromError(error: unknown): string | null {
+  const msg = (error as any)?.message || (error as any)?.details || String(error || '');
+  if (typeof msg !== 'string') return null;
+  // Examples:
+  // - column assets.avg_volume does not exist
+  // - column "avg_volume" does not exist
+  const m = msg.match(/column\s+(?:[\w\."]+\.)?"?([a-zA-Z0-9_]+)"?\s+does\s+not\s+exist/i);
+  return m?.[1] ?? null;
+}
+
+async function updateWithColumnFallback(
+  supabase: any,
+  table: string,
+  update: Record<string, any>,
+  where: { column: string; value: any },
+): Promise<{ attempted: string[]; removed: string[]; error: any | null }> {
+  const attempted = Object.keys(update);
+  const removed: string[] = [];
+
+  let current = { ...update };
+  for (let i = 0; i < 5; i++) {
+    const { error } = await supabase.from(table).update(current).eq(where.column, where.value);
+    if (!error) return { attempted, removed, error: null };
+
+    const missing = missingColumnNameFromError(error);
+    if (!missing || !(missing in current)) {
+      return { attempted, removed, error };
+    }
+
+    delete current[missing];
+    removed.push(missing);
+    if (Object.keys(current).length === 0) {
+      return { attempted, removed, error: null };
+    }
+  }
+
+  return { attempted, removed, error: null };
+}
+
 type AssetHint = YahooSymbolHint & {
   id?: string;
   name?: string | null;
@@ -222,9 +267,13 @@ Deno.serve(async (req) => {
   try {
     console.log('[enrich-assets-yahoo] Starting sector enrichment...');
 
+    const url = new URL(req.url);
+
     // Optional: allow targeted enrichment by symbol(s) for debugging/backfills.
     // When provided, we will enrich those assets regardless of missing-field filters.
     let symbols: string[] = [];
+    let limit = clampInt(url.searchParams.get('limit'), 1, BATCH_SIZE, BATCH_SIZE);
+    let delayMs = clampInt(url.searchParams.get('delay_ms'), 0, 5000, DELAY_MS);
     try {
       const body = await req.json();
       if (Array.isArray(body?.symbols)) {
@@ -233,6 +282,11 @@ Deno.serve(async (req) => {
           .filter(Boolean)
           .slice(0, 50);
       }
+
+      if (body && typeof body === 'object') {
+        limit = clampInt((body as any)?.limit ?? limit, 1, BATCH_SIZE, limit);
+        delayMs = clampInt((body as any)?.delay_ms ?? delayMs, 0, 5000, delayMs);
+      }
     } catch {
       // No JSON body provided.
     }
@@ -240,17 +294,52 @@ Deno.serve(async (req) => {
     // Get assets missing sector data, or previously marked Unknown (retry after cooldown),
     // or missing key fundamentals.
     const unknownCutoffIso = new Date(Date.now() - UNKNOWN_RETRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
-    const baseSelect = 'id, symbol, name, asset_type, exchange, country, sector, industry, currency, market_cap, pe_ratio, eps, dividend_yield, avg_volume, beta, updated_at';
-    const query = supabase.from('assets').select(baseSelect);
-    const { data: assets, error: fetchError } = symbols.length > 0
-      ? await query.in('symbol', symbols)
-      : await query
-          .or(
-            `sector.is.null,` +
-              `and(sector.eq.Unknown,or(updated_at.is.null,updated_at.lt.${unknownCutoffIso})),` +
-              `market_cap.is.null,pe_ratio.is.null,eps.is.null,dividend_yield.is.null,avg_volume.is.null,beta.is.null,currency.is.null`
-          )
-          .limit(BATCH_SIZE);
+
+    const fullSelect = 'id, symbol, name, asset_type, exchange, country, sector, industry, currency, market_cap, pe_ratio, eps, dividend_yield, avg_volume, beta, updated_at';
+    const minimalSelect = 'id, symbol, name, asset_type, exchange, country, sector, updated_at';
+
+    const tryFetchAssets = async (selectCols: string, includeFundamentalFilters: boolean) => {
+      const query = supabase.from('assets').select(selectCols);
+
+      if (symbols.length > 0) {
+        return await query.in('symbol', symbols).limit(limit);
+      }
+
+      const sectorOnlyOr =
+        `sector.is.null,` +
+        `and(sector.eq.Unknown,or(updated_at.is.null,updated_at.lt.${unknownCutoffIso}))`;
+      const fullOr =
+        sectorOnlyOr +
+        `,market_cap.is.null,pe_ratio.is.null,eps.is.null,dividend_yield.is.null,avg_volume.is.null,beta.is.null,currency.is.null`;
+
+      return await query
+        .or(includeFundamentalFilters ? fullOr : sectorOnlyOr)
+        .limit(limit);
+    };
+
+    let assets: any[] | null = null;
+    let fetchError: any | null = null;
+
+    // 1) Try full select + full filters
+    {
+      const r = await tryFetchAssets(fullSelect, true);
+      assets = r.data;
+      fetchError = r.error;
+    }
+
+    // 2) If schema drift (missing columns) breaks the filter, retry with sector-only filter
+    if (fetchError) {
+      const r = await tryFetchAssets(fullSelect, false);
+      assets = r.data;
+      fetchError = r.error;
+    }
+
+    // 3) If schema drift breaks select list, retry with minimal columns
+    if (fetchError) {
+      const r = await tryFetchAssets(minimalSelect, false);
+      assets = r.data;
+      fetchError = r.error;
+    }
 
     if (fetchError) throw fetchError;
 
@@ -264,22 +353,28 @@ Deno.serve(async (req) => {
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    console.log(`[enrich-assets-yahoo] Processing ${assets.length} assets...`);
+    console.log(`[enrich-assets-yahoo] Processing ${assets.length} assets (limit=${limit}, delay_ms=${delayMs})...`);
 
     let enrichedCount = 0;
     let skippedCount = 0;
 
+    let perAssetErrors = 0;
+
     for (const asset of assets) {
+      try {
       // Handle crypto assets
       if (isCrypto(asset.symbol, asset.asset_type)) {
-        await supabase
-          .from('assets')
-          .update({
+        const nowIso = new Date().toISOString();
+        await updateWithColumnFallback(
+          supabase,
+          'assets',
+          {
             sector: 'Cryptocurrency',
             industry: 'Digital Assets',
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', asset.id);
+            updated_at: nowIso,
+          },
+          { column: 'id', value: asset.id },
+        );
         
         console.log(`[enrich-assets-yahoo] ${asset.symbol} -> Cryptocurrency (auto-detected)`);
         enrichedCount++;
@@ -313,28 +408,47 @@ Deno.serve(async (req) => {
       if (!asset.avg_volume && fundamentals.avg_volume !== null) update.avg_volume = fundamentals.avg_volume;
       if (!asset.beta && fundamentals.beta !== null) update.beta = fundamentals.beta;
 
-      if (Object.keys(update).length === 1) {
-        // Nothing to update.
-      } else {
-        await supabase.from('assets').update(update).eq('id', asset.id);
+      if (Object.keys(update).length > 1) {
+        const res = await updateWithColumnFallback(
+          supabase,
+          'assets',
+          update,
+          { column: 'id', value: asset.id },
+        );
+        if (res.error) {
+          console.warn(`[enrich-assets-yahoo] update failed for ${asset.symbol}:`, res.error);
+          perAssetErrors++;
+        }
       }
 
       if (sector) {
         enrichedCount++;
       } else if (!asset.sector) {
         // Mark as Unknown when sector is still missing, but allow retry later via cooldown.
-        await supabase
-          .from('assets')
-          .update({
+        const nowIso = new Date().toISOString();
+        const res = await updateWithColumnFallback(
+          supabase,
+          'assets',
+          {
             sector: 'Unknown',
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', asset.id);
+            updated_at: nowIso,
+          },
+          { column: 'id', value: asset.id },
+        );
+        if (res.error) {
+          console.warn(`[enrich-assets-yahoo] failed to mark Unknown for ${asset.symbol}:`, res.error);
+          perAssetErrors++;
+        }
         skippedCount++;
       }
 
       // Rate limiting
-      await delay(DELAY_MS);
+      await delay(delayMs);
+      } catch (e) {
+        perAssetErrors++;
+        console.warn(`[enrich-assets-yahoo] per-asset error for ${asset?.symbol || 'unknown'}:`, e);
+        await delay(delayMs);
+      }
     }
 
     // Count remaining assets without sector
@@ -350,6 +464,7 @@ Deno.serve(async (req) => {
       enriched: enrichedCount,
       skipped: skippedCount,
       remaining: remaining || 0,
+      per_asset_errors: perAssetErrors,
       message: remaining && remaining > 0 
         ? `Run again to process ${remaining} more assets`
         : 'All assets enriched',

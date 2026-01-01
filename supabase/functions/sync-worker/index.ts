@@ -6,6 +6,21 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+function inferProjectUrlFromRequest(req: Request): string {
+    const origin = new URL(req.url).origin;
+    if (origin.includes('.functions.supabase.co')) {
+        return origin.replace('.functions.supabase.co', '.supabase.co');
+    }
+    return origin;
+}
+
+function bearerToken(authHeader: string | null): string {
+    const raw = (authHeader || '').trim();
+    if (!raw) return '';
+    const m = raw.match(/^Bearer\s+(.+)$/i);
+    return (m?.[1] || '').trim();
+}
+
 serve(async (req) => {
     if (req.method === 'OPTIONS') {
         return new Response(null, { headers: corsHeaders });
@@ -16,10 +31,21 @@ serve(async (req) => {
         const FOLLOWED_ENQUEUE_LIMIT = 50;
         const FOLLOWED_STALE_MINUTES = 30;
         const FOLLOWED_BULLAWARE_JOB_TYPES = ['investor_details', 'risk_score', 'metrics', 'portfolio', 'trades'] as const;
-        // Prefer injected env; fall back to request origin to avoid "supabaseUrl is required".
-        const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? new URL(req.url).origin;
+        // Prefer injected env; otherwise infer project URL from request.
+        // Note: request origin can be *.functions.supabase.co which is NOT the project URL.
+        const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? inferProjectUrlFromRequest(req);
         const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-        const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+        const envAnonKey = Deno.env.get("SUPABASE_ANON_KEY") || '';
+
+        const callerAuth = req.headers.get('authorization');
+        const callerApiKey = req.headers.get('apikey');
+        const callerBearer = bearerToken(callerAuth);
+        const forwardedApiKey = (callerApiKey || callerBearer || envAnonKey).trim();
+        const forwardedAuth = (callerAuth && callerAuth.trim().length > 0)
+            ? callerAuth
+            : (forwardedApiKey ? `Bearer ${forwardedApiKey}` : '');
+
+        const functionsBaseUrl = `${supabaseUrl}/functions/v1`;
         
         const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -50,10 +76,11 @@ serve(async (req) => {
             const results: Record<string, any> = { trader_id: trader.id };
 
             if (preferEtoro && (trader.etoro_cid || trader.etoro_username)) {
-                const etoroResp = await fetch(`${supabaseUrl}/functions/v1/sync-trader-etoro`, {
+                const etoroResp = await fetch(`${functionsBaseUrl}/sync-trader-etoro`, {
                     method: 'POST',
                     headers: {
-                        'Authorization': `Bearer ${supabaseAnonKey}`,
+                        ...(forwardedAuth ? { 'Authorization': forwardedAuth } : {}),
+                        ...(forwardedApiKey ? { 'apikey': forwardedApiKey } : {}),
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({ cid: trader.etoro_cid ?? null, username: trader.etoro_username ?? null }),
@@ -100,10 +127,11 @@ serve(async (req) => {
             const bullaware: Array<any> = [];
             for (let i = 0; i < bullAwareJobTypes.length; i++) {
                 const job_type = bullAwareJobTypes[i];
-                const baResp = await fetch(`${supabaseUrl}/functions/v1/sync-trader-details`, {
+                const baResp = await fetch(`${functionsBaseUrl}/sync-trader-details`, {
                     method: 'POST',
                     headers: {
-                        'Authorization': `Bearer ${supabaseAnonKey}`,
+                        ...(forwardedAuth ? { 'Authorization': forwardedAuth } : {}),
+                        ...(forwardedApiKey ? { 'apikey': forwardedApiKey } : {}),
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({ username: trader.etoro_username, job_type }),
@@ -264,10 +292,11 @@ serve(async (req) => {
             console.warn('Warning: followed-trader enqueue step failed:', e?.message || e);
         }
         
-        const dispatchResponse = await fetch(`${supabaseUrl}/functions/v1/dispatch-sync-jobs`, {
+        const dispatchResponse = await fetch(`${functionsBaseUrl}/dispatch-sync-jobs`, {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${supabaseAnonKey}`,
+                ...(forwardedAuth ? { 'Authorization': forwardedAuth } : {}),
+                ...(forwardedApiKey ? { 'apikey': forwardedApiKey } : {}),
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({}),
@@ -316,10 +345,11 @@ serve(async (req) => {
             console.log(`Queue is low (${currentPending} pending). Enqueuing more jobs...`);
             try {
                 // Call enqueue-sync-jobs on same project
-                const enqueueResponse = await fetch(`${supabaseUrl}/functions/v1/enqueue-sync-jobs`, {
+                const enqueueResponse = await fetch(`${functionsBaseUrl}/enqueue-sync-jobs`, {
                     method: 'POST',
                     headers: {
-                        'Authorization': `Bearer ${supabaseAnonKey}`,
+                        ...(forwardedAuth ? { 'Authorization': forwardedAuth } : {}),
+                        ...(forwardedApiKey ? { 'apikey': forwardedApiKey } : {}),
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({}),

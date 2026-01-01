@@ -8,8 +8,12 @@ const corsHeaders = {
 
 // Process jobs sequentially to respect Bullaware API rate limit (10 req/min)
 // Optimized: 1 job every 6 seconds = exactly 10 req/min (using full capacity)
-const MAX_JOBS_TO_PROCESS = 10; // Process 10 jobs per batch = 1 minute per batch
+// NOTE: Supabase Edge Functions have an execution time limit. If we get killed mid-run,
+// we may not reach `finally` and locks can be left behind. Keep batches conservative and
+// also enforce a hard time budget below.
+const MAX_JOBS_TO_PROCESS = 7; // 7 * 6s delay ~= 36s (+ overhead) -> typically within limits
 const DELAY_BETWEEN_JOBS_MS = 6000; // 6 seconds = exactly 10 req/min
+const DISPATCH_TIME_BUDGET_MS = 55_000;
 
 const LOCK_DOMAIN = 'dispatch_sync_jobs';
 const LOCK_TTL_MINUTES = 5;
@@ -44,8 +48,9 @@ function makeNotInFilter(ids: string[]) {
 }
 
 async function acquireLock(supabase: any, lockHolder: string) {
-    const staleCutoffMs = Date.now() - LOCK_TTL_MINUTES * 60 * 1000;
-    const now = new Date().toISOString();
+    const nowMs = Date.now();
+    const staleCutoffMs = nowMs - LOCK_TTL_MINUTES * 60 * 1000;
+    const now = new Date(nowMs).toISOString();
 
     const parsePgTimestamptzMs = (value: any): number => {
         if (!value) return NaN;
@@ -91,10 +96,16 @@ async function acquireLock(supabase: any, lockHolder: string) {
     const lockAcquiredAt = current.lock_acquired_at;
     const lockAcquiredMs = parsePgTimestamptzMs(lockAcquiredAt);
     const lockAgeMinutes = Number.isFinite(lockAcquiredMs)
-        ? Math.floor((Date.now() - lockAcquiredMs) / 60000)
+        ? Math.floor((nowMs - lockAcquiredMs) / 60000)
         : 0;
+    // Guard against clock skew across regions/runtimes: if the stored lock time is
+    // significantly in the future, treat it as stale so we don't deadlock for hours.
+    const isFutureByMoreThanOneMinute = Number.isFinite(lockAcquiredMs) && (lockAcquiredMs - nowMs) > 60 * 1000;
     // If we can't parse the timestamp, treat it as stale to avoid permanent deadlocks.
-    const isStale = (Number.isFinite(lockAcquiredMs) && lockAcquiredMs < staleCutoffMs) || (!Number.isFinite(lockAcquiredMs) && !!lockAcquiredAt);
+    const isStale =
+        isFutureByMoreThanOneMinute ||
+        (Number.isFinite(lockAcquiredMs) && lockAcquiredMs < staleCutoffMs) ||
+        (!Number.isFinite(lockAcquiredMs) && !!lockAcquiredAt);
 
     if (current.status === 'running' && !isStale) {
         return {
@@ -110,8 +121,10 @@ async function acquireLock(supabase: any, lockHolder: string) {
         await supabase.from('sync_logs').insert({
             domain: LOCK_DOMAIN,
             level: 'warn',
-            message: `Stale dispatch lock auto-cleared (was held by ${current.lock_holder} for ${lockAgeMinutes} min, TTL is ${LOCK_TTL_MINUTES} min)`,
-            details: { previous_holder: current.lock_holder, lock_acquired_at: lockAcquiredAt, age_minutes: lockAgeMinutes },
+            message: isFutureByMoreThanOneMinute
+                ? `Dispatch lock auto-cleared due to clock skew (lock_acquired_at ${lockAcquiredAt} is in the future; holder ${current.lock_holder})`
+                : `Stale dispatch lock auto-cleared (was held by ${current.lock_holder} for ${lockAgeMinutes} min, TTL is ${LOCK_TTL_MINUTES} min)`,
+            details: { previous_holder: current.lock_holder, lock_acquired_at: lockAcquiredAt, age_minutes: lockAgeMinutes, clock_skew_future: isFutureByMoreThanOneMinute },
         });
     }
 
@@ -143,6 +156,14 @@ async function releaseLock(supabase: any, status: 'idle' | 'error', errorMessage
     await supabase.from('sync_domain_status').update(updates).eq('domain', LOCK_DOMAIN);
 }
 
+function inferProjectUrlFromRequest(req: Request): string {
+    const origin = new URL(req.url).origin;
+    if (origin.includes('.functions.supabase.co')) {
+        return origin.replace('.functions.supabase.co', '.supabase.co');
+    }
+    return origin;
+}
+
 serve(async (req) => {
     if (req.method === 'OPTIONS') {
         return new Response(null, { headers: corsHeaders });
@@ -154,8 +175,8 @@ serve(async (req) => {
     let lockAcquired = false;
     let lockReleased = false;
     try {
-        // Use native SUPABASE_URL - functions are deployed on this project
-        const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? new URL(req.url).origin;
+        // Use native SUPABASE_URL - otherwise infer project URL from request.
+        const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? inferProjectUrlFromRequest(req);
         const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
         const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
@@ -290,9 +311,17 @@ serve(async (req) => {
         let invokedCount = 0;
         const errors: any[] = []; // Collect errors
 
+        const startedAtMs = Date.now();
+        const deadlineMs = startedAtMs + DISPATCH_TIME_BUDGET_MS;
+
                 for (let i = 0; i < pendingJobs.length; i++) {
             const job = pendingJobs[i];
                         console.log(`[${invocationId}] Processing job ${i + 1}/${pendingJobs.length}: ${job.id}`);
+
+            if (Date.now() > deadlineMs) {
+                console.warn(`[${invocationId}] Time budget reached; stopping early to avoid timeout.`);
+                break;
+            }
             
             try {
                                 // Claim the job first to avoid duplicate processing if another dispatch overlaps
@@ -308,6 +337,11 @@ serve(async (req) => {
                                     console.error(`[${invocationId}] Error claiming job ${job.id}:`, claimError);
                                     errors.push({ job_id: job.id, error: `Claim error: ${claimError.message}` });
                                     if (i < pendingJobs.length - 1) {
+                                        const remainingMs = deadlineMs - Date.now();
+                                        if (remainingMs <= DELAY_BETWEEN_JOBS_MS + 250) {
+                                            console.warn(`[${invocationId}] Not enough time left to wait; stopping early.`);
+                                            break;
+                                        }
                                         await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_JOBS_MS));
                                     }
                                     continue;
@@ -374,6 +408,11 @@ serve(async (req) => {
                 // Add delay between jobs to respect rate limit (except for last job)
                 if (i < pendingJobs.length - 1) {
                     console.log(`Waiting ${DELAY_BETWEEN_JOBS_MS}ms before next job to respect API rate limit...`);
+                    const remainingMs = deadlineMs - Date.now();
+                    if (remainingMs <= DELAY_BETWEEN_JOBS_MS + 250) {
+                        console.warn(`[${invocationId}] Not enough time left to wait; stopping early.`);
+                        break;
+                    }
                     await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_JOBS_MS));
                 }
             } catch (err: any) {
@@ -390,6 +429,11 @@ serve(async (req) => {
                 
                 // Still add delay even on error to respect rate limits
                 if (i < pendingJobs.length - 1) {
+                    const remainingMs = deadlineMs - Date.now();
+                    if (remainingMs <= DELAY_BETWEEN_JOBS_MS + 250) {
+                        console.warn(`[${invocationId}] Not enough time left to wait; stopping early.`);
+                        break;
+                    }
                     await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_JOBS_MS));
                 }
             }

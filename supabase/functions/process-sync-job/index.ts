@@ -8,6 +8,14 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+function inferProjectUrlFromRequest(req: Request): string {
+    const origin = new URL(req.url).origin;
+    if (origin.includes('.functions.supabase.co')) {
+        return origin.replace('.functions.supabase.co', '.supabase.co');
+    }
+    return origin;
+}
+
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -25,10 +33,9 @@ serve(async (req: Request) => {
         return new Response(JSON.stringify({ error: 'Missing job_id' }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Use native SUPABASE_URL when available; fall back to request origin.
-    // This prevents createClient() from throwing "supabaseUrl is required" in environments
-    // where SUPABASE_URL is not injected.
-    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? new URL(req.url).origin;
+    // Use native SUPABASE_URL when available; otherwise infer project URL from request.
+    // Note: request origin can be *.functions.supabase.co which is NOT the project URL.
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? inferProjectUrlFromRequest(req);
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     
