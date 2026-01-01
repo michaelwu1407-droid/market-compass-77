@@ -474,6 +474,31 @@ function DomainPanel({
                   : '-'}
             </p>
           </div>
+
+          {domain === 'trader_profiles' && (
+            <>
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground uppercase tracking-wider">Queue Remaining</p>
+                <p className="font-medium tabular-nums">{(diagnostics as any)?.queue_remaining ?? '-'}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground uppercase tracking-wider">Jobs/Hour</p>
+                <p className="font-medium tabular-nums">{(diagnostics as any)?.processing_rate?.jobs_per_hour ?? '-'}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground uppercase tracking-wider">Completed (30m)</p>
+                <p className="font-medium tabular-nums">{(diagnostics as any)?.processing_rate?.completed_last_30_min ?? '-'}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground uppercase tracking-wider">Oldest Pending</p>
+                <p className="font-medium">
+                  {(diagnostics as any)?.oldest_pending
+                    ? formatDistanceToNow(new Date((diagnostics as any).oldest_pending), { addSuffix: true })
+                    : '-'}
+                </p>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Rate Limit Info (only for trader_profiles) */}
