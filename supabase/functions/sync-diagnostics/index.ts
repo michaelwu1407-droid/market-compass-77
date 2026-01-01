@@ -128,26 +128,8 @@ serve(async (req: Request) => {
   }
 
   // 2. Sync Jobs Statistics
-  const { data: allJobs, error: jobsError } = await supabase
-    .from('sync_jobs')
-    .select('status, created_at, finished_at, error_message');
-
-  if (!jobsError && allJobs) {
-    const statusCounts = allJobs.reduce((acc: any, job: any) => {
-      acc[job.status] = (acc[job.status] || 0) + 1;
-      return acc;
-    }, {});
-
-    diagnostics.sync_jobs = {
-      total: allJobs.length,
-      by_status: statusCounts,
-      pending: statusCounts.pending || 0,
-      in_progress: statusCounts.in_progress || 0,
-      completed: statusCounts.completed || 0,
-      failed: statusCounts.failed || 0
-    };
-
-    // Processing rate + ETA (based on recent completions)
+  // IMPORTANT: PostgREST defaults to returning max 1000 rows; do not rely on fetching all jobs.
+  try {
     const detectCompletionColumn = async (): Promise<string> => {
       const candidates = ['finished_at', 'completed_at', 'updated_at'] as const;
       for (const col of candidates) {
@@ -163,8 +145,78 @@ serve(async (req: Request) => {
       return 'updated_at';
     };
 
+    const completionCol = await detectCompletionColumn();
+
+    const [
+      { count: pendingCount, error: pendingErr },
+      { count: inProgressCount, error: inProgressErr },
+      { count: completedCount, error: completedErr },
+      { count: failedCount, error: failedErr },
+    ] = await Promise.all([
+      supabase.from('sync_jobs').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+      supabase.from('sync_jobs').select('*', { count: 'exact', head: true }).in('status', ['in_progress', 'running']),
+      supabase.from('sync_jobs').select('*', { count: 'exact', head: true }).eq('status', 'completed'),
+      supabase.from('sync_jobs').select('*', { count: 'exact', head: true }).eq('status', 'failed'),
+    ]);
+
+    const pending = pendingCount || 0;
+    const inProgress = inProgressCount || 0;
+    const completed = completedCount || 0;
+    const failed = failedCount || 0;
+
+    diagnostics.sync_jobs = {
+      total: pending + inProgress + completed + failed,
+      by_status: {
+        pending,
+        in_progress: inProgress,
+        completed,
+        failed,
+      },
+      pending,
+      in_progress: inProgress,
+      completed,
+      failed,
+      completion_column: completionCol,
+      errors: {
+        pending: pendingErr?.message,
+        in_progress: inProgressErr?.message,
+        completed: completedErr?.message,
+        failed: failedErr?.message,
+      }
+    };
+
+    // Oldest pending
+    const { data: oldestPending, error: oldestErr } = await supabase
+      .from('sync_jobs')
+      .select('created_at')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: true })
+      .limit(1);
+    if (!oldestErr && oldestPending?.[0]?.created_at) {
+      diagnostics.sync_jobs.oldest_pending = oldestPending[0].created_at;
+    } else if (oldestErr) {
+      diagnostics.sync_jobs.oldest_pending_error = oldestErr.message;
+    }
+
+    // Recent errors (latest few failed jobs)
+    const { data: recentErrors, error: recentErrorsErr } = await supabase
+      .from('sync_jobs')
+      .select('error_message, created_at')
+      .eq('status', 'failed')
+      .not('error_message', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(5);
+    if (!recentErrorsErr && recentErrors && recentErrors.length > 0) {
+      diagnostics.sync_jobs.recent_errors = recentErrors.map((r: any) => ({
+        error: r.error_message,
+        created_at: r.created_at,
+      }));
+    } else if (recentErrorsErr) {
+      diagnostics.sync_jobs.recent_errors_error = recentErrorsErr.message;
+    }
+
+    // Processing rate + ETA (based on recent completions)
     try {
-      const completionCol = await detectCompletionColumn();
       const sinceIso = new Date(Date.now() - 30 * 60 * 1000).toISOString();
       const { count: completedRecent } = await supabase
         .from('sync_jobs')
@@ -174,7 +226,7 @@ serve(async (req: Request) => {
         .gt(completionCol, sinceIso);
 
       const jobsPerHour = Math.round(((completedRecent || 0) / 30) * 60);
-      const queueRemaining = (diagnostics.sync_jobs.pending || 0) + (diagnostics.sync_jobs.in_progress || 0);
+      const queueRemaining = pending + inProgress;
       const etaSeconds = jobsPerHour > 0 ? Math.round((queueRemaining / jobsPerHour) * 3600) : null;
 
       diagnostics.sync_jobs.processing_rate = {
@@ -187,30 +239,10 @@ serve(async (req: Request) => {
     } catch (e: any) {
       diagnostics.sync_jobs.processing_rate_error = e.message;
     }
-
-    // Get recent errors
-    const recentErrors = allJobs
-      .filter((j: any) => j.status === 'failed' && j.error_message)
-      .slice(0, 5)
-      .map((j: any) => ({
-        error: j.error_message,
-        created_at: j.created_at
-      }));
-
-    if (recentErrors.length > 0) {
-      diagnostics.sync_jobs.recent_errors = recentErrors;
-    }
-
-    // Get oldest pending job
-    const pendingJobs = allJobs.filter((j: any) => j.status === 'pending');
-    if (pendingJobs.length > 0) {
-      const oldestPending = pendingJobs.sort((a: any, b: any) => 
-        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-      )[0];
-      diagnostics.sync_jobs.oldest_pending = oldestPending.created_at;
-    }
-  } else if (jobsError) {
-    diagnostics.sync_jobs.error = jobsError.message;
+  } catch (e: any) {
+    diagnostics.sync_jobs = {
+      error: e.message,
+    };
   }
 
   // 3. Worker Status (check pg_cron if possible)
