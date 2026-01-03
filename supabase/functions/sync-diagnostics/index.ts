@@ -7,12 +7,21 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // Unique build fingerprint for deployment verification
-const BUILD_ID = "BUILD_2026_01_01_0929_WORKER_STATUS";
+const BUILD_ID = "BUILD_2026_01_02_0436_NO_CACHE";
 console.log("SYNC_DIAGNOSTICS_BUILD_ID", BUILD_ID);
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+const responseHeaders = {
+  ...corsHeaders,
+  'Content-Type': 'application/json',
+  // Avoid Cloudflare / browser caching of diagnostics (stale queue counts are very confusing).
+  'Cache-Control': 'no-store, max-age=0',
+  'CDN-Cache-Control': 'no-store',
+  'Pragma': 'no-cache',
 };
 
 // Enhanced diagnostics function to help debug sync issues
@@ -36,7 +45,7 @@ serve(async (req: Request) => {
         SUPABASE_URL,
         SUPABASE_SERVICE_ROLE_KEY
       }),
-      { status: 500, headers: corsHeaders }
+      { status: 500, headers: responseHeaders }
     );
   }
   const supabase = createClient(
@@ -320,7 +329,5 @@ serve(async (req: Request) => {
     });
   }
 
-  return new Response(JSON.stringify(diagnostics, null, 2), {
-    headers: { ...corsHeaders, "Content-Type": "application/json" }
-  });
+  return new Response(JSON.stringify(diagnostics, null, 2), { headers: responseHeaders });
 });

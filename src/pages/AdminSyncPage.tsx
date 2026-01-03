@@ -657,8 +657,31 @@ export default function AdminSyncPage() {
     const { data: diagnostics } = useQuery({
       queryKey: ['sync-diagnostics'],
       queryFn: async () => {
-        const res = await fetch('https://xgvaibxxiwfraklfbwey.functions.supabase.co/sync-diagnostics');
-        if (!res.ok) throw new Error('Failed to fetch diagnostics');
+        const cacheBust = `t=${Date.now()}`;
+        // Prefer project URL with auth headers so this works when verify_jwt=true.
+        const resProj = await fetch(`${SUPABASE_URL}/functions/v1/sync-diagnostics`, {
+          method: 'POST',
+          mode: 'cors',
+          cache: 'no-store',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          },
+          body: '{}',
+        }).catch(() => null);
+
+        const resNoAuth = resProj && resProj.ok
+          ? resProj
+          : await fetch(`https://xgvaibxxiwfraklfbwey.functions.supabase.co/sync-diagnostics?${cacheBust}` , {
+            method: 'POST',
+            cache: 'no-store',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}',
+          }).catch(() => null);
+
+        const res = (resProj && resProj.ok) ? resProj : resNoAuth;
+        if (!res || !res.ok) throw new Error('Failed to fetch diagnostics');
         return await res.json();
       },
       refetchInterval: 10000,
@@ -919,6 +942,8 @@ export default function AdminSyncPage() {
       if (typeof pending === 'number' || typeof inProgress === 'number') {
         return (typeof pending === 'number' ? pending : 0) + (typeof inProgress === 'number' ? inProgress : 0);
       }
+      // Avoid showing misleading legacy counts when diagnostics isn't available.
+      return '-';
     }
 
     const status = getStatusForDomain(domain);
@@ -951,6 +976,7 @@ export default function AdminSyncPage() {
             size="sm" 
             onClick={() => {
               queryClient.invalidateQueries({ queryKey: ['sync-domain-status'] });
+              queryClient.invalidateQueries({ queryKey: ['sync-diagnostics'] });
               queryClient.invalidateQueries({ queryKey: ['sync-rate-limits'] });
               queryClient.invalidateQueries({ queryKey: ['sync-logs-recent'] });
               queryClient.invalidateQueries({ queryKey: ['sync-datapoints'] });
